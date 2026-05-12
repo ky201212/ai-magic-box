@@ -324,8 +324,12 @@ export default function WorkshopPage() {
       throw new Error(data.error ?? "语音识别失败，请稍后再试。");
     }
 
+    const recognizedText = data.text;
+
     setPromptText((currentText) =>
-      currentText.trim() ? `${currentText}\n${data.text}` : data.text,
+      currentText.trim()
+        ? `${currentText}\n${recognizedText}`
+        : recognizedText,
     );
   };
 
