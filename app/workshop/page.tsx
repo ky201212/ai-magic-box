@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 const codingQuickPrompts = [
   "环保小卫士",
@@ -211,7 +211,7 @@ const createMessagePreviewHtml = (title: string, message: string) => `
   </html>
 `;
 
-export default function WorkshopPage() {
+function WorkshopContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1216,5 +1216,30 @@ export default function WorkshopPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+export default function WorkshopPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="relative min-h-screen overflow-hidden bg-yellow-50 text-slate-700">
+          <div className="absolute inset-0 bg-gradient-to-br from-yellow-50 via-pink-50 to-sky-50" />
+          <div className="relative flex min-h-screen items-center justify-center px-6">
+            <div className="rounded-[32px] bg-white/90 px-8 py-10 text-center shadow-[0_20px_60px_rgba(251,191,188,0.18)]">
+              <div className="mx-auto h-14 w-14 rounded-full border-4 border-dashed border-pink-200 animate-spin" />
+              <p className="mt-5 text-lg font-black text-slate-700">
+                魔法工坊正在准备中
+              </p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                请稍等一下，我们正在铺开今天的创作画布。
+              </p>
+            </div>
+          </div>
+        </main>
+      }
+    >
+      <WorkshopContent />
+    </Suspense>
   );
 }
