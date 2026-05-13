@@ -29,3 +29,53 @@ body {
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
     "Source Han Sans SC", sans-serif;
 }
+
+@keyframes auroraDrift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(18px, -14px, 0) scale(1.04);
+  }
+
+  100% {
+    transform: translate3d(-14px, 12px, 0) scale(0.98);
+  }
+}
+
+@keyframes floatSoft {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    transform: translate3d(-50%, 0, 0) scale(0.98);
+    filter: saturate(100%);
+  }
+
+  50% {
+    transform: translate3d(-50%, 0, 0) scale(1.05);
+    filter: saturate(112%);
+  }
+}
+
+.aurora-drift {
+  animation: auroraDrift 18s ease-in-out infinite alternate;
+}
+
+.float-soft {
+  animation: floatSoft 6.5s ease-in-out infinite;
+}
+
+.pulse-glow {
+  animation: pulseGlow 5s ease-in-out infinite;
+}
