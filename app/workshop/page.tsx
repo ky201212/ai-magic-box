@@ -59,6 +59,12 @@ const modeTabs = [
 
 type ModeId = (typeof modeTabs)[number]["id"];
 
+type ShareFeedbackState = {
+  type: "success" | "pending" | "error";
+  title: string;
+  message: string;
+};
+
 const modeVisuals: Record<
   ModeId,
   {
@@ -310,6 +316,11 @@ function WorkshopContent() {
   const [phoneScale, setPhoneScale] = useState(1);
   const [isSharing, setIsSharing] = useState(false);
   const [shareMessage, setShareMessage] = useState("");
+  const [isShareConfirmOpen, setIsShareConfirmOpen] = useState(false);
+  const [sharePreviewImageUrl, setSharePreviewImageUrl] = useState("");
+  const [shareFeedback, setShareFeedback] = useState<ShareFeedbackState | null>(
+    null,
+  );
 
   const modeParam = searchParams.get("mode");
   const activeMode = modeTabs.some((tab) => tab.id === modeParam)
@@ -544,6 +555,7 @@ function WorkshopContent() {
     }
 
     setShareMessage("");
+    setShareFeedback(null);
     setGeneratedCode("");
     setLoadingMessageIndex(0);
     setIsLoading(true);
@@ -596,7 +608,7 @@ function WorkshopContent() {
     }
   };
 
-  const handleShareToCommunity = async () => {
+  const openShareConfirm = async () => {
     if (!promptText.trim()) {
       window.alert("先写下创作想法，再把作品分享出去。");
       return;
@@ -609,9 +621,33 @@ function WorkshopContent() {
 
     setIsSharing(true);
     setShareMessage("");
+    setShareFeedback(null);
 
     try {
       const previewImageUrl = await capturePreviewImage();
+      setSharePreviewImageUrl(previewImageUrl);
+      setIsShareConfirmOpen(true);
+    } catch (error) {
+      setShareMessage(
+        error instanceof Error ? error.message : "预览截图失败，请稍后再试。",
+      );
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleShareToCommunity = async () => {
+    if (!sharePreviewImageUrl) {
+      setIsShareConfirmOpen(false);
+      await openShareConfirm();
+      return;
+    }
+
+    setIsSharing(true);
+    setShareMessage("");
+    setShareFeedback(null);
+
+    try {
       const response = await fetch("/api/community/posts", {
         method: "POST",
         headers: {
@@ -620,7 +656,7 @@ function WorkshopContent() {
         body: JSON.stringify({
           title: buildShareTitle(),
           prompt: promptText,
-          previewImageUrl,
+          previewImageUrl: sharePreviewImageUrl,
           previewCode: generatedCode,
           mode: "coding",
         }),
@@ -629,29 +665,70 @@ function WorkshopContent() {
       const data = (await response.json()) as {
         error?: string;
         message?: string;
-        moderation?: { approved?: boolean; reason?: string };
+        moderation?: {
+          approved?: boolean;
+          reason?: string;
+          suggestedStatus?: "approved" | "pending" | "rejected";
+        };
       };
 
       if (response.status === 401) {
+        setIsShareConfirmOpen(false);
         redirectToLogin();
         return;
       }
 
       if (!response.ok) {
         setShareMessage(data.error ?? "分享失败了，请稍后再试。");
+        setShareFeedback({
+          type: "error",
+          title: "这次还没有分享成功",
+          message: data.error ?? "刚刚和社区广场失去了一下联系，请稍后再试。",
+        });
         return;
       }
 
-      setShareMessage(
-        data.message ??
-          (data.moderation?.approved
-            ? "作品已经分享进社区。"
-            : "作品已经提交，但暂未通过审核。"),
-      );
+      setIsShareConfirmOpen(false);
+      setShareMessage(data.message ?? "");
+
+      if (data.moderation?.suggestedStatus === "approved") {
+        setShareFeedback({
+          type: "success",
+          title: "作品已经点亮社区展台",
+          message:
+            data.message ?? "你的作品已经通过审核，其他小朋友现在可以在成长社区看到它了。",
+        });
+        return;
+      }
+
+      if (data.moderation?.suggestedStatus === "pending") {
+        setShareFeedback({
+          type: "pending",
+          title: "作品已经进入复审队列",
+          message:
+            data.message ??
+            "我们正在做更细致的安全检查，通过后就会自动出现在成长社区里。",
+        });
+        return;
+      }
+
+      setShareFeedback({
+        type: "error",
+        title: "作品暂时不能公开展示",
+        message:
+          data.message ??
+          data.moderation?.reason ??
+          "你可以调整提示词或内容后再试一次。",
+      });
     } catch (error) {
-      setShareMessage(
-        error instanceof Error ? error.message : "分享失败了，请稍后再试。",
-      );
+      const message =
+        error instanceof Error ? error.message : "分享失败了，请稍后再试。";
+      setShareMessage(message);
+      setShareFeedback({
+        type: "error",
+        title: "分享没有完成",
+        message,
+      });
     } finally {
       setIsSharing(false);
     }
@@ -976,6 +1053,7 @@ function WorkshopContent() {
                     onClick={() => {
                       setGeneratedCode(defaultPreviewHtml);
                       setShareMessage("");
+                      setShareFeedback(null);
                     }}
                     className="inline-flex h-15 flex-1 items-center justify-center rounded-full bg-[#f4f7ff] px-5 text-base font-black text-slate-600 shadow-[0_12px_28px_rgba(148,163,184,0.12)] transition hover:-translate-y-0.5"
                   >
@@ -1395,6 +1473,7 @@ function WorkshopContent() {
                           onClick={() => {
                             setGeneratedCode(defaultPreviewHtml);
                             setShareMessage("");
+                            setShareFeedback(null);
                           }}
                           className="rounded-full bg-white px-4 py-3 text-sm font-bold text-slate-500 shadow-[0_12px_28px_rgba(148,163,184,0.12)]"
                         >
@@ -1409,7 +1488,7 @@ function WorkshopContent() {
                         </button>
                         <button
                           type="button"
-                          onClick={handleShareToCommunity}
+                          onClick={openShareConfirm}
                           disabled={isSharing}
                           className="rounded-full bg-[linear-gradient(90deg,#ffd9ea_0%,#ffe7c7_52%,#dcecff_100%)] px-4 py-3 text-sm font-bold text-slate-700 shadow-[0_12px_28px_rgba(251,191,188,0.2)] disabled:cursor-not-allowed disabled:opacity-70"
                         >
@@ -1652,6 +1731,155 @@ function WorkshopContent() {
           </section>
         </section>
       </div>
+
+      {isShareConfirmOpen && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#7d8eb0]/18 px-6 backdrop-blur-md">
+          <div className="w-full max-w-3xl rounded-[36px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-6 shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold tracking-[0.16em] text-[#8aa0ca]">
+                  分享确认
+                </p>
+                <h3 className="mt-2 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[32px] font-black tracking-[-0.05em] text-slate-700">
+                  把这份作品送进成长社区
+                </h3>
+                <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500">
+                  我们会先检查提示词和内容是否适合儿童社区公开展示，通过后才会出现在社区广场。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShareConfirmOpen(false)}
+                className="grid h-11 w-11 place-items-center rounded-full bg-white text-xl font-black text-slate-400 shadow-[0_12px_24px_rgba(148,163,184,0.12)] transition hover:text-slate-600"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-[260px_1fr]">
+              <div className="overflow-hidden rounded-[28px] bg-white shadow-[0_18px_40px_rgba(148,163,184,0.14)]">
+                {sharePreviewImageUrl ? (
+                  <img
+                    src={sharePreviewImageUrl}
+                    alt="作品分享预览"
+                    className="aspect-[4/5] h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex aspect-[4/5] items-center justify-center bg-[#f7fbff] text-sm font-bold text-slate-400">
+                    正在准备预览
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-[26px] bg-white p-5 shadow-[0_16px_36px_rgba(148,163,184,0.1)]">
+                  <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                    分享标题
+                  </p>
+                  <p className="mt-3 text-xl font-black text-slate-700">
+                    {buildShareTitle()}
+                  </p>
+                </div>
+
+                <div className="rounded-[26px] bg-white p-5 shadow-[0_16px_36px_rgba(148,163,184,0.1)]">
+                  <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                    提示词内容
+                  </p>
+                  <p className="mt-3 max-h-[180px] overflow-y-auto text-sm leading-7 text-slate-600">
+                    {promptText}
+                  </p>
+                </div>
+
+                <div className="rounded-[24px] bg-[#fff7e8] px-4 py-3 text-sm font-bold leading-7 text-[#b7791f]">
+                  分享后会优先经过规则审核，再进入智能复审，确保社区内容适合孩子们公开浏览。
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsShareConfirmOpen(false)}
+                className="rounded-full bg-white px-5 py-3 text-sm font-bold text-slate-500 shadow-[0_12px_24px_rgba(148,163,184,0.12)]"
+              >
+                再看看
+              </button>
+              <button
+                type="button"
+                onClick={handleShareToCommunity}
+                disabled={isSharing}
+                className="rounded-full bg-[linear-gradient(90deg,#ffd9ea_0%,#ffe7c7_52%,#dcecff_100%)] px-6 py-3 text-sm font-black text-slate-700 shadow-[0_16px_34px_rgba(251,191,188,0.24)] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSharing ? "正在送往社区" : "确认分享"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shareFeedback && (
+        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-[#7d8eb0]/20 px-6 backdrop-blur-md">
+          <div className="w-full max-w-xl rounded-[36px] bg-white p-8 text-center shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+            <div
+              className={`mx-auto grid h-20 w-20 place-items-center rounded-[28px] text-3xl font-black shadow-[0_16px_36px_rgba(148,163,184,0.12)] ${
+                shareFeedback.type === "success"
+                  ? "bg-gradient-to-br from-[#dff8ea] to-[#e8fff4] text-[#1e9b66]"
+                  : shareFeedback.type === "pending"
+                    ? "bg-gradient-to-br from-[#fff3d4] to-[#fff8e8] text-[#c88914]"
+                    : "bg-gradient-to-br from-[#ffe5eb] to-[#fff2f5] text-[#d45b85]"
+              }`}
+            >
+              {shareFeedback.type === "success"
+                ? "成"
+                : shareFeedback.type === "pending"
+                  ? "审"
+                  : "改"}
+            </div>
+            <h3 className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[34px] font-black tracking-[-0.05em] text-slate-700">
+              {shareFeedback.title}
+            </h3>
+            <p className="mt-4 text-[15px] leading-8 text-slate-500">
+              {shareFeedback.message}
+            </p>
+
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              {shareFeedback.type === "success" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareFeedback(null);
+                    router.push("/community");
+                  }}
+                  className="rounded-full bg-[#eef6ff] px-5 py-3 text-sm font-bold text-[#4b8fd6] shadow-[0_12px_24px_rgba(125,211,252,0.14)]"
+                >
+                  去社区看看
+                </button>
+              )}
+
+              {shareFeedback.type === "pending" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareFeedback(null);
+                    router.push("/profile");
+                  }}
+                  className="rounded-full bg-[#fff6dc] px-5 py-3 text-sm font-bold text-[#c88914] shadow-[0_12px_24px_rgba(251,191,36,0.14)]"
+                >
+                  去我的主页查看状态
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShareFeedback(null)}
+                className="rounded-full bg-white px-5 py-3 text-sm font-bold text-slate-500 shadow-[0_12px_24px_rgba(148,163,184,0.12)]"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

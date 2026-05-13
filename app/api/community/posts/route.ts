@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
     await ensureUserProfile(currentUser.user_id, currentUser.users.phone);
 
-    const moderation = moderateCommunityPost({
+    const moderation = await moderateCommunityPost({
       title: body.title.trim(),
       prompt: body.prompt.trim(),
       previewCode: body.previewCode.trim(),
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       previewImageUrl: body.previewImageUrl.trim(),
       previewCode: body.previewCode.trim(),
       mode: "coding",
-      moderationStatus: moderation.approved ? "approved" : "rejected",
+      moderationStatus: moderation.suggestedStatus,
       moderationReason: moderation.reason,
     });
 
@@ -68,9 +68,12 @@ export async function POST(request: Request) {
       success: true,
       post,
       moderation,
-      message: moderation.approved
-        ? "作品已经分享进社区。"
-        : `作品未通过审核：${moderation.reason ?? "请调整后重试。"}`,
+      message:
+        moderation.suggestedStatus === "approved"
+          ? "作品已经通过审核，并展示到成长社区。"
+          : moderation.suggestedStatus === "pending"
+            ? "作品已经提交成功，正在进入复审队列。"
+            : `作品未通过审核：${moderation.reason ?? "请调整后重试。"}`,
     });
   } catch (error) {
     console.error("【分享作品失败】:", error);
