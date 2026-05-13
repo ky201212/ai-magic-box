@@ -58,13 +58,70 @@ body {
 @keyframes pulseGlow {
   0%,
   100% {
-    transform: translate3d(-50%, 0, 0) scale(0.98);
+    transform: scale(0.98);
     filter: saturate(100%);
   }
 
   50% {
-    transform: translate3d(-50%, 0, 0) scale(1.05);
+    transform: scale(1.05);
     filter: saturate(112%);
+  }
+}
+
+@keyframes orbitalFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  25% {
+    transform: translate3d(6px, -10px, 0) rotate(1.5deg);
+  }
+
+  50% {
+    transform: translate3d(0, -16px, 0) rotate(0deg);
+  }
+
+  75% {
+    transform: translate3d(-8px, -8px, 0) rotate(-1.5deg);
+  }
+}
+
+@keyframes particleTwinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes slowSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes driftWide {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  33% {
+    transform: translate3d(14px, -12px, 0) scale(1.02);
+  }
+
+  66% {
+    transform: translate3d(-12px, 10px, 0) scale(0.98);
   }
 }
 
@@ -78,4 +135,20 @@ body {
 
 .pulse-glow {
   animation: pulseGlow 5s ease-in-out infinite;
+}
+
+.orbital-float {
+  animation: orbitalFloat 8s ease-in-out infinite;
+}
+
+.particle-twinkle {
+  animation: particleTwinkle 3.4s ease-in-out infinite;
+}
+
+.slow-spin {
+  animation: slowSpin 24s linear infinite;
+}
+
+.drift-wide {
+  animation: driftWide 14s ease-in-out infinite;
 }

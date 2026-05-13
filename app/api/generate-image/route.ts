@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { consumeCredits } from "@/lib/credits";
+import { getCurrentUser } from "@/lib/auth";
 
 const SILICONFLOW_IMAGE_API_URL =
   "https://api.siliconflow.cn/v1/images/generations";
+const IMAGE_COST = 2;
 
 type SiliconFlowImageResponse = {
   images?: Array<{
@@ -14,6 +17,15 @@ type SiliconFlowImageResponse = {
 
 export async function POST(request: Request) {
   try {
+    const currentUser = await getCurrentUser();
+
+    if (!currentUser?.user_id) {
+      return NextResponse.json(
+        { error: "请先登录后再使用 AI 绘画功能。" },
+        { status: 401 },
+      );
+    }
+
     const { prompt } = (await request.json()) as { prompt?: string };
 
     if (!prompt?.trim()) {
@@ -27,6 +39,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "服务端缺少 SILICONFLOW_API_KEY 环境变量。" },
         { status: 500 },
+      );
+    }
+
+    const creditResult = await consumeCredits(currentUser.user_id, IMAGE_COST);
+
+    if (!creditResult?.success) {
+      return NextResponse.json(
+        {
+          error: `魔法币不足，当前剩余 ${creditResult?.remaining ?? 0} 个。`,
+        },
+        { status: 403 },
       );
     }
 
@@ -65,8 +88,13 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ imageUrl });
-  } catch {
+    return NextResponse.json({
+      imageUrl,
+      remainingCredits: creditResult.remaining,
+    });
+  } catch (error) {
+    console.error("【图像生成接口异常】:", error);
+
     return NextResponse.json(
       { error: "图像生成接口暂时出了点小状况，请稍后再试。" },
       { status: 500 },
