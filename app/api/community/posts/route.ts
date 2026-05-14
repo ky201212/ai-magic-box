@@ -1,7 +1,8 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
-import { createCommunityPost, ensureUserProfile, listApprovedCommunityPosts } from "@/lib/community";
+import { ensureUserProfile, listApprovedCommunityPosts } from "@/lib/community";
 import { getCurrentUser } from "@/lib/auth";
-import { moderateCommunityPost } from "@/lib/moderation";
+import { finalizeCommunityShareReview, queueCommunityShare } from "@/lib/community-share";
 
 export async function GET() {
   try {
@@ -47,34 +48,27 @@ export async function POST(request: Request) {
 
     await ensureUserProfile(currentUser.user_id, currentUser.users.phone);
 
-    const moderation = await moderateCommunityPost({
-      title: body.title.trim(),
-      prompt: body.prompt.trim(),
-      previewCode: body.previewCode.trim(),
-    });
-
-    const post = await createCommunityPost({
+    const result = await queueCommunityShare({
       userId: currentUser.user_id,
       title: body.title.trim(),
       prompt: body.prompt.trim(),
       previewImageUrl: body.previewImageUrl.trim(),
       previewCode: body.previewCode.trim(),
-      mode: "coding",
-      moderationStatus: moderation.suggestedStatus,
-      moderationReason: moderation.reason,
-      moderationDetail: moderation.detail,
     });
+
+    if (result.immediateStatus === "pending") {
+      after(async () => {
+        await finalizeCommunityShareReview(result.post.id);
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      post,
-      moderation,
-      message:
-        moderation.suggestedStatus === "approved"
-          ? "作品已经通过审核，并展示到成长社区。"
-          : moderation.suggestedStatus === "pending"
-            ? "作品已经提交成功，正在进入复审队列。"
-            : `作品未通过审核：${moderation.reason ?? "请调整后重试。"}`,
+      post: result.post,
+      moderation: {
+        suggestedStatus: result.immediateStatus,
+      },
+      message: result.message,
     });
   } catch (error) {
     console.error("【分享作品失败】:", error);

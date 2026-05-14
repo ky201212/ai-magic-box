@@ -56,6 +56,24 @@ export type AdminUserRecord = {
   notes: string | null;
   created_at: string;
   credits: number;
+  postsCount: number;
+  approvedPostsCount: number;
+  pendingPostsCount: number;
+  rejectedPostsCount: number;
+  latestPostAt: string | null;
+  totalCreditsAdded: number;
+  totalCreditsSpent: number;
+  lastCreditChangeAt: string | null;
+  creditLogs: Array<{
+    id: string;
+    user_id: string;
+    change_amount: number;
+    balance_after: number;
+    reason_code: string;
+    reason_label: string;
+    note: string | null;
+    created_at: string;
+  }>;
 };
 
 export type NotificationRecord = {

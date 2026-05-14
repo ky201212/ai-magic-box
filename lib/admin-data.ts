@@ -1,5 +1,8 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { createCreditLogEntry } from "@/lib/credits";
+import type { CreditLogRow } from "@/lib/credits";
+import { sendUserNotification } from "@/lib/user-notifications";
 
 export type SiteSettingRecord = {
   setting_key: string;
@@ -59,6 +62,15 @@ export type AdminUserRecord = {
   notes: string | null;
   created_at: string;
   credits: number;
+  postsCount: number;
+  approvedPostsCount: number;
+  pendingPostsCount: number;
+  rejectedPostsCount: number;
+  latestPostAt: string | null;
+  totalCreditsAdded: number;
+  totalCreditsSpent: number;
+  lastCreditChangeAt: string | null;
+  creditLogs: CreditLogRow[];
 };
 
 export type NotificationRecord = {
@@ -299,28 +311,129 @@ export async function updateCommunityPostReview(
     throw error;
   }
 
-  return data as AdminCommunityPostRecord;
+  const postRecord = data as AdminCommunityPostRecord;
+
+  if (postRecord.user_id) {
+    await sendUserNotification({
+      userId: postRecord.user_id,
+      title:
+        input.moderation_status === "approved"
+          ? "作品审核通过啦"
+          : input.moderation_status === "rejected"
+            ? "作品暂时没有通过审核"
+            : "作品重新进入审核队列",
+      body:
+        input.moderation_status === "approved"
+          ? "你的作品已经通过管理员审核，现在已经出现在成长社区里。"
+          : input.moderation_status === "rejected"
+            ? input.moderation_reason ?? "管理员判定该内容暂不适合公开展示。"
+            : "你的作品已重新进入审核队列，稍后会继续通知你结果。",
+    }).catch((notificationError) => {
+      console.error("【后台审核后发送用户通知失败】:", notificationError);
+    });
+  }
+
+  return postRecord;
 }
 
-type AdminUserBaseRow = Omit<AdminUserRecord, "credits">;
+type AdminUserBaseRow = Omit<
+  AdminUserRecord,
+  | "credits"
+  | "postsCount"
+  | "approvedPostsCount"
+  | "pendingPostsCount"
+  | "rejectedPostsCount"
+  | "latestPostAt"
+  | "totalCreditsAdded"
+  | "totalCreditsSpent"
+  | "lastCreditChangeAt"
+  | "creditLogs"
+>;
 
-export async function listAdminUsers(): Promise<AdminUserRecord[]> {
+type AdminUserPostRow = {
+  user_id: string;
+  moderation_status: "pending" | "approved" | "rejected";
+  created_at: string;
+};
+
+function isMissingCreditLogTable(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return "code" in error && error.code === "PGRST205";
+}
+
+async function listAdminCreditLogsForUser(userId: string, limit = 30) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("user_credit_logs")
+    .select(
+      "id, user_id, change_amount, balance_after, reason_code, reason_label, note, created_at",
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+    .returns<CreditLogRow[]>();
+
+  if (!error) {
+    return data ?? [];
+  }
+
+  if (!isMissingCreditLogTable(error)) {
+    throw error;
+  }
+
+  const { data: fallback, error: fallbackError } = await supabaseAdmin
+    .from("site_settings")
+    .select("value")
+    .eq("setting_key", `credits.logs.${userId}`)
+    .maybeSingle<{ value: { logs?: CreditLogRow[] } }>();
+
+  if (fallbackError) {
+    throw fallbackError;
+  }
+
+  return (fallback?.value?.logs ?? []).slice(0, limit);
+}
+
+export async function getAdminUserById(userId: string) {
+  const users = await listAdminUsers({ userId, includeCreditLogs: true });
+  return users[0] ?? null;
+}
+
+export async function listAdminUsers(input?: {
+  userId?: string;
+  includeCreditLogs?: boolean;
+}): Promise<AdminUserRecord[]> {
   const supabaseAdmin = getSupabaseAdmin();
   const creditPolicy = await getCreditPolicySetting().catch(() => ({
     initialCredits: 50,
   }));
-  const [{ data: users, error: usersError }, { data: credits, error: creditsError }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("users")
-        .select("id, phone, nickname, status, last_login_at, avatar_url, notes, created_at")
-        .order("created_at", { ascending: false })
-        .returns<AdminUserBaseRow[]>(),
-      supabaseAdmin
-        .from("user_credits")
-        .select("user_id, credits")
-        .returns<Array<{ user_id: string; credits: number }>>(),
-    ]);
+  const usersQuery = supabaseAdmin
+    .from("users")
+    .select("id, phone, nickname, status, last_login_at, avatar_url, notes, created_at")
+    .order("created_at", { ascending: false });
+
+  if (input?.userId) {
+    usersQuery.eq("id", input.userId);
+  }
+
+  const [
+    { data: users, error: usersError },
+    { data: credits, error: creditsError },
+    { data: posts, error: postsError },
+  ] = await Promise.all([
+    usersQuery.returns<AdminUserBaseRow[]>(),
+    supabaseAdmin
+      .from("user_credits")
+      .select("user_id, credits")
+      .returns<Array<{ user_id: string; credits: number }>>(),
+    supabaseAdmin
+      .from("community_posts")
+      .select("user_id, moderation_status, created_at")
+      .returns<AdminUserPostRow[]>(),
+  ]);
 
   if (usersError) {
     throw usersError;
@@ -330,16 +443,95 @@ export async function listAdminUsers(): Promise<AdminUserRecord[]> {
     throw creditsError;
   }
 
+  if (postsError) {
+    throw postsError;
+  }
+
   const creditsMap = new Map(
     (credits ?? []).map((item) => [item.user_id as string, item.credits as number]),
   );
 
-  return (users ?? []).map((user) => ({
-    ...user,
-    credits:
-      creditsMap.get(user.id as string) ??
-      Math.max(0, creditPolicy.initialCredits ?? 50),
-  }));
+  const postsByUser = new Map<
+    string,
+    {
+      postsCount: number;
+      approvedPostsCount: number;
+      pendingPostsCount: number;
+      rejectedPostsCount: number;
+      latestPostAt: string | null;
+    }
+  >();
+
+  for (const post of posts ?? []) {
+    const current = postsByUser.get(post.user_id) ?? {
+      postsCount: 0,
+      approvedPostsCount: 0,
+      pendingPostsCount: 0,
+      rejectedPostsCount: 0,
+      latestPostAt: null,
+    };
+
+    current.postsCount += 1;
+    if (post.moderation_status === "approved") {
+      current.approvedPostsCount += 1;
+    } else if (post.moderation_status === "rejected") {
+      current.rejectedPostsCount += 1;
+    } else {
+      current.pendingPostsCount += 1;
+    }
+
+    if (!current.latestPostAt || post.created_at > current.latestPostAt) {
+      current.latestPostAt = post.created_at;
+    }
+
+    postsByUser.set(post.user_id, current);
+  }
+
+  const creditLogsByUser = new Map<string, CreditLogRow[]>();
+
+  if (input?.includeCreditLogs === true) {
+    const creditLogsEntries = await Promise.all(
+      (users ?? []).map(async (user): Promise<[string, CreditLogRow[]]> => [
+        user.id,
+        await listAdminCreditLogsForUser(user.id, 30),
+      ]),
+    );
+
+    for (const [userId, logs] of creditLogsEntries) {
+      creditLogsByUser.set(userId, logs);
+    }
+  }
+
+  return (users ?? []).map((user) => {
+    const userPosts = postsByUser.get(user.id) ?? {
+      postsCount: 0,
+      approvedPostsCount: 0,
+      pendingPostsCount: 0,
+      rejectedPostsCount: 0,
+      latestPostAt: null,
+    };
+    const creditLogs = creditLogsByUser.get(user.id) ?? [];
+    const totalCreditsAdded = creditLogs.reduce(
+      (total, item) => total + Math.max(0, item.change_amount),
+      0,
+    );
+    const totalCreditsSpent = creditLogs.reduce(
+      (total, item) => total + Math.max(0, -item.change_amount),
+      0,
+    );
+
+    return {
+      ...user,
+      credits:
+        creditsMap.get(user.id as string) ??
+        Math.max(0, creditPolicy.initialCredits ?? 50),
+      ...userPosts,
+      totalCreditsAdded,
+      totalCreditsSpent,
+      lastCreditChangeAt: creditLogs[0]?.created_at ?? null,
+      creditLogs,
+    };
+  });
 }
 
 export async function updateAdminUser(
@@ -349,6 +541,7 @@ export async function updateAdminUser(
     status?: "active" | "disabled";
     notes?: string | null;
     credits?: number;
+    creditLogNote?: string | null;
   },
 ) {
   const supabaseAdmin = getSupabaseAdmin();
@@ -375,14 +568,40 @@ export async function updateAdminUser(
   }
 
   if (typeof input.credits === "number") {
+    const previousCreditsResult = await supabaseAdmin
+      .from("user_credits")
+      .select("credits")
+      .eq("user_id", userId)
+      .maybeSingle<{ credits: number }>();
+
+    const previousCredits = previousCreditsResult.data?.credits ?? 0;
+    const nextCredits = Math.max(0, input.credits);
+
     const { error: creditsError } = await supabaseAdmin
       .from("user_credits")
-      .upsert({ user_id: userId, credits: Math.max(0, input.credits) } as never, {
+      .upsert({ user_id: userId, credits: nextCredits } as never, {
         onConflict: "user_id",
       });
 
     if (creditsError) {
       throw creditsError;
+    }
+
+    const delta = nextCredits - previousCredits;
+
+    if (delta !== 0) {
+      await createCreditLogEntry({
+        userId,
+        changeAmount: delta,
+        balanceAfter: nextCredits,
+        reasonCode: "admin_adjustment",
+        reasonLabel: "管理员调整魔法币",
+        note:
+          input.creditLogNote ??
+          (delta > 0
+            ? `管理员补充了 ${delta} 个魔法币。`
+            : `管理员扣减了 ${Math.abs(delta)} 个魔法币。`),
+      });
     }
   }
 }

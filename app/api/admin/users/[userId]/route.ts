@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updateAdminUser } from "@/lib/admin-data";
+import { getAdminUserById, updateAdminUser } from "@/lib/admin-data";
 import {
   requireAdminContext,
   requirePermission,
@@ -31,10 +31,16 @@ export async function PATCH(request: Request, context: RouteContext) {
       status?: "active" | "disabled";
       notes?: string | null;
       credits?: number;
+      creditLogNote?: string | null;
     };
 
     await updateAdminUser(userId, body);
-    return NextResponse.json({ success: true });
+    const user = await getAdminUserById(userId);
+
+    return NextResponse.json({
+      success: true,
+      user,
+    });
   } catch (requestError) {
     console.error("【后台用户更新失败】:", requestError);
 

@@ -12,6 +12,7 @@ export type CommunityPostStatus = "pending" | "approved" | "rejected";
 
 export type UserCommunityPost = {
   id: string;
+  user_id: string;
   title: string;
   prompt: string;
   preview_image_url: string;
@@ -151,6 +152,56 @@ export async function createCommunityPost(input: CommunityPostInsert) {
   const { data, error } = await supabaseAdmin
     .from("community_posts")
     .insert(insertPayload as never)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function getCommunityPostById(postId: string) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("community_posts")
+    .select("*")
+    .eq("id", postId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function updateCommunityPostModeration(
+  postId: string,
+  input: {
+    moderationStatus: CommunityPostStatus;
+    moderationReason?: string | null;
+    moderationDetail?: Record<string, unknown>;
+    moderationStage?: "rule" | "ai" | "fallback" | "manual";
+    reviewedAt?: string | null;
+    reviewedBy?: string | null;
+  },
+) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("community_posts")
+    .update(
+      {
+        moderation_status: input.moderationStatus,
+        moderation_reason: input.moderationReason ?? null,
+        moderation_detail: input.moderationDetail ?? {},
+        moderation_stage: input.moderationStage ?? "manual",
+        reviewed_at: input.reviewedAt ?? null,
+        reviewed_by: input.reviewedBy ?? null,
+      } as never,
+    )
+    .eq("id", postId)
     .select("*")
     .single();
 

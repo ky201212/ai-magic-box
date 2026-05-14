@@ -4,7 +4,7 @@ import {
   getUserProfile,
   listUserCommunityPosts,
 } from "@/lib/community";
-import { ensureUserCredits } from "@/lib/credits";
+import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
@@ -17,15 +17,17 @@ export async function GET() {
 
     await ensureUserProfile(currentUser.user_id, currentUser.users.phone);
 
-    const [profile, credits, posts] = await Promise.all([
+    const [profile, credits, posts, creditLogs] = await Promise.all([
       getUserProfile(currentUser.user_id),
       ensureUserCredits(currentUser.user_id),
       listUserCommunityPosts(currentUser.user_id),
+      listUserCreditLogs(currentUser.user_id),
     ]);
 
     return NextResponse.json({
       profile,
       credits,
+      creditLogs,
       posts,
       phone: currentUser.users.phone,
     });

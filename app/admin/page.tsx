@@ -16,7 +16,7 @@ export default async function AdminDashboardPage() {
     })),
     listAiModeConfigs().catch(() => []),
     listAdminCommunityPosts().catch(() => []),
-    listAdminUsers().catch(() => []),
+    listAdminUsers({ includeCreditLogs: false }).catch(() => []),
     listNotifications(6).catch(() => []),
   ]);
 

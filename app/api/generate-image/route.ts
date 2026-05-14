@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { consumeCredits } from "@/lib/credits";
+import { addCredits, consumeCredits } from "@/lib/credits";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     );
     const shouldCharge = creditEnabled && creditCost > 0;
     let remainingCredits: number | undefined;
+    let chargedUserId: string | null = null;
 
     if (!aiConfig.isEnabled) {
       return NextResponse.json(
@@ -59,7 +60,11 @@ export async function POST(request: Request) {
         );
       }
 
-      const creditResult = await consumeCredits(currentUser.user_id, creditCost);
+      const creditResult = await consumeCredits(currentUser.user_id, creditCost, {
+        reasonCode: "painting_generate",
+        reasonLabel: "AI绘画作画",
+        note: `使用 AI 绘画功能，消耗 ${creditCost} 个魔法币。`,
+      });
 
       if (!creditResult?.success) {
         return NextResponse.json(
@@ -71,6 +76,7 @@ export async function POST(request: Request) {
       }
 
       remainingCredits = creditResult.remaining;
+      chargedUserId = currentUser.user_id;
     }
 
     const upstreamResponse = await fetch(aiConfig.endpointUrl, {
@@ -90,9 +96,18 @@ export async function POST(request: Request) {
       const errorData = await upstreamResponse.text();
       console.error("【SiliconFlow 图像接口报错详情】:", errorData);
 
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: "painting_refund",
+          reasonLabel: "AI绘画失败退回",
+          note: `AI 绘画生成失败，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
         {
           error: errorData || "图像生成接口请求失败，请稍后再试。",
+          remainingCredits,
         },
         { status: upstreamResponse.status },
       );
@@ -102,8 +117,16 @@ export async function POST(request: Request) {
     const imageUrl = data.images?.[0]?.url;
 
     if (!imageUrl) {
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: "painting_refund",
+          reasonLabel: "AI绘画失败退回",
+          note: `AI 绘画未返回有效图片，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
-        { error: "图像模型没有返回可用的图片地址。" },
+        { error: "图像模型没有返回可用的图片地址。", remainingCredits },
         { status: 502 },
       );
     }

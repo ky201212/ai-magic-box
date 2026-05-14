@@ -77,6 +77,16 @@ type WorkshopNotification = {
   } | null;
 };
 
+type WorkshopCreditLog = {
+  id: string;
+  change_amount: number;
+  balance_after: number;
+  reason_code: string;
+  reason_label: string;
+  note: string | null;
+  created_at: string;
+};
+
 const modeVisuals: Record<
   ModeId,
   {
@@ -364,15 +374,16 @@ function WorkshopContent() {
   const [isShareConfirmOpen, setIsShareConfirmOpen] = useState(false);
   const [sharePreviewImageUrl, setSharePreviewImageUrl] = useState("");
   const [activeHeaderPanel, setActiveHeaderPanel] = useState<
-    "help" | "notifications" | null
+    "help" | "notifications" | "credits" | null
   >(null);
-  const [saveStatus, setSaveStatus] = useState("已自动保存");
   const [shareFeedback, setShareFeedback] = useState<ShareFeedbackState | null>(
     null,
   );
   const [headerNotifications, setHeaderNotifications] = useState<
     WorkshopNotification[]
   >([]);
+  const [magicCredits, setMagicCredits] = useState<number | null>(null);
+  const [creditLogs, setCreditLogs] = useState<WorkshopCreditLog[]>([]);
 
   const modeParam = searchParams.get("mode");
   const activeMode = modeTabs.some((tab) => tab.id === modeParam)
@@ -457,9 +468,36 @@ function WorkshopContent() {
   useEffect(() => {
     let isMounted = true;
 
+    const loadCreditSummary = async () => {
+      try {
+        const response = await fetch("/api/community/me", {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          credits?: { credits: number };
+          creditLogs?: WorkshopCreditLog[];
+        };
+
+        if (!response.ok || !isMounted) {
+          return;
+        }
+
+        setMagicCredits(
+          typeof data.credits?.credits === "number" ? data.credits.credits : null,
+        );
+        setCreditLogs(data.creditLogs ?? []);
+      } catch {
+        if (isMounted) {
+          window.console.error("魔法币信息加载失败");
+        }
+      }
+    };
+
     const loadNotifications = async () => {
       try {
-        const response = await fetch("/api/notifications");
+        const response = await fetch("/api/notifications", {
+          cache: "no-store",
+        });
         const data = (await response.json()) as {
           notifications?: WorkshopNotification[];
         };
@@ -470,14 +508,27 @@ function WorkshopContent() {
 
         setHeaderNotifications(data.notifications);
       } catch {
-        window.console.error("通知加载失败");
+        if (isMounted) {
+          window.console.error("通知加载失败");
+        }
       }
     };
 
     void loadNotifications();
+    void loadCreditSummary();
+
+    const creditIntervalId = window.setInterval(() => {
+      void loadCreditSummary();
+    }, 15000);
+
+    const notificationIntervalId = window.setInterval(() => {
+      void loadNotifications();
+    }, 12000);
 
     return () => {
       isMounted = false;
+      window.clearInterval(creditIntervalId);
+      window.clearInterval(notificationIntervalId);
     };
   }, []);
 
@@ -493,29 +544,7 @@ function WorkshopContent() {
     router.replace(`${pathname}?mode=${mode}`, { scroll: false });
   };
 
-  const handleManualSave = () => {
-    try {
-      window.localStorage.setItem(
-        "workshop-draft",
-        JSON.stringify({
-          promptText,
-          writingPrompt,
-          writingResult,
-          drawingPrompt,
-          generatedCode,
-          generatedImageUrl,
-        }),
-      );
-      setSaveStatus("刚刚保存");
-      window.setTimeout(() => {
-        setSaveStatus("已自动保存");
-      }, 1600);
-    } catch {
-      setSaveStatus("保存遇到一点问题");
-    }
-  };
-
-  const handleHeaderAction = (panel: "help" | "notifications") => {
+  const handleHeaderAction = (panel: "help" | "notifications" | "credits") => {
     setActiveHeaderPanel((currentPanel) =>
       currentPanel === panel ? null : panel,
     );
@@ -558,20 +587,20 @@ function WorkshopContent() {
       const canvas = await html2canvas(frameRoot, {
         backgroundColor: "#ffffff",
         useCORS: true,
-        scale: 1,
+        scale: 0.72,
       });
 
-      return canvas.toDataURL("image/png", 0.92);
+      return canvas.toDataURL("image/jpeg", 0.82);
     }
 
     if (previewShellRef.current) {
       const canvas = await html2canvas(previewShellRef.current, {
         backgroundColor: null,
         useCORS: true,
-        scale: 1,
+        scale: 0.72,
       });
 
-      return canvas.toDataURL("image/png", 0.92);
+      return canvas.toDataURL("image/jpeg", 0.82);
     }
 
     throw new Error("预览截图失败，请重新生成后再试。");
@@ -705,12 +734,20 @@ function WorkshopContent() {
         }),
       });
 
-      const data = (await response.json()) as { code?: string; error?: string };
+      const data = (await response.json()) as {
+        code?: string;
+        error?: string;
+        remainingCredits?: number;
+      };
       console.log("小米返回的原始数据:", data);
 
       if (response.status === 401) {
         redirectToLogin();
         return;
+      }
+
+      if (typeof data.remainingCredits === "number") {
+        setMagicCredits(data.remainingCredits);
       }
 
       if (!response.ok || !data.code) {
@@ -824,23 +861,23 @@ function WorkshopContent() {
       setIsShareConfirmOpen(false);
       setShareMessage(data.message ?? "");
 
+      if (data.moderation?.suggestedStatus === "pending") {
+        setShareFeedback({
+          type: "pending",
+          title: "作品已经进入审核队列",
+          message:
+            data.message ??
+            "你现在可以继续创作了，审核结果会通过右上角通知告诉你。",
+        });
+        return;
+      }
+
       if (data.moderation?.suggestedStatus === "approved") {
         setShareFeedback({
           type: "success",
           title: "作品已经点亮社区展台",
           message:
             data.message ?? "你的作品已经通过审核，其他小朋友现在可以在成长社区看到它了。",
-        });
-        return;
-      }
-
-      if (data.moderation?.suggestedStatus === "pending") {
-        setShareFeedback({
-          type: "pending",
-          title: "作品已经进入复审队列",
-          message:
-            data.message ??
-            "我们正在做更细致的安全检查，通过后就会自动出现在成长社区里。",
         });
         return;
       }
@@ -890,12 +927,20 @@ function WorkshopContent() {
         }),
       });
 
-      const data = (await response.json()) as { code?: string; error?: string };
+      const data = (await response.json()) as {
+        code?: string;
+        error?: string;
+        remainingCredits?: number;
+      };
       console.log("MiMo 写作返回的原始数据:", data);
 
       if (response.status === 401) {
         redirectToLogin();
         return;
+      }
+
+      if (typeof data.remainingCredits === "number") {
+        setMagicCredits(data.remainingCredits);
       }
 
       if (!response.ok || !data.code) {
@@ -940,12 +985,17 @@ function WorkshopContent() {
       const data = (await response.json()) as {
         imageUrl?: string;
         error?: string;
+        remainingCredits?: number;
       };
       console.log("SiliconFlow 返回的原始数据:", data);
 
       if (response.status === 401) {
         redirectToLogin();
         return;
+      }
+
+      if (typeof data.remainingCredits === "number") {
+        setMagicCredits(data.remainingCredits);
       }
 
       if (!response.ok || !data.imageUrl) {
@@ -1002,10 +1052,10 @@ function WorkshopContent() {
             <div className="relative flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={handleManualSave}
+                onClick={() => handleHeaderAction("credits")}
                 className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-bold text-[#5f84d8] shadow-[0_10px_24px_rgba(148,163,184,0.1)] transition hover:-translate-y-0.5"
               >
-                {saveStatus}
+                {magicCredits ?? "--"} 魔法币
               </button>
               <button
                 type="button"
@@ -1077,16 +1127,10 @@ function WorkshopContent() {
                         </button>
                       </div>
                     </div>
-                  ) : (
+                  ) : activeHeaderPanel === "notifications" ? (
                     <div>
                       <p className="text-sm font-black text-slate-700">通知中心</p>
                       <div className="mt-4 space-y-3">
-                        <div className="rounded-[18px] bg-[#f6faff] px-4 py-3">
-                          <p className="text-sm font-black text-slate-700">创作草稿已自动保存</p>
-                          <p className="mt-1 text-xs leading-6 text-slate-400">
-                            你可以随时回到这里继续创作。
-                          </p>
-                        </div>
                         {headerNotifications.length ? (
                           headerNotifications.slice(0, 4).map((item, index) => (
                             <div
@@ -1108,6 +1152,70 @@ function WorkshopContent() {
                             <p className="text-sm font-black text-slate-700">暂时还没有新的平台通知</p>
                             <p className="mt-1 text-xs leading-6 text-slate-400">
                               后台发布的新消息会第一时间出现在这里。
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-black text-slate-700">魔法币账本</p>
+                      <div className="mt-4 rounded-[18px] bg-[#f6faff] px-4 py-3">
+                        <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                          当前剩余
+                        </p>
+                        <p className="mt-2 text-2xl font-black text-slate-700">
+                          {magicCredits ?? "--"} 魔法币
+                        </p>
+                        <p className="mt-1 text-xs leading-6 text-slate-400">
+                          这里会告诉你魔法币什么时候增加、什么时候减少，以及对应的原因。
+                        </p>
+                      </div>
+                      <div className="mt-3 max-h-[280px] space-y-3 overflow-y-auto pr-1">
+                        {creditLogs.length ? (
+                          creditLogs.slice(0, 8).map((log) => (
+                            <div
+                              key={log.id}
+                              className="rounded-[18px] bg-[#fff8fb] px-4 py-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-black text-slate-700">
+                                    {log.reason_label}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-6 text-slate-400">
+                                    {log.note || "系统记录了一次魔法币变化。"}
+                                  </p>
+                                  <p className="mt-1 text-[11px] text-slate-300">
+                                    {new Intl.DateTimeFormat("zh-CN", {
+                                      month: "numeric",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    }).format(new Date(log.created_at))}
+                                  </p>
+                                </div>
+                                <div
+                                  className={`text-sm font-black ${
+                                    log.change_amount > 0
+                                      ? "text-[#1e9b66]"
+                                      : "text-[#d45b85]"
+                                  }`}
+                                >
+                                  {log.change_amount > 0
+                                    ? `+${log.change_amount}`
+                                    : log.change_amount}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-[18px] bg-[#fff8fb] px-4 py-3">
+                            <p className="text-sm font-black text-slate-700">
+                              暂时还没有新的魔法币变化
+                            </p>
+                            <p className="mt-1 text-xs leading-6 text-slate-400">
+                              当你领取礼包或使用需要扣币的功能时，这里就会出现记录。
                             </p>
                           </div>
                         )}

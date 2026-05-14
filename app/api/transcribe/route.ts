@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
-import { consumeCredits } from "@/lib/credits";
+import { addCredits, consumeCredits } from "@/lib/credits";
 
 type SiliconFlowTranscribeResponse = {
   text?: string;
@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     );
     const shouldCharge = creditEnabled && creditCost > 0;
     let remainingCredits: number | undefined;
+    let chargedUserId: string | null = null;
 
     if (!aiConfig.isEnabled) {
       return NextResponse.json(
@@ -54,7 +55,11 @@ export async function POST(request: Request) {
         );
       }
 
-      const creditResult = await consumeCredits(currentUser.user_id, creditCost);
+      const creditResult = await consumeCredits(currentUser.user_id, creditCost, {
+        reasonCode: "voice_transcribe",
+        reasonLabel: "语音施法识别",
+        note: `使用语音施法识别功能，消耗 ${creditCost} 个魔法币。`,
+      });
 
       if (!creditResult?.success) {
         return NextResponse.json(
@@ -66,6 +71,7 @@ export async function POST(request: Request) {
       }
 
       remainingCredits = creditResult.remaining;
+      chargedUserId = currentUser.user_id;
     }
 
     const upstreamFormData = new FormData();
@@ -84,9 +90,18 @@ export async function POST(request: Request) {
       const errorData = await upstreamResponse.text();
       console.error("【SiliconFlow 语音转写接口报错详情】:", errorData);
 
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: "voice_refund",
+          reasonLabel: "语音识别失败退回",
+          note: `语音识别失败，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
         {
           error: errorData || "语音识别接口请求失败，请稍后再试。",
+          remainingCredits,
         },
         { status: upstreamResponse.status },
       );
@@ -97,8 +112,16 @@ export async function POST(request: Request) {
     const text = data.text?.trim();
 
     if (!text) {
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: "voice_refund",
+          reasonLabel: "语音识别失败退回",
+          note: `语音识别未返回有效文本，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
-        { error: "语音模型没有返回可用的识别文本。" },
+        { error: "语音模型没有返回可用的识别文本。", remainingCredits },
         { status: 502 },
       );
     }

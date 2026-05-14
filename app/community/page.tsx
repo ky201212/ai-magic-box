@@ -1,21 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { listApprovedCommunityPosts } from "@/lib/community";
 import { marketingNavItems } from "../_components/marketing-nav";
 import { CommunityClient } from "./community-client";
 
 export default async function CommunityPage() {
   const cookieStore = await cookies();
   const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
-  const posts = await listApprovedCommunityPosts().catch((error) => {
-    console.error("成长社区数据加载失败，已回退为静态展示。", error);
-    return [];
-  });
-
-  const totalWorks = posts.length;
-  const totalCreators = new Set(posts.map((post) => post.user_id)).size;
-  const totalLikes = posts.reduce((sum, post) => sum + (post.like_count ?? 0), 0);
 
   return (
     <main className="min-h-screen bg-[#080512] text-white">
@@ -106,10 +97,6 @@ export default async function CommunityPage() {
 
           <CommunityClient
             isLoggedIn={isLoggedIn}
-            posts={posts}
-            totalWorks={totalWorks}
-            totalCreators={totalCreators}
-            totalLikes={totalLikes}
           />
         </div>
       </div>

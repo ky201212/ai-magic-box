@@ -2,15 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ApprovedCommunityPost } from "@/lib/community";
 
 type CommunityClientProps = {
   isLoggedIn: boolean;
-  posts: ApprovedCommunityPost[];
-  totalWorks: number;
-  totalCreators: number;
-  totalLikes: number;
 };
 
 type CommunityTab =
@@ -134,14 +130,51 @@ function formatDate(date: string) {
 
 export function CommunityClient({
   isLoggedIn,
-  posts,
-  totalWorks,
-  totalCreators,
-  totalLikes,
 }: CommunityClientProps) {
+  const [posts, setPosts] = useState<ApprovedCommunityPost[]>([]);
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [activeTab, setActiveTab] = useState<CommunityTab>("精选作品");
   const [searchText, setSearchText] = useState("");
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPosts = async () => {
+      try {
+        const response = await fetch("/api/community/posts", {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          posts?: ApprovedCommunityPost[];
+        };
+
+        if (!response.ok || !mounted) {
+          return;
+        }
+
+        setPosts(data.posts ?? []);
+      } catch {
+        if (mounted) {
+          window.console.error("成长社区作品加载失败");
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingPosts(false);
+        }
+      }
+    };
+
+    void loadPosts();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const totalWorks = posts.length;
+  const totalCreators = new Set(posts.map((post) => post.user_id)).size;
+  const totalLikes = posts.reduce((sum, post) => sum + (post.like_count ?? 0), 0);
 
   const enrichedPosts = useMemo<EnrichedPost[]>(() => {
     return posts.map((post, index) => {
@@ -345,7 +378,30 @@ export function CommunityClient({
         <div className="mt-8 grid gap-8 2xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-8">
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {filteredPosts.length ? (
+              {isLoadingPosts ? (
+                Array.from({ length: 8 }).map((_, index) => (
+                  <div
+                    key={`community-skeleton-${index}`}
+                    className="overflow-hidden rounded-[28px] border border-[#44306f] bg-[linear-gradient(180deg,rgba(22,14,42,0.96),rgba(14,9,28,0.98))] shadow-[0_18px_46px_rgba(0,0,0,0.24)]"
+                  >
+                    <div className="aspect-[1.18/1] animate-pulse bg-white/8" />
+                    <div className="space-y-4 px-5 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-full bg-white/8" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-5 w-3/4 rounded-full bg-white/8" />
+                          <div className="h-4 w-1/2 rounded-full bg-white/6" />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="h-4 rounded-full bg-white/8" />
+                        <div className="h-4 rounded-full bg-white/6" />
+                        <div className="h-4 w-2/3 rounded-full bg-white/6" />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : filteredPosts.length ? (
                 filteredPosts.map((post) => (
                   <article
                     key={post.id}
@@ -474,7 +530,19 @@ export function CommunityClient({
                 </div>
 
                 <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                  {creators.length ? (
+                  {isLoadingPosts ? (
+                    Array.from({ length: 8 }).map((_, index) => (
+                      <div
+                        key={`creator-skeleton-${index}`}
+                        className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-5"
+                      >
+                        <div className="h-16 w-16 rounded-full bg-white/8" />
+                        <div className="mt-4 h-5 w-2/3 rounded-full bg-white/8" />
+                        <div className="mt-3 h-4 w-1/2 rounded-full bg-white/6" />
+                        <div className="mt-3 h-4 w-full rounded-full bg-white/6" />
+                      </div>
+                    ))
+                  ) : creators.length ? (
                     creators.slice(0, 8).map((creator) => {
                       const isActive = selectedCreatorId === creator.userId;
 
@@ -530,7 +598,21 @@ export function CommunityClient({
                 </p>
 
                 <div className="mt-8 space-y-4">
-                  {rankingUsers.length ? (
+                  {isLoadingPosts ? (
+                    Array.from({ length: 6 }).map((_, index) => (
+                      <div
+                        key={`ranking-skeleton-${index}`}
+                        className="flex items-center gap-4 rounded-[22px] border border-white/6 bg-white/[0.03] px-4 py-4"
+                      >
+                        <div className="h-6 w-8 rounded-full bg-white/8" />
+                        <div className="h-12 w-12 rounded-full bg-white/8" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-5 w-1/3 rounded-full bg-white/8" />
+                          <div className="h-4 w-1/4 rounded-full bg-white/6" />
+                        </div>
+                      </div>
+                    ))
+                  ) : rankingUsers.length ? (
                     rankingUsers.slice(0, 6).map((creator, index) => (
                       <button
                         key={`${creator.userId}-${index}`}

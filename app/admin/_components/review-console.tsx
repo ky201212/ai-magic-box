@@ -28,6 +28,15 @@ function parseModerationDetail(post: AdminCommunityPostRecord) {
 export function ReviewConsole({ initialPosts }: ReviewConsoleProps) {
   const [posts, setPosts] = useState(initialPosts);
   const [activeFilter, setActiveFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const reviewStats = useMemo(
+    () => ({
+      all: posts.length,
+      pending: posts.filter((post) => post.moderation_status === "pending").length,
+      approved: posts.filter((post) => post.moderation_status === "approved").length,
+      rejected: posts.filter((post) => post.moderation_status === "rejected").length,
+    }),
+    [posts],
+  );
 
   const filteredPosts = useMemo(() => {
     if (activeFilter === "all") {
@@ -100,8 +109,33 @@ export function ReviewConsole({ initialPosts }: ReviewConsoleProps) {
                 }`}
               >
                 {item.label}
+                {item.key === "all"
+                  ? ` ${reviewStats.all}`
+                  : item.key === "pending"
+                    ? ` ${reviewStats.pending}`
+                    : item.key === "approved"
+                      ? ` ${reviewStats.approved}`
+                      : ` ${reviewStats.rejected}`}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-4">
+          <div className="rounded-[22px] bg-slate-50 px-4 py-4">
+            <p className="text-xs font-bold tracking-[0.14em] text-slate-400">全部作品</p>
+            <p className="mt-3 text-3xl font-black text-slate-900">{reviewStats.all}</p>
+          </div>
+          <div className="rounded-[22px] bg-[#fff7ed] px-4 py-4">
+            <p className="text-xs font-bold tracking-[0.14em] text-[#b86a12]">待审核</p>
+            <p className="mt-3 text-3xl font-black text-[#b86a12]">{reviewStats.pending}</p>
+          </div>
+          <div className="rounded-[22px] bg-[#ecfdf3] px-4 py-4">
+            <p className="text-xs font-bold tracking-[0.14em] text-[#1c8b5f]">已发布</p>
+            <p className="mt-3 text-3xl font-black text-[#1c8b5f]">{reviewStats.approved}</p>
+          </div>
+          <div className="rounded-[22px] bg-[#fff1f2] px-4 py-4">
+            <p className="text-xs font-bold tracking-[0.14em] text-[#d4557c]">已驳回</p>
+            <p className="mt-3 text-3xl font-black text-[#d4557c]">{reviewStats.rejected}</p>
           </div>
         </div>
       </section>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
-import { consumeCredits } from "@/lib/credits";
+import { addCredits, consumeCredits } from "@/lib/credits";
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
     );
     const shouldCharge = creditEnabled && creditCost > 0;
     let remainingCredits: number | undefined;
+    let chargedUserId: string | null = null;
 
     if (!aiConfig.isEnabled) {
       return NextResponse.json(
@@ -61,7 +62,14 @@ export async function POST(request: Request) {
         );
       }
 
-      const creditResult = await consumeCredits(currentUser.user_id, creditCost);
+      const creditResult = await consumeCredits(currentUser.user_id, creditCost, {
+        reasonCode: resolvedMode === "writing" ? "writing_generate" : "coding_generate",
+        reasonLabel: resolvedMode === "writing" ? "AI写作创作" : "AI编程生成",
+        note:
+          resolvedMode === "writing"
+            ? `使用 AI 写作功能，消耗 ${creditCost} 个魔法币。`
+            : `使用 AI 编程功能，消耗 ${creditCost} 个魔法币。`,
+      });
 
       if (!creditResult?.success) {
         return NextResponse.json(
@@ -73,6 +81,7 @@ export async function POST(request: Request) {
       }
 
       remainingCredits = creditResult.remaining;
+      chargedUserId = currentUser.user_id;
     }
 
     const upstreamResponse = await fetch(aiConfig.endpointUrl, {
@@ -100,9 +109,22 @@ export async function POST(request: Request) {
       const errorData = await upstreamResponse.text();
       console.error("【小米API报错详情】:", errorData);
 
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: resolvedMode === "writing" ? "writing_refund" : "coding_refund",
+          reasonLabel:
+            resolvedMode === "writing" ? "AI写作失败退回" : "AI编程失败退回",
+          note:
+            resolvedMode === "writing"
+              ? `AI 写作生成失败，退回 ${creditCost} 个魔法币。`
+              : `AI 编程生成失败，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
         {
           error: errorData || "上游大模型接口请求失败，请稍后再试。",
+          remainingCredits,
         },
         { status: upstreamResponse.status },
       );
@@ -113,8 +135,20 @@ export async function POST(request: Request) {
     const generatedContent = data.choices?.[0]?.message?.content?.trim();
 
     if (!generatedContent) {
+      if (shouldCharge && chargedUserId) {
+        remainingCredits = await addCredits(chargedUserId, creditCost, {
+          reasonCode: resolvedMode === "writing" ? "writing_refund" : "coding_refund",
+          reasonLabel:
+            resolvedMode === "writing" ? "AI写作失败退回" : "AI编程失败退回",
+          note:
+            resolvedMode === "writing"
+              ? `AI 写作未返回有效内容，退回 ${creditCost} 个魔法币。`
+              : `AI 编程未返回有效内容，退回 ${creditCost} 个魔法币。`,
+        });
+      }
+
       return NextResponse.json(
-        { error: "模型没有返回可用的内容。" },
+        { error: "模型没有返回可用的内容。", remainingCredits },
         { status: 502 },
       );
     }
@@ -123,7 +157,8 @@ export async function POST(request: Request) {
       code: generatedContent,
       remainingCredits,
     });
-  } catch {
+  } catch (error) {
+    console.error("【生成接口异常】:", error);
     return NextResponse.json(
       { error: "生成接口暂时出了点小状况，请稍后再试。" },
       { status: 500 },

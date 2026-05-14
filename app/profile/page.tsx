@@ -1,15 +1,41 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import {
-  ensureUserProfile,
-  getUserProfile,
-  listUserCommunityPosts,
-} from "@/lib/community";
-import { getCurrentUser } from "@/lib/auth";
-import { ensureUserCredits } from "@/lib/credits";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { marketingNavItems } from "../_components/marketing-nav";
+
+type ProfilePayload = {
+  profile: {
+    display_name: string | null;
+    avatar_color: string | null;
+    bio: string | null;
+  } | null;
+  credits: {
+    user_id: string;
+    credits: number;
+  };
+  creditLogs: Array<{
+    id: string;
+    change_amount: number;
+    balance_after: number;
+    reason_code: string;
+    reason_label: string;
+    note: string | null;
+    created_at: string;
+  }>;
+  posts: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    preview_image_url: string;
+    moderation_status: "pending" | "approved" | "rejected";
+    moderation_reason: string | null;
+    created_at: string;
+  }>;
+  phone: string;
+};
 
 function maskPhone(phone: string) {
   return phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
@@ -39,25 +65,102 @@ const statusMap = {
   },
 } as const;
 
-export default async function ProfilePage() {
-  const currentUser = await getCurrentUser();
+export default function ProfilePage() {
+  const router = useRouter();
+  const [data, setData] = useState<ProfilePayload | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [isCreditPanelOpen, setIsCreditPanelOpen] = useState(false);
 
-  if (!currentUser?.user_id || !currentUser.users?.phone) {
-    redirect("/login?redirect=/profile");
+  useEffect(() => {
+    let mounted = true;
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetch("/api/community/me", {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as ProfilePayload & {
+          error?: string;
+        };
+
+        if (response.status === 401) {
+          router.replace("/login?redirect=/profile");
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "个人主页加载失败。");
+        }
+
+        if (mounted) {
+          setData(payload);
+        }
+      } catch (requestError) {
+        if (mounted) {
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : "个人主页加载失败。",
+          );
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadProfile();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  const displayName = useMemo(
+    () => data?.profile?.display_name || "小创作者",
+    [data],
+  );
+  const avatarColor = useMemo(
+    () => data?.profile?.avatar_color || "#8b5cf6",
+    [data],
+  );
+
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-[#080512] text-white">
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="rounded-[28px] border border-white/10 bg-white/6 px-8 py-10 text-center backdrop-blur-xl">
+            <div className="mx-auto h-14 w-14 rounded-full border-4 border-dashed border-white/30 animate-spin" />
+            <p className="mt-5 text-lg font-black text-white">正在打开我的主页</p>
+          </div>
+        </div>
+      </main>
+    );
   }
 
-  await ensureUserProfile(currentUser.user_id, currentUser.users.phone);
-
-  const [cookieStore, profile, credits, posts] = await Promise.all([
-    cookies(),
-    getUserProfile(currentUser.user_id),
-    ensureUserCredits(currentUser.user_id),
-    listUserCommunityPosts(currentUser.user_id),
-  ]);
-
-  const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
-  const displayName = profile?.display_name || "小创作者";
-  const avatarColor = profile?.avatar_color || "#8b5cf6";
+  if (!data) {
+    return (
+      <main className="min-h-screen bg-[#080512] text-white">
+        <div className="flex min-h-screen items-center justify-center px-6">
+          <div className="max-w-lg rounded-[28px] border border-white/10 bg-white/6 px-8 py-10 text-center backdrop-blur-xl">
+            <p className="text-2xl font-black text-white">个人主页暂时打不开</p>
+            <p className="mt-4 text-sm leading-8 text-white/60">
+              {error || "刚刚和个人主页失去了一下联系，请稍后再试。"}
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-6 rounded-full bg-white px-5 py-3 text-sm font-black text-[#1e1338]"
+            >
+              重新加载
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#080512] text-white">
@@ -99,14 +202,12 @@ export default async function ProfilePage() {
                 </Link>
               ))}
               <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/6 p-2 pl-3 backdrop-blur-xl">
-                {isLoggedIn && (
-                  <Link
-                    href="/community"
-                    className="rounded-full border border-white/10 bg-white/6 px-4 py-2.5 text-[13px] font-semibold text-white/78 transition hover:bg-white/10 hover:text-white"
-                  >
-                    社区广场
-                  </Link>
-                )}
+                <Link
+                  href="/community"
+                  className="rounded-full border border-white/10 bg-white/6 px-4 py-2.5 text-[13px] font-semibold text-white/78 transition hover:bg-white/10 hover:text-white"
+                >
+                  社区广场
+                </Link>
                 <form action="/api/auth/logout" method="POST">
                   <button
                     type="submit"
@@ -138,10 +239,10 @@ export default async function ProfilePage() {
                   {displayName}
                 </h1>
                 <p className="mt-2 text-sm text-white/44">
-                  {maskPhone(currentUser.users.phone)}
+                  {maskPhone(data.phone)}
                 </p>
                 <p className="mt-5 text-[15px] leading-8 text-white/62">
-                  {profile?.bio || "这里会记录你的创作投稿和社区展示进度。"}
+                  {data.profile?.bio || "这里会记录你的创作投稿和社区展示进度。"}
                 </p>
               </div>
 
@@ -149,16 +250,23 @@ export default async function ProfilePage() {
                 <p className="text-sm font-semibold tracking-[0.14em] text-white/48">
                   创作资产
                 </p>
-                <div className="mt-5 rounded-[26px] bg-white/7 p-5">
+                <button
+                  type="button"
+                  onClick={() => setIsCreditPanelOpen(true)}
+                  className="mt-5 block w-full rounded-[26px] bg-white/7 p-5 text-left transition hover:bg-white/10"
+                >
                   <p className="text-sm text-white/50">剩余魔法币</p>
                   <p className="mt-2 text-[38px] font-black tracking-[-0.05em] text-white">
-                    {credits.credits}
+                    {data.credits.credits}
                   </p>
-                </div>
+                  <p className="mt-3 text-xs leading-6 text-white/46">
+                    点开可以查看魔法币什么时候增加、什么时候减少。
+                  </p>
+                </button>
                 <div className="mt-4 rounded-[26px] bg-white/7 p-5">
                   <p className="text-sm text-white/50">累计投稿</p>
                   <p className="mt-2 text-[38px] font-black tracking-[-0.05em] text-white">
-                    {posts.length}
+                    {data.posts.length}
                   </p>
                 </div>
               </div>
@@ -183,8 +291,8 @@ export default async function ProfilePage() {
               </div>
 
               <div className="mt-8 space-y-4">
-                {posts.length ? (
-                  posts.map((post) => {
+                {data.posts.length ? (
+                  data.posts.map((post) => {
                     const status =
                       statusMap[post.moderation_status as keyof typeof statusMap] ||
                       statusMap.pending;
@@ -253,6 +361,85 @@ export default async function ProfilePage() {
           </section>
         </div>
       </div>
+
+      {isCreditPanelOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#05030d]/58 px-6 backdrop-blur-md">
+          <div className="w-full max-w-3xl rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(28,20,52,0.98),rgba(17,11,33,0.98))] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold tracking-[0.14em] text-white/42">
+                  魔法币明细
+                </p>
+                <h3 className="mt-2 text-[34px] font-black tracking-[-0.05em] text-white">
+                  我的魔法币账本
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-white/58">
+                  这里会告诉你魔法币什么时候增加、什么时候减少，以及对应的原因。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreditPanelOpen(false)}
+                className="grid h-11 w-11 place-items-center rounded-full bg-white/10 text-xl font-black text-white/70 transition hover:bg-white/14 hover:text-white"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 rounded-[26px] bg-white/6 p-5">
+              <p className="text-sm text-white/50">当前剩余魔法币</p>
+              <p className="mt-2 text-[42px] font-black tracking-[-0.06em] text-white">
+                {data.credits.credits}
+              </p>
+            </div>
+
+            <div className="mt-6 max-h-[420px] space-y-3 overflow-y-auto pr-2">
+              {data.creditLogs.length ? (
+                data.creditLogs.map((log) => {
+                  const isIncome = log.change_amount > 0;
+
+                  return (
+                    <div
+                      key={log.id}
+                      className="rounded-[24px] border border-white/10 bg-white/6 px-5 py-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-base font-black text-white">
+                            {log.reason_label}
+                          </p>
+                          <p className="mt-2 text-sm leading-7 text-white/56">
+                            {log.note || "系统记录了一次魔法币变化。"}
+                          </p>
+                          <p className="mt-2 text-xs text-white/34">
+                            {formatDate(log.created_at)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p
+                            className={`text-xl font-black ${
+                              isIncome ? "text-[#9de0be]" : "text-[#ffb8cf]"
+                            }`}
+                          >
+                            {isIncome ? `+${log.change_amount}` : log.change_amount}
+                          </p>
+                          <p className="mt-2 text-xs text-white/40">
+                            变化后余额 {log.balance_after}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-white/12 bg-white/6 px-5 py-10 text-center text-sm text-white/46">
+                  这里暂时还没有魔法币变化记录。
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

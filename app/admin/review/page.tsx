@@ -12,7 +12,7 @@ export default async function AdminReviewPage() {
       <AdminPageHeader
         eyebrow="社区审核"
         title="规则 + 智能 + 人工 三段审核台"
-        description="这里不再只是简单显示待审状态，而是把规则拦截结果、智能审核理由、智能审核报错信息和人工最终处理全部展开给管理员看。"
+        description="这里会同时看到待审核、已发布、已驳回的全部社区作品，不再只是一条待审列表。规则拦截、智能审核、人工最终处理和用户当前发布状态都会完整展开。"
       />
       <ReviewConsole initialPosts={posts} />
     </div>
