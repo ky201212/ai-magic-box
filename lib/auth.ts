@@ -1,6 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const SESSION_COOKIE_NAME = "magic_session";
@@ -46,6 +46,27 @@ export async function hashOtpCode(code: string) {
   return sha256(`${getSessionSecret()}:${code}`);
 }
 
+async function resolveCookieSecureFlag() {
+  const headerStore = await headers();
+  const forwardedProto = headerStore.get("x-forwarded-proto");
+  const forwardedSsl = headerStore.get("x-forwarded-ssl");
+  const host = headerStore.get("host") ?? "";
+
+  if (forwardedProto === "https" || forwardedSsl === "on") {
+    return true;
+  }
+
+  if (
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("0.0.0.0")
+  ) {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production" && forwardedProto !== "http";
+}
+
 export async function setSession(userId: string) {
   const token = generateSessionToken();
   const tokenHash = sha256(`${getSessionSecret()}:${token}`);
@@ -69,10 +90,11 @@ export async function setSession(userId: string) {
   }
 
   const cookieStore = await cookies();
+  const secure = await resolveCookieSecureFlag();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: SESSION_EXPIRES_DAYS * 24 * 60 * 60,
   });
