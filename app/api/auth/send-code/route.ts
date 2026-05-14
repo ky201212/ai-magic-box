@@ -83,6 +83,11 @@ export async function POST(request: Request) {
       now + OTP_EXPIRES_MINUTES * 60 * 1000,
     ).toISOString();
 
+    console.log("【准备发送验证码】:", {
+      phone: normalizedPhone,
+      environment: process.env.NODE_ENV,
+    });
+
     await sendVerificationSms(normalizedPhone, code, OTP_EXPIRES_MINUTES);
 
     if (!existingOtp) {
