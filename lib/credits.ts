@@ -1,5 +1,6 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { getCreditPolicySetting } from "@/lib/admin-data";
 
 export const INITIAL_CREDITS = 50;
 
@@ -20,6 +21,9 @@ type UserCreditInsertPayload = {
 
 export async function ensureUserCredits(userId: string) {
   const supabaseAdmin = getSupabaseAdmin();
+  const creditPolicy = await getCreditPolicySetting().catch(() => ({
+    initialCredits: INITIAL_CREDITS,
+  }));
 
   const { data: existingRow, error: fetchError } = await supabaseAdmin
     .from("user_credits")
@@ -37,7 +41,7 @@ export async function ensureUserCredits(userId: string) {
 
   const insertPayload: UserCreditInsertPayload = {
     user_id: userId,
-    credits: INITIAL_CREDITS,
+    credits: Math.max(0, creditPolicy.initialCredits ?? INITIAL_CREDITS),
   };
 
   const { data: insertedRow, error: insertError } = await supabaseAdmin

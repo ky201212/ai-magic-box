@@ -65,6 +65,18 @@ type ShareFeedbackState = {
   message: string;
 };
 
+type WorkshopNotification = {
+  id: string;
+  is_read: boolean;
+  created_at: string;
+  read_at: string | null;
+  notifications: {
+    title: string;
+    body: string;
+    sent_at: string | null;
+  } | null;
+};
+
 const modeVisuals: Record<
   ModeId,
   {
@@ -358,6 +370,9 @@ function WorkshopContent() {
   const [shareFeedback, setShareFeedback] = useState<ShareFeedbackState | null>(
     null,
   );
+  const [headerNotifications, setHeaderNotifications] = useState<
+    WorkshopNotification[]
+  >([]);
 
   const modeParam = searchParams.get("mode");
   const activeMode = modeTabs.some((tab) => tab.id === modeParam)
@@ -436,6 +451,33 @@ function WorkshopContent() {
     return () => {
       mediaRecorderRef.current?.stop();
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch("/api/notifications");
+        const data = (await response.json()) as {
+          notifications?: WorkshopNotification[];
+        };
+
+        if (!response.ok || !data.notifications || !isMounted) {
+          return;
+        }
+
+        setHeaderNotifications(data.notifications);
+      } catch {
+        window.console.error("通知加载失败");
+      }
+    };
+
+    void loadNotifications();
+
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -1045,12 +1087,30 @@ function WorkshopContent() {
                             你可以随时回到这里继续创作。
                           </p>
                         </div>
-                        <div className="rounded-[18px] bg-[#fff8fb] px-4 py-3">
-                          <p className="text-sm font-black text-slate-700">成长社区有新的作品</p>
-                          <p className="mt-1 text-xs leading-6 text-slate-400">
-                            去看看其他同学分享了什么灵感。
-                          </p>
-                        </div>
+                        {headerNotifications.length ? (
+                          headerNotifications.slice(0, 4).map((item, index) => (
+                            <div
+                              key={item.id}
+                              className={`rounded-[18px] px-4 py-3 ${
+                                index % 2 === 0 ? "bg-[#fff8fb]" : "bg-[#fff9ef]"
+                              }`}
+                            >
+                              <p className="text-sm font-black text-slate-700">
+                                {item.notifications?.title ?? "平台通知"}
+                              </p>
+                              <p className="mt-1 text-xs leading-6 text-slate-400">
+                                {item.notifications?.body ?? "有一条新的平台动态可以查看。"}
+                              </p>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-[18px] bg-[#fff8fb] px-4 py-3">
+                            <p className="text-sm font-black text-slate-700">暂时还没有新的平台通知</p>
+                            <p className="mt-1 text-xs leading-6 text-slate-400">
+                              后台发布的新消息会第一时间出现在这里。
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

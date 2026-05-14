@@ -122,13 +122,17 @@ export default async function MatrixPage() {
             <div className="inline-flex rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-semibold tracking-[0.18em] text-white/66">
               创作矩阵
             </div>
-            <h1 className="mt-6 max-w-[10ch] text-[60px] font-black leading-[0.98] tracking-[-0.075em] text-white xl:text-[78px]">
-              每一种表达方式
-              <br />
-              都可以成为孩子的创作入口
-            </h1>
-            <p className="mt-6 max-w-[42ch] text-[18px] leading-9 text-white/56">
-              我们把不同模态的AI能力，变成不同类型的创作工坊。孩子不需要先理解技术名词，只需要选择自己最想表达的方式。
+
+            <div className="mt-8 max-w-[1180px]">
+              <h1 className="text-[64px] font-black leading-[0.96] tracking-[-0.07em] text-white xl:text-[88px] 2xl:text-[102px]">
+                <span className="block">每一种表达方式</span>
+                <span className="mt-3 block xl:mt-4">都可以成为孩子的创作入口</span>
+              </h1>
+              <div className="mt-6 h-[3px] w-24 rounded-full bg-[linear-gradient(90deg,rgba(167,108,255,0.9),rgba(97,208,255,0.9))]" />
+            </div>
+
+            <p className="mt-8 max-w-[38ch] text-[18px] leading-[2.1] text-white/58 xl:max-w-[40ch]">
+              我们把不同模态的 AI 能力，变成不同类型的创作工坊。孩子不需要先理解技术名词，只需要选择自己最想表达的方式。
             </p>
 
             <div className="mt-12 grid gap-6 lg:grid-cols-3">

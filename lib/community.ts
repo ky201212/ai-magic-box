@@ -63,6 +63,7 @@ type CommunityPostInsert = {
   mode: "coding";
   moderationStatus: "pending" | "approved" | "rejected";
   moderationReason?: string;
+  moderationDetail?: Record<string, unknown>;
 };
 
 type UserProfileInsertPayload = {
@@ -79,6 +80,7 @@ type CommunityPostInsertPayload = {
   mode: "coding";
   moderation_status: "pending" | "approved" | "rejected";
   moderation_reason: string | null;
+  moderation_detail: Record<string, unknown>;
 };
 
 export async function ensureUserProfile(userId: string, phone: string) {
@@ -143,6 +145,7 @@ export async function createCommunityPost(input: CommunityPostInsert) {
     mode: input.mode,
     moderation_status: input.moderationStatus,
     moderation_reason: input.moderationReason ?? null,
+    moderation_detail: input.moderationDetail ?? {},
   };
 
   const { data, error } = await supabaseAdmin

@@ -62,6 +62,7 @@ export async function POST(request: Request) {
       mode: "coding",
       moderationStatus: moderation.suggestedStatus,
       moderationReason: moderation.reason,
+      moderationDetail: moderation.detail,
     });
 
     return NextResponse.json({

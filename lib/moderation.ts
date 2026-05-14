@@ -24,6 +24,20 @@ export type ModerationResult = {
   reason?: string;
   stage: "rule" | "ai" | "fallback";
   suggestedStatus: "approved" | "pending" | "rejected";
+  detail: {
+    rule: {
+      approved: boolean;
+      reason: string | null;
+      matchedKeyword: string | null;
+    };
+    ai: {
+      executed: boolean;
+      approved: boolean | null;
+      reason: string | null;
+      raw: string | null;
+      error: string | null;
+    };
+  };
 };
 
 type AiModerationResponse = {
@@ -61,6 +75,20 @@ export function moderateCommunityPostByRules(
       reason: `内容包含敏感词：${hitKeyword}`,
       stage: "rule",
       suggestedStatus: "rejected",
+      detail: {
+        rule: {
+          approved: false,
+          reason: `内容包含敏感词：${hitKeyword}`,
+          matchedKeyword: hitKeyword,
+        },
+        ai: {
+          executed: false,
+          approved: null,
+          reason: null,
+          raw: null,
+          error: null,
+        },
+      },
     };
   }
 
@@ -70,6 +98,20 @@ export function moderateCommunityPostByRules(
       reason: "提示词内容太短，暂不适合直接公开展示。",
       stage: "rule",
       suggestedStatus: "rejected",
+      detail: {
+        rule: {
+          approved: false,
+          reason: "提示词内容太短，暂不适合直接公开展示。",
+          matchedKeyword: null,
+        },
+        ai: {
+          executed: false,
+          approved: null,
+          reason: null,
+          raw: null,
+          error: null,
+        },
+      },
     };
   }
 
@@ -79,6 +121,20 @@ export function moderateCommunityPostByRules(
       reason: "生成内容太少，建议完善后再分享。",
       stage: "rule",
       suggestedStatus: "rejected",
+      detail: {
+        rule: {
+          approved: false,
+          reason: "生成内容太少，建议完善后再分享。",
+          matchedKeyword: null,
+        },
+        ai: {
+          executed: false,
+          approved: null,
+          reason: null,
+          raw: null,
+          error: null,
+        },
+      },
     };
   }
 
@@ -86,6 +142,20 @@ export function moderateCommunityPostByRules(
     approved: true,
     stage: "rule",
     suggestedStatus: "approved",
+    detail: {
+      rule: {
+        approved: true,
+        reason: null,
+        matchedKeyword: null,
+      },
+      ai: {
+        executed: false,
+        approved: null,
+        reason: null,
+        raw: null,
+        error: null,
+      },
+    },
   };
 }
 
@@ -100,6 +170,20 @@ export async function moderateCommunityPostWithAi(
       reason: "审核服务暂时不可用，作品已进入人工复审队列。",
       stage: "fallback",
       suggestedStatus: "pending",
+      detail: {
+        rule: {
+          approved: true,
+          reason: null,
+          matchedKeyword: null,
+        },
+        ai: {
+          executed: false,
+          approved: null,
+          reason: null,
+          raw: null,
+          error: "缺少 AI_API_KEY，已进入人工复审队列。",
+        },
+      },
     };
   }
 
@@ -139,6 +223,20 @@ export async function moderateCommunityPostWithAi(
         reason: "智能审核暂时不可用，作品已进入人工复审队列。",
         stage: "fallback",
         suggestedStatus: "pending",
+        detail: {
+          rule: {
+            approved: true,
+            reason: null,
+            matchedKeyword: null,
+          },
+          ai: {
+            executed: true,
+            approved: null,
+            reason: null,
+            raw: errorText,
+            error: "上游智能审核接口调用失败。",
+          },
+        },
       };
     }
 
@@ -158,6 +256,20 @@ export async function moderateCommunityPostWithAi(
         reason: "智能审核未返回结果，作品已进入人工复审队列。",
         stage: "fallback",
         suggestedStatus: "pending",
+        detail: {
+          rule: {
+            approved: true,
+            reason: null,
+            matchedKeyword: null,
+          },
+          ai: {
+            executed: true,
+            approved: null,
+            reason: null,
+            raw: null,
+            error: "智能审核未返回结果。",
+          },
+        },
       };
     }
 
@@ -174,6 +286,20 @@ export async function moderateCommunityPostWithAi(
         reason: parsed.reason,
         stage: "ai",
         suggestedStatus: "approved",
+        detail: {
+          rule: {
+            approved: true,
+            reason: null,
+            matchedKeyword: null,
+          },
+          ai: {
+            executed: true,
+            approved: true,
+            reason: parsed.reason ?? null,
+            raw: cleanedContent,
+            error: null,
+          },
+        },
       };
     }
 
@@ -182,6 +308,20 @@ export async function moderateCommunityPostWithAi(
       reason: parsed.reason || "内容暂不适合公开展示。",
       stage: "ai",
       suggestedStatus: "rejected",
+      detail: {
+        rule: {
+          approved: true,
+          reason: null,
+          matchedKeyword: null,
+        },
+        ai: {
+          executed: true,
+          approved: false,
+          reason: parsed.reason || "内容暂不适合公开展示。",
+          raw: cleanedContent,
+          error: null,
+        },
+      },
     };
   } catch (error) {
     console.error("【AI审核异常】:", error);
@@ -190,6 +330,20 @@ export async function moderateCommunityPostWithAi(
       reason: "智能审核异常，作品已进入人工复审队列。",
       stage: "fallback",
       suggestedStatus: "pending",
+      detail: {
+        rule: {
+          approved: true,
+          reason: null,
+          matchedKeyword: null,
+        },
+        ai: {
+          executed: true,
+          approved: null,
+          reason: null,
+          raw: null,
+          error: error instanceof Error ? error.message : "智能审核异常。",
+        },
+      },
     };
   }
 }

@@ -1,25 +1,7 @@
 import { NextResponse } from "next/server";
-
-const AI_API_URL =
-  process.env.AI_API_URL ??
-  "https://token-plan-cn.xiaomimimo.com/v1/chat/completions";
-
-const SYSTEM_PROMPT = `
-你是一个充满童心的少儿编程导师和前端魔法师。
-请根据用户输入的魔法咒语，生成一个可以在浏览器直接运行的单文件 HTML 代码。
-里面必须包含必要的 CSS，并通过 CDN 引入 Tailwind CSS，还要包含 JavaScript 交互。
-界面风格要可爱、充满童趣，宽度必须 100% 适配手机屏幕。
-核心要求：生成的页面内容如果较长，必须允许用户垂直滑动浏览。绝对禁止在 body 或 html 标签上使用 overflow: hidden 或固定 100vh 高度从而阻断用户滚动。
-重要要求：只返回纯 HTML 代码，绝对不要包含任何 Markdown 格式符号（如 \`\`\`html），也不要任何解释性文字。
-`;
-
-const WRITING_SYSTEM_PROMPT = `
-你是一位充满童心、温柔又专业的少儿写作导师。
-请根据用户输入的写作需求，生成适合中小学生阅读和使用的中文写作内容。
-要求语言优美、生动、有画面感，同时保持自然、真诚、易懂。
-如果用户要童话，就写得温暖有想象力；如果用户要诗歌，就写得有节奏和意境；如果用户要演讲稿，就写得自信、清晰、有感染力。
-重要要求：只返回最终的纯文本内容，绝对不要包含 Markdown 代码块、标题符号、解释说明、创作分析或多余前后缀。
-`;
+import { getCurrentUser } from "@/lib/auth";
+import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
+import { consumeCredits } from "@/lib/credits";
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -46,30 +28,65 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.AI_API_KEY) {
+    const resolvedMode = mode === "writing" ? "writing" : "coding";
+    const aiConfig = await resolveAiModeConfig(resolvedMode);
+    const apiKey = process.env[aiConfig.apiKeyEnv];
+    const { creditEnabled, creditCost } = resolveModeCreditPolicy(
+      aiConfig.extraPayload,
+    );
+    const shouldCharge = creditEnabled && creditCost > 0;
+    let remainingCredits: number | undefined;
+
+    if (!aiConfig.isEnabled) {
       return NextResponse.json(
-        { error: "服务端缺少 AI_API_KEY 环境变量。" },
+        { error: "这一项 AI 能力正在维护中，请稍后再试。" },
+        { status: 503 },
+      );
+    }
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
         { status: 500 },
       );
     }
 
-    const resolvedMode = mode === "writing" ? "writing" : "coding";
+    if (shouldCharge) {
+      const currentUser = await getCurrentUser();
 
-    const upstreamResponse = await fetch(AI_API_URL, {
+      if (!currentUser?.user_id) {
+        return NextResponse.json(
+          { error: "请先登录后再使用这一项创作能力。" },
+          { status: 401 },
+        );
+      }
+
+      const creditResult = await consumeCredits(currentUser.user_id, creditCost);
+
+      if (!creditResult?.success) {
+        return NextResponse.json(
+          {
+            error: `魔法币不足，当前剩余 ${creditResult?.remaining ?? 0} 个。`,
+          },
+          { status: 403 },
+        );
+      }
+
+      remainingCredits = creditResult.remaining;
+    }
+
+    const upstreamResponse = await fetch(aiConfig.endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.AI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "mimo-v2.5-pro",
+        model: aiConfig.model,
         messages: [
           {
             role: "system",
-            content:
-              resolvedMode === "writing"
-                ? WRITING_SYSTEM_PROMPT
-                : SYSTEM_PROMPT,
+            content: aiConfig.systemPrompt,
           },
           {
             role: "user",
@@ -102,7 +119,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ code: generatedContent });
+    return NextResponse.json({
+      code: generatedContent,
+      remainingCredits,
+    });
   } catch {
     return NextResponse.json(
       { error: "生成接口暂时出了点小状况，请稍后再试。" },

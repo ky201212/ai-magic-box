@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { marketingNavItems } from "./_components/marketing-nav";
+import { getBrandIdentitySetting, getHomeHeroSetting } from "@/lib/site-config";
 
 function HeroStage() {
   return (
@@ -42,6 +43,10 @@ function HeroStage() {
 export default async function HomePage() {
   const cookieStore = await cookies();
   const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const [heroSetting, brandIdentity] = await Promise.all([
+    getHomeHeroSetting(),
+    getBrandIdentitySetting(),
+  ]);
 
   return (
     <main className="min-h-screen bg-[#080512] text-white">
@@ -57,8 +62,8 @@ export default async function HomePage() {
           <div className="relative z-20 mx-auto flex w-full max-w-[1920px] items-center justify-between px-10 py-7 lg:px-14 xl:px-20">
             <div className="flex items-center gap-4">
               <Image
-                src="/logo.png"
-                alt="小红车魔法工坊"
+                src={brandIdentity.logoUrl}
+                alt={brandIdentity.siteName}
                 width={54}
                 height={54}
                 className="rounded-[18px] shadow-[0_12px_28px_rgba(255,255,255,0.12)]"
@@ -66,10 +71,10 @@ export default async function HomePage() {
               />
               <div>
                 <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">
-                  小红车魔法工坊
+                  {brandIdentity.siteName}
                 </p>
                 <p className="text-[12px] tracking-[0.08em] text-white/40">
-                  下一代儿童AI创造力平台
+                  {brandIdentity.tagline}
                 </p>
               </div>
             </div>
@@ -119,25 +124,25 @@ export default async function HomePage() {
               </div>
 
               <h1 className="mt-10 max-w-none text-[78px] font-black leading-[1.01] tracking-[-0.065em] text-white xl:text-[108px] 2xl:text-[118px]">
-                小红车魔法工坊
+                {heroSetting.title}
                 <span className="mt-5 inline-block pr-3 whitespace-nowrap leading-[1.03] tracking-[-0.05em] bg-gradient-to-r from-[#8de1ff] via-[#f4b9ff] to-[#ffd788] bg-clip-text text-transparent">
-                  共同拥抱AI新时代
+                  {heroSetting.subtitle}
                 </span>
               </h1>
 
               <p className="mt-8 max-w-[620px] text-[19px] leading-9 text-white/60 xl:text-[20px]">
-                把编程、绘画、写作与未来科技体验，变成孩子愿意主动走进去的创造旅程。
+                {heroSetting.description}
               </p>
 
               <div className="mt-12 flex flex-col gap-4 sm:flex-row">
                 <Link
-                  href="/workshop?mode=coding"
+                  href={heroSetting.primaryButtonHref}
                   className="inline-flex items-center justify-center rounded-full bg-[linear-gradient(90deg,#ffbc7c_0%,#ff8fc7_46%,#8974ff_100%)] px-8 py-4 text-[16px] font-semibold text-white shadow-[0_20px_48px_rgba(140,96,255,0.34)] transition hover:-translate-y-0.5"
                 >
-                  开始第一场创作旅程
+                  {heroSetting.primaryButtonLabel}
                 </Link>
                 <div className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/6 px-6 py-4 text-[15px] font-medium text-white/66 backdrop-blur-xl">
-                  面向孩子的AI创造力启蒙
+                  {heroSetting.secondaryBadge}
                 </div>
               </div>
             </div>
