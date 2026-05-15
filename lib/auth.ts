@@ -11,6 +11,7 @@ type CurrentUser = {
   users: {
     id: string;
     phone: string;
+    status?: "active" | "disabled";
   } | null;
 };
 
@@ -93,7 +94,7 @@ export async function setSession(userId: string) {
   const secure = await resolveCookieSecureFlag();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure,
     path: "/",
     maxAge: SESSION_EXPIRES_DAYS * 24 * 60 * 60,
@@ -127,12 +128,18 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
   const { data, error } = await supabaseAdmin
     .from("user_sessions")
-    .select("user_id, users(id, phone)")
+    .select("user_id, users(id, phone, status)")
     .eq("token_hash", tokenHash)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle<CurrentUser>();
 
   if (error || !data) {
+    return null;
+  }
+
+  if (data.users?.status === "disabled") {
+    await supabaseAdmin.from("user_sessions").delete().eq("token_hash", tokenHash);
+    cookieStore.delete(SESSION_COOKIE_NAME);
     return null;
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Image from "next/image";
+import { useMemo, useState, type ChangeEvent } from "react";
 import type { SiteSettingRecord } from "./types";
 
 type SaveStatus = "idle" | "saving" | "success" | "error";
@@ -77,6 +78,8 @@ function createInitialState(settings: SiteSettingRecord[]): SiteFormState {
 export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
   const [formState, setFormState] = useState(() => createInitialState(initialSettings));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [uploadStatus, setUploadStatus] = useState<SaveStatus>("idle");
+  const [uploadMessage, setUploadMessage] = useState("");
 
   const settingMap = useMemo(() => {
     return new Map(initialSettings.map((item) => [item.setting_key, item]));
@@ -87,6 +90,51 @@ export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
       ...current,
       [field]: value,
     }));
+  };
+
+  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setUploadStatus("saving");
+    setUploadMessage("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/admin/upload-logo", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = (await response.json()) as {
+        url?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !data.url) {
+        throw new Error(data.error ?? "Logo 上传失败");
+      }
+
+      handleFieldChange("logoUrl", data.url);
+      setUploadStatus("success");
+      setUploadMessage("Logo 已上传完成，保存站点设置后会全站生效。");
+    } catch (error) {
+      setUploadStatus("error");
+      setUploadMessage(
+        error instanceof Error ? error.message : "Logo 上传失败，请稍后再试。",
+      );
+    } finally {
+      event.target.value = "";
+      window.setTimeout(() => {
+        setUploadStatus("idle");
+        setUploadMessage("");
+      }, 2400);
+    }
   };
 
   const handleSave = async () => {
@@ -254,18 +302,65 @@ export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
               />
             </label>
             <label className="block text-sm font-bold text-slate-600">
-              Logo 图片地址
-              <input
-                value={formState.logoUrl}
-                onChange={(event) => handleFieldChange("logoUrl", event.target.value)}
-                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
-              />
+              Logo 上传
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.16)]">
+                  {uploadStatus === "saving"
+                    ? "上传中"
+                    : uploadStatus === "success"
+                      ? "上传成功"
+                      : uploadStatus === "error"
+                        ? "重新上传"
+                        : "选择 PNG / JPG"}
+                  <input
+                    type="file"
+                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </label>
+                <input
+                  value={formState.logoUrl}
+                  onChange={(event) => handleFieldChange("logoUrl", event.target.value)}
+                  placeholder="也可以直接粘贴已上传的图片地址"
+                  className="h-12 min-w-[260px] flex-1 rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+                />
+              </div>
             </label>
             <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-bold tracking-[0.14em] text-slate-400">当前 Logo 预览</p>
-              <p className="mt-3 text-sm leading-7 text-slate-500">
-                当前填写地址：{formState.logoUrl || "还没有填写"}
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-4">
+                <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-[22px] bg-white shadow-[0_10px_24px_rgba(148,163,184,0.1)]">
+                  {formState.logoUrl ? (
+                    <Image
+                      src={formState.logoUrl}
+                      alt="当前 Logo 预览"
+                      width={80}
+                      height={80}
+                      className="h-full w-full object-cover"
+                      unoptimized
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-slate-400">暂无</span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm leading-7 text-slate-500">
+                    当前地址：{formState.logoUrl || "还没有填写"}
+                  </p>
+                  {uploadMessage && (
+                    <p
+                      className={`mt-2 text-sm font-bold ${
+                        uploadStatus === "error"
+                          ? "text-[#d4557c]"
+                          : "text-[#1c8b5f]"
+                      }`}
+                    >
+                      {uploadMessage}
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </article>

@@ -1,17 +1,6 @@
 import "server-only";
-
-const bannedKeywords = [
-  "赌博",
-  "诈骗",
-  "色情",
-  "暴力",
-  "毒品",
-  "枪支",
-  "自杀",
-  "反动",
-  "恐怖",
-  "违法",
-];
+import { getCommunityReviewSetting } from "@/lib/admin-data";
+import { getAiSecret } from "@/lib/ai-secrets";
 
 type ModerationInput = {
   title: string;
@@ -46,9 +35,13 @@ type AiModerationResponse = {
 };
 
 function buildModerationPrompt(input: ModerationInput) {
+  const defaultInstruction =
+    "请优先保护未成年人社区安全，重点关注是否含有违法违规、血腥暴力、色情低俗、危险模仿、诱导沉迷、辱骂攻击或明显不适合儿童公开展示的内容。";
+
   return [
     "你是一名面向中国青少年产品的社区内容审核助手。",
     "请根据中国法律法规、未成年人保护要求和儿童社区规范，审核下面这份作品内容是否适合公开展示。",
+    defaultInstruction,
     "审核重点：违法违规、暴力血腥、色情低俗、诈骗赌博、极端危险、仇恨攻击、诱导未成年人不当行为、明显不适合儿童的内容。",
     "如果内容适合儿童社区公开展示，返回 approved=true。",
     "如果不适合，返回 approved=false，并用一句简短中文说明原因。",
@@ -65,7 +58,22 @@ export function moderateCommunityPostByRules(
 ): ModerationResult {
   const combinedText = `${input.title}\n${input.prompt}\n${input.previewCode}`.toLowerCase();
 
-  const hitKeyword = bannedKeywords.find((keyword) =>
+  const defaultBlockedKeywords = [
+    "赌博",
+    "诈骗",
+    "色情",
+    "暴力",
+    "毒品",
+    "枪支",
+    "自杀",
+    "反动",
+    "恐怖",
+    "违法",
+  ];
+
+  const blockedKeywords = defaultBlockedKeywords;
+
+  const hitKeyword = blockedKeywords.find((keyword) =>
     combinedText.includes(keyword.toLowerCase()),
   );
 
@@ -162,7 +170,8 @@ export function moderateCommunityPostByRules(
 export async function moderateCommunityPostWithAi(
   input: ModerationInput,
 ): Promise<ModerationResult> {
-  const aiApiKey = process.env.AI_API_KEY;
+  const reviewSetting = await getCommunityReviewSetting().catch(() => null);
+  const aiApiKey = await getAiSecret("AI_API_KEY");
 
   if (!aiApiKey) {
     return {
@@ -208,7 +217,14 @@ export async function moderateCommunityPostWithAi(
           },
           {
             role: "user",
-            content: buildModerationPrompt(input),
+            content: [
+              buildModerationPrompt(input),
+              "",
+              `额外审核要求：${
+                reviewSetting?.aiModerationInstruction ||
+                "请优先保护未成年人社区安全。"
+              }`,
+            ].join("\n"),
           },
         ],
       }),
@@ -349,7 +365,49 @@ export async function moderateCommunityPostWithAi(
 }
 
 export async function moderateCommunityPost(input: ModerationInput) {
-  const ruleResult = moderateCommunityPostByRules(input);
+  const reviewSetting = await getCommunityReviewSetting().catch(() => null);
+  const combinedText = `${input.title}\n${input.prompt}\n${input.previewCode}`.toLowerCase();
+  const blockedKeywords =
+    reviewSetting?.blockedKeywords?.filter(
+      (keyword) => typeof keyword === "string" && keyword.trim().length > 0,
+    ) ?? [
+      "赌博",
+      "诈骗",
+      "色情",
+      "暴力",
+      "毒品",
+      "枪支",
+      "自杀",
+      "反动",
+      "恐怖",
+      "违法",
+    ];
+  const hitKeyword = blockedKeywords.find((keyword) =>
+    combinedText.includes(keyword.toLowerCase()),
+  );
+
+  const ruleResult = hitKeyword
+    ? {
+        approved: false,
+        reason: `内容包含敏感词：${hitKeyword}`,
+        stage: "rule" as const,
+        suggestedStatus: "rejected" as const,
+        detail: {
+          rule: {
+            approved: false,
+            reason: `内容包含敏感词：${hitKeyword}`,
+            matchedKeyword: hitKeyword,
+          },
+          ai: {
+            executed: false,
+            approved: null,
+            reason: null,
+            raw: null,
+            error: null,
+          },
+        },
+      }
+    : moderateCommunityPostByRules(input);
 
   if (!ruleResult.approved) {
     return ruleResult;

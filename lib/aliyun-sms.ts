@@ -65,12 +65,5 @@ export async function sendVerificationSms(
     );
   }
 
-  console.log("【阿里云短信发送成功】:", {
-    phone,
-    requestId: requestId ?? null,
-    bizId: bizId ?? null,
-    statusCode: response.statusCode ?? null,
-  });
-
   return response;
 }

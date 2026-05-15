@@ -125,6 +125,51 @@ body {
   }
 }
 
+@keyframes homeSweep {
+  0% {
+    transform: translate3d(-8%, 0, 0) rotate(-8deg);
+  }
+
+  50% {
+    transform: translate3d(8%, -10px, 0) rotate(-8deg);
+  }
+
+  100% {
+    transform: translate3d(-8%, 8px, 0) rotate(-8deg);
+  }
+}
+
+@keyframes homeShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 220% 50%;
+  }
+}
+
+@keyframes homeButtonGlow {
+  0%,
+  100% {
+    box-shadow: 0 24px 54px rgba(118, 139, 255, 0.24);
+  }
+
+  50% {
+    box-shadow: 0 28px 68px rgba(244, 158, 198, 0.3);
+  }
+}
+
+@keyframes homeCardShine {
+  0% {
+    background-position: -180% 0;
+  }
+
+  100% {
+    background-position: 180% 0;
+  }
+}
+
 .aurora-drift {
   animation: auroraDrift 18s ease-in-out infinite alternate;
 }
@@ -151,4 +196,58 @@ body {
 
 .drift-wide {
   animation: driftWide 14s ease-in-out infinite;
+}
+
+.home-grid {
+  background-image:
+    linear-gradient(rgba(104, 132, 214, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(104, 132, 214, 0.12) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.9) 1px, transparent 1px);
+  background-position:
+    0 0,
+    0 0,
+    10px 10px;
+  background-size:
+    44px 44px,
+    44px 44px,
+    22px 22px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 82%);
+}
+
+.home-sweep {
+  animation: homeSweep 16s ease-in-out infinite;
+}
+
+.home-gradient-text {
+  background-image: linear-gradient(90deg, #5f91ff, #d971b4, #f3b758, #6f9dff);
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: homeShimmer 8s linear infinite;
+}
+
+.home-shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.62),
+    rgba(232, 241, 255, 0.9),
+    rgba(255, 239, 248, 0.88),
+    rgba(255, 255, 255, 0.62)
+  );
+  background-size: 220% 100%;
+  animation: homeShimmer 9s linear infinite;
+}
+
+.home-button-glow {
+  animation: homeButtonGlow 4.8s ease-in-out infinite;
+}
+
+.home-card-shine {
+  background-image:
+    linear-gradient(115deg, transparent 0%, transparent 36%, rgba(255, 255, 255, 0.8) 50%, transparent 64%, transparent 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.78));
+  background-size:
+    220% 100%,
+    100% 100%;
+  animation: homeCardShine 8s ease-in-out infinite;
 }

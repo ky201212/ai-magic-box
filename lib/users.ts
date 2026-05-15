@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 type UserRow = {
   id: string;
   phone: string;
+  status?: "active" | "disabled";
 };
 
 type UserInsertPayload = {
@@ -15,7 +16,7 @@ export async function ensureUserByPhone(phone: string) {
 
   const { data: existingUser, error: fetchError } = await supabaseAdmin
     .from("users")
-    .select("id, phone")
+    .select("id, phone, status")
     .eq("phone", phone)
     .maybeSingle<UserRow>();
 
@@ -32,7 +33,7 @@ export async function ensureUserByPhone(phone: string) {
   const { data: insertedUser, error: insertError } = await supabaseAdmin
     .from("users")
     .insert(insertPayload as never)
-    .select("id, phone")
+    .select("id, phone, status")
     .single<UserRow>();
 
   if (insertError) {

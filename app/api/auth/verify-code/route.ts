@@ -4,8 +4,10 @@ import { ensureUserCredits } from "@/lib/credits";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { hashOtpCode, setSession } from "@/lib/auth";
 import { normalizeChinaPhone } from "@/lib/phone";
+import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 const MAX_VERIFY_ATTEMPTS = 5;
+const MAX_VERIFY_PER_IP_PER_10_MINUTES = 20;
 
 type PhoneOtpRow = {
   phone: string;
@@ -20,6 +22,20 @@ type PhoneOtpUpdatePayload = {
 
 export async function POST(request: Request) {
   try {
+    const ip = getRequestIp(request);
+    const ipRateLimit = consumeRateLimit({
+      key: `auth:verify-code:${ip}`,
+      limit: MAX_VERIFY_PER_IP_PER_10_MINUTES,
+      windowMs: 10 * 60 * 1000,
+    });
+
+    if (!ipRateLimit.allowed) {
+      return NextResponse.json(
+        { error: `尝试太频繁了，请 ${ipRateLimit.retryAfterSeconds} 秒后再试。` },
+        { status: 429 },
+      );
+    }
+
     const { phone, code } = (await request.json()) as {
       phone?: string;
       code?: string;
@@ -86,6 +102,14 @@ export async function POST(request: Request) {
     }
 
     const user = await ensureUserByPhone(normalizedPhone);
+
+    if (user.status === "disabled") {
+      return NextResponse.json(
+        { error: "该账号已被停用，请联系管理员处理。" },
+        { status: 403 },
+      );
+    }
+
     await ensureUserCredits(user.id);
     await setSession(user.id);
 

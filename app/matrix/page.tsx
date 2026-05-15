@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { marketingNavItems } from "../_components/marketing-nav";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 
 const matrixCards = [
   {
@@ -48,6 +49,7 @@ const matrixCards = [
 export default async function MatrixPage() {
   const cookieStore = await cookies();
   const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const brandIdentity = await getBrandIdentitySetting();
 
   return (
     <main className="min-h-screen bg-[#080512] text-white">
@@ -61,8 +63,8 @@ export default async function MatrixPage() {
           <header className="flex items-center justify-between">
             <Link href="/" className="flex items-center gap-4">
               <Image
-                src="/logo.png"
-                alt="小红车魔法工坊"
+                src={brandIdentity.logoUrl}
+                alt={brandIdentity.siteName}
                 width={54}
                 height={54}
                 className="rounded-[18px]"
@@ -70,10 +72,10 @@ export default async function MatrixPage() {
               />
               <div>
                 <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">
-                  小红车魔法工坊
+                  {brandIdentity.siteName}
                 </p>
                 <p className="text-[12px] tracking-[0.08em] text-white/40">
-                  下一代儿童AI创造力平台
+                  {brandIdentity.tagline}
                 </p>
               </div>
             </Link>

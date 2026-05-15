@@ -11,6 +11,38 @@ type RouteContext = {
   }>;
 };
 
+export async function GET(_request: Request, context: RouteContext) {
+  const { error, adminContext } = await requireAdminContext();
+
+  if (error || !adminContext) {
+    return error;
+  }
+
+  const permissionError = requirePermission(adminContext, "user_management");
+
+  if (permissionError) {
+    return permissionError;
+  }
+
+  try {
+    const { userId } = await context.params;
+    const user = await getAdminUserById(userId);
+
+    if (!user) {
+      return NextResponse.json({ error: "没有找到这个用户。" }, { status: 404 });
+    }
+
+    return NextResponse.json({ user });
+  } catch (requestError) {
+    console.error("【后台用户详情读取失败】:", requestError);
+
+    return NextResponse.json(
+      { error: "用户详情读取失败，请稍后再试。" },
+      { status: 500 },
+    );
+  }
+}
+
 export async function PATCH(request: Request, context: RouteContext) {
   const { error, adminContext } = await requireAdminContext();
 

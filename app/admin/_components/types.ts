@@ -31,17 +31,79 @@ export type AiModeConfigRecord = {
   updated_at?: string;
 };
 
+export type AiModelPresetRecord = {
+  id: string;
+  mode_key: string;
+  label: string;
+  provider: string;
+  endpoint_url: string;
+  api_key_env: string;
+  model: string;
+  description: string;
+  badge: string;
+  image_size?: string;
+};
+
+export type AiSecretStatusRecord = {
+  envName: string;
+  available: boolean;
+  source: "database" | "environment" | "missing";
+  updatedAt: string | null;
+};
+
+export type AiSecretAuditRecord = {
+  id: string;
+  envName: string;
+  action: "save" | "delete";
+  actorUserId: string;
+  actorDisplayName: string;
+  actorPhone: string;
+  createdAt: string;
+};
+
+export type AiSecretSecuritySummary = {
+  masterKeySource: "dedicated" | "fallback" | "missing";
+  storageEncryptionEnabled: boolean;
+  warningMessage: string | null;
+};
+
+export type AiModelOptionsState = {
+  models: string[];
+  endpoint: string;
+  warning: string;
+  status: "idle" | "loading" | "success" | "error";
+};
+
+export type CommunityReviewSettingRecord = {
+  aiApprovalMode: "auto_publish" | "manual_review";
+  aiModerationInstruction: string;
+  blockedKeywords: string[];
+  lockManualApproveAfterAiReject: boolean;
+};
+
 export type AdminCommunityPostRecord = {
   id: string;
   user_id: string;
   title: string;
   prompt: string;
   preview_image_url: string;
+  preview_code?: string;
+  user_phone: string | null;
+  user_nickname: string | null;
+  user_display_name: string | null;
   moderation_status: "pending" | "approved" | "rejected";
   moderation_reason: string | null;
   moderation_stage: "rule" | "ai" | "fallback" | "manual";
   moderation_detail: Record<string, unknown>;
   is_featured: boolean;
+  like_count?: number;
+  view_count?: number;
+  share_count?: number;
+  category?: string;
+  manual_sort_order?: number;
+  creator_score?: number;
+  manual_creator_rank?: number | null;
+  is_creator_star?: boolean;
   created_at: string;
   reviewed_at: string | null;
 };

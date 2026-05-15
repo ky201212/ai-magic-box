@@ -46,6 +46,10 @@ function parseBootstrapPhones() {
     .filter((phone): phone is string => Boolean(phone));
 }
 
+export function isBootstrapAdminPhone(phone: string) {
+  return parseBootstrapPhones().includes(normalizeChinaPhone(phone) ?? "");
+}
+
 async function ensureBootstrapAdmin(userId: string, phone: string) {
   const allowedPhones = parseBootstrapPhones();
 
@@ -91,6 +95,9 @@ export async function getAdminContext(): Promise<AdminContext | null> {
   }
 
   const supabaseAdmin = getSupabaseAdmin();
+  const bootstrapAdminRecord = isBootstrapAdminPhone(currentUser.users.phone)
+    ? await ensureBootstrapAdmin(currentUser.user_id, currentUser.users.phone)
+    : null;
 
   const { data, error } = await supabaseAdmin
     .from("admin_users")
@@ -102,7 +109,10 @@ export async function getAdminContext(): Promise<AdminContext | null> {
     throw error;
   }
 
-  const adminRecord = data ?? (await ensureBootstrapAdmin(currentUser.user_id, currentUser.users.phone));
+  const adminRecord =
+    bootstrapAdminRecord ??
+    data ??
+    (await ensureBootstrapAdmin(currentUser.user_id, currentUser.users.phone));
 
   if (!adminRecord?.is_active) {
     return null;
@@ -117,6 +127,26 @@ export async function getAdminContext(): Promise<AdminContext | null> {
       `管理员${currentUser.users.phone.slice(-4)}`,
     permissions: adminRecord.permissions ?? [],
   };
+}
+
+export function requireAiSecretManagerPermission(
+  adminContext: AdminContext | null,
+) {
+  if (!adminContext) {
+    return NextResponse.json({ error: "缺少管理员上下文。" }, { status: 403 });
+  }
+
+  if (
+    adminContext.role === "super_admin" ||
+    hasAdminPermission(adminContext, "site_settings")
+  ) {
+    return null;
+  }
+
+  return NextResponse.json(
+    { error: "当前管理员账号没有管理或调用 AI 密钥的权限。" },
+    { status: 403 },
+  );
 }
 
 export async function requireAdminContext() {

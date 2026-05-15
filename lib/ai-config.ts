@@ -59,6 +59,63 @@ const modeFallbacks: Record<
   },
 };
 
+function ensureAbsoluteEndpoint(endpointUrl: string, fallbackEndpoint: string) {
+  const trimmedEndpoint = endpointUrl.trim();
+
+  if (!trimmedEndpoint) {
+    return fallbackEndpoint;
+  }
+
+  if (
+    trimmedEndpoint.startsWith("http://") ||
+    trimmedEndpoint.startsWith("https://")
+  ) {
+    return trimmedEndpoint;
+  }
+
+  return fallbackEndpoint;
+}
+
+function resolvePaintingEndpoint(endpointUrl: string) {
+  const fallbackEndpoint = modeFallbacks.painting.endpointUrl;
+  const absoluteEndpoint = ensureAbsoluteEndpoint(endpointUrl, fallbackEndpoint);
+  const normalizedEndpoint = absoluteEndpoint.toLowerCase();
+
+  if (normalizedEndpoint.endsWith("/images/generations")) {
+    return absoluteEndpoint;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1")) {
+    return `${absoluteEndpoint}/images/generations`;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1/")) {
+    return `${absoluteEndpoint}images/generations`;
+  }
+
+  return absoluteEndpoint;
+}
+
+function resolveTranscribeEndpoint(endpointUrl: string) {
+  const fallbackEndpoint = modeFallbacks.transcribe.endpointUrl;
+  const absoluteEndpoint = ensureAbsoluteEndpoint(endpointUrl, fallbackEndpoint);
+  const normalizedEndpoint = absoluteEndpoint.toLowerCase();
+
+  if (normalizedEndpoint.endsWith("/audio/transcriptions")) {
+    return absoluteEndpoint;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1")) {
+    return `${absoluteEndpoint}/audio/transcriptions`;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1/")) {
+    return `${absoluteEndpoint}audio/transcriptions`;
+  }
+
+  return absoluteEndpoint;
+}
+
 export async function resolveAiModeConfig(
   modeKey: "coding" | "writing" | "painting" | "transcribe",
 ): Promise<ResolvedAiModeConfig> {
@@ -76,7 +133,12 @@ export async function resolveAiModeConfig(
 
     return {
       modeKey,
-      endpointUrl: dbConfig.endpoint_url,
+      endpointUrl:
+        modeKey === "painting"
+          ? resolvePaintingEndpoint(dbConfig.endpoint_url)
+          : modeKey === "transcribe"
+            ? resolveTranscribeEndpoint(dbConfig.endpoint_url)
+            : ensureAbsoluteEndpoint(dbConfig.endpoint_url, fallback.endpointUrl),
       apiKeyEnv: dbConfig.api_key_env,
       model: dbConfig.model,
       systemPrompt: dbConfig.system_prompt,

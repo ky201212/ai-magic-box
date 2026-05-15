@@ -1,330 +1,271 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { ApprovedCommunityPost } from "@/lib/community";
+import {
+  COMMUNITY_CATEGORY_ACCENT,
+  COMMUNITY_CATEGORY_DESCRIPTIONS,
+  COMMUNITY_CATEGORY_LABELS,
+} from "@/lib/community-config";
 
 type CommunityClientProps = {
   isLoggedIn: boolean;
+  initialPosts: CommunityPost[];
+  initialOverview: CommunityOverview | null;
 };
 
-type CommunityTab =
-  | "精选作品"
-  | "最新作品"
-  | "最多点赞"
-  | "创意编程"
-  | "绘画设计"
-  | "故事写作"
-  | "视频动画"
-  | "音乐创作"
-  | "科学实验";
-
-type EnrichedPost = ApprovedCommunityPost & {
-  authorName: string;
-  avatarColor: string;
+type CommunityPost = {
+  id: string;
+  user_id: string;
+  title: string;
+  prompt: string;
+  preview_image_url: string;
+  like_count: number;
+  view_count: number;
+  share_count: number;
   category: string;
-  tag: string;
-  commentCount: number;
+  created_at: string;
+  is_featured: boolean;
+  manual_sort_order: number;
+  creator_score: number;
+  manual_creator_rank: number | null;
+  is_creator_star: boolean;
+  users: {
+    id: string;
+    phone: string;
+    nickname: string | null;
+  } | null;
+  user_profiles: {
+    user_id: string;
+    display_name: string | null;
+    avatar_color: string | null;
+  } | null;
 };
 
-type CreatorSummary = {
-  userId: string;
+type CommunityCreator = {
+  user_id: string;
   name: string;
-  avatarColor: string;
-  works: number;
-  likes: number;
+  avatar_color: string | null;
+  works_count: number;
+  total_likes: number;
+  total_views: number;
+  total_shares: number;
   categories: string[];
+  manual_rank: number | null;
+  creator_score: number;
+  is_creator_star: boolean;
 };
 
-const communityTabs: CommunityTab[] = [
+type CommunityOverview = {
+  totalWorks: number;
+  totalCreators: number;
+  totalLikes: number;
+  totalViews: number;
+  totalShares: number;
+  displayTotalLikes: number;
+  activeCreators: CommunityCreator[];
+  creatorStars: CommunityCreator[];
+};
+
+type CommunityTab = "精选作品" | "最新作品" | "最多点赞" | (typeof COMMUNITY_CATEGORY_LABELS)[number];
+
+const tabs: CommunityTab[] = [
   "精选作品",
   "最新作品",
   "最多点赞",
-  "创意编程",
-  "绘画设计",
-  "故事写作",
-  "视频动画",
-  "音乐创作",
-  "科学实验",
+  ...COMMUNITY_CATEGORY_LABELS,
 ];
 
-const categoryMap = {
-  创意编程: ["程序", "编程", "互动", "按钮", "小游戏", "任务", "机器人", "科学"],
-  绘画设计: ["绘画", "插画", "海报", "设计", "颜色", "画", "风景"],
-  故事写作: ["故事", "童话", "小说", "日记", "冒险", "剧本", "写作"],
-  视频动画: ["视频", "动画", "镜头", "短片", "剪辑"],
-  音乐创作: ["音乐", "旋律", "节奏", "钢琴", "乐曲", "唱"],
-  科学实验: ["实验", "火山", "电路", "物理", "化学", "观察"],
-} as const;
-
-const categoryAccent: Record<string, string> = {
-  创意编程: "精选",
-  绘画设计: "静态",
-  故事写作: "故事",
-  视频动画: "推荐",
-  音乐创作: "新声",
-  科学实验: "探索",
+const gradientByCategory: Record<string, string> = {
+  创意编程: "from-[#718bff] via-[#8ddaff] to-[#c6f3ff]",
+  绘画设计: "from-[#ff8eca] via-[#ffb8dc] to-[#ffe2f0]",
+  故事写作: "from-[#8277ff] via-[#b9c8ff] to-[#edf1ff]",
+  视频动画: "from-[#ffad83] via-[#ffc66d] to-[#fff0bf]",
+  音乐创作: "from-[#66c7ff] via-[#8ddaff] to-[#ddf8ff]",
+  科学实验: "from-[#8f7dff] via-[#ff9bd3] to-[#ffe4f2]",
 };
-
-const categoryGradients: Record<string, string> = {
-  创意编程: "from-[#13235c] via-[#3a37b7] to-[#5fd2ff]",
-  绘画设计: "from-[#371854] via-[#7a35bc] to-[#ff93d1]",
-  故事写作: "from-[#1f255c] via-[#5344d4] to-[#b2c7ff]",
-  视频动画: "from-[#412053] via-[#8d43cc] to-[#ffb980]",
-  音乐创作: "from-[#0d2850] via-[#2657bf] to-[#78deff]",
-  科学实验: "from-[#2b184f] via-[#6840cf] to-[#ffb273]",
-};
-
-const categoryDescriptions: Record<string, string> = {
-  创意编程: "把互动逻辑、小游戏和科普机关做成能玩的作品。",
-  绘画设计: "用色彩、构图和想象力把一个世界画出来。",
-  故事写作: "从一句灵感展开成完整角色、情节和结尾。",
-  视频动画: "让画面、镜头和节奏串成一个可以观看的故事。",
-  音乐创作: "把旋律、节拍和氛围感做成自己的主题曲。",
-  科学实验: "把观察、猜想和实验过程变成可分享的小项目。",
-};
-
-const rankingPalette = ["#5b7cff", "#7f5cff", "#ff8f7c", "#4dc2ff", "#a855f7"];
-
-function maskPhone(phone?: string | null) {
-  if (!phone) {
-    return "小创作者";
-  }
-
-  return phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
-}
 
 function formatCount(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function getAvatarInitial(name: string) {
-  return name.trim().slice(0, 1) || "创";
-}
-
-function getAvatarColor(index: number, fallback?: string | null) {
-  return fallback || rankingPalette[index % rankingPalette.length];
-}
-
-function inferCategory(post: ApprovedCommunityPost) {
-  const source = `${post.title} ${post.prompt}`.toLowerCase();
-
-  for (const [label, keywords] of Object.entries(categoryMap)) {
-    if (keywords.some((keyword) => source.includes(keyword.toLowerCase()))) {
-      return label;
-    }
-  }
-
-  return "创意编程";
-}
-
-function formatDate(date: string) {
+function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(date));
+  }).format(new Date(value));
+}
+
+function authorName(post: CommunityPost) {
+  return (
+    post.user_profiles?.display_name ||
+    post.users?.nickname ||
+    post.users?.phone ||
+    "小创作者"
+  );
+}
+
+function authorInitial(name: string) {
+  return name.trim().slice(0, 1) || "创";
 }
 
 export function CommunityClient({
   isLoggedIn,
+  initialPosts,
+  initialOverview,
 }: CommunityClientProps) {
-  const [posts, setPosts] = useState<ApprovedCommunityPost[]>([]);
-  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [posts, setPosts] = useState<CommunityPost[]>(initialPosts);
+  const [overview, setOverview] = useState<CommunityOverview | null>(initialOverview);
   const [activeTab, setActiveTab] = useState<CommunityTab>("精选作品");
   const [searchText, setSearchText] = useState("");
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(
+    initialPosts.length === 0 || initialOverview === null,
+  );
 
   useEffect(() => {
     let mounted = true;
 
-    const loadPosts = async () => {
+    const loadCommunity = async () => {
       try {
-        const response = await fetch("/api/community/posts", {
-          cache: "no-store",
-        });
-        const data = (await response.json()) as {
-          posts?: ApprovedCommunityPost[];
+        const [postsResponse, overviewResponse] = await Promise.all([
+          fetch("/api/community/posts", { cache: "no-store" }),
+          fetch("/api/community/overview", { cache: "no-store" }),
+        ]);
+
+        const postsPayload = (await postsResponse.json()) as { posts?: CommunityPost[] };
+        const overviewPayload = (await overviewResponse.json()) as {
+          overview?: CommunityOverview;
         };
 
-        if (!response.ok || !mounted) {
+        if (!mounted) {
           return;
         }
 
-        setPosts(data.posts ?? []);
-      } catch {
-        if (mounted) {
-          window.console.error("成长社区作品加载失败");
-        }
+        setPosts(postsPayload.posts ?? []);
+        setOverview(overviewPayload.overview ?? null);
+      } catch (error) {
+        console.error("【成长社区读取失败】:", error);
       } finally {
         if (mounted) {
-          setIsLoadingPosts(false);
+          setIsLoading(false);
         }
       }
     };
 
-    void loadPosts();
+    if (!initialPosts.length || !initialOverview) {
+      void loadCommunity();
+      return;
+    }
+
+    setIsLoading(false);
 
     return () => {
       mounted = false;
     };
-  }, []);
-
-  const totalWorks = posts.length;
-  const totalCreators = new Set(posts.map((post) => post.user_id)).size;
-  const totalLikes = posts.reduce((sum, post) => sum + (post.like_count ?? 0), 0);
-
-  const enrichedPosts = useMemo<EnrichedPost[]>(() => {
-    return posts.map((post, index) => {
-      const authorName =
-        post.user_profiles?.display_name || maskPhone(post.users?.phone);
-      const category = inferCategory(post);
-
-      return {
-        ...post,
-        authorName,
-        avatarColor: getAvatarColor(index, post.user_profiles?.avatar_color),
-        category,
-        tag: categoryAccent[category],
-        commentCount: Math.max(8, Math.floor((post.like_count ?? 0) / 2) + 6),
-      };
-    });
-  }, [posts]);
-
-  const creators = useMemo<CreatorSummary[]>(() => {
-    const summary = new Map<string, CreatorSummary>();
-
-    enrichedPosts.forEach((post) => {
-      const existing = summary.get(post.user_id);
-
-      if (existing) {
-        existing.works += 1;
-        existing.likes += post.like_count ?? 0;
-        if (!existing.categories.includes(post.category)) {
-          existing.categories.push(post.category);
-        }
-        return;
-      }
-
-      summary.set(post.user_id, {
-        userId: post.user_id,
-        name: post.authorName,
-        avatarColor: post.avatarColor,
-        works: 1,
-        likes: post.like_count ?? 0,
-        categories: [post.category],
-      });
-    });
-
-    return [...summary.values()].sort(
-      (a, b) => b.works - a.works || b.likes - a.likes,
-    );
-  }, [enrichedPosts]);
-
-  const rankingUsers = useMemo(() => {
-    return [...creators].sort((a, b) => b.likes - a.likes || b.works - a.works);
-  }, [creators]);
+  }, [initialOverview, initialPosts.length]);
 
   const filteredPosts = useMemo(() => {
-    let nextPosts = [...enrichedPosts];
+    let next = [...posts];
 
     if (activeTab === "最新作品") {
-      nextPosts.sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      next.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
     } else if (activeTab === "最多点赞") {
-      nextPosts.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0));
+      next.sort((a, b) => b.like_count - a.like_count || b.view_count - a.view_count);
     } else if (activeTab !== "精选作品") {
-      nextPosts = nextPosts.filter((post) => post.category === activeTab);
+      next = next.filter((post) => post.category === activeTab);
     } else {
-      nextPosts.sort(
+      next.sort(
         (a, b) =>
-          (b.like_count ?? 0) - (a.like_count ?? 0) ||
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+          Number(b.is_featured) - Number(a.is_featured) ||
+          a.manual_sort_order - b.manual_sort_order ||
+          b.like_count - a.like_count ||
+          b.view_count - a.view_count,
       );
     }
 
     if (selectedCreatorId) {
-      nextPosts = nextPosts.filter((post) => post.user_id === selectedCreatorId);
+      next = next.filter((post) => post.user_id === selectedCreatorId);
     }
 
     const keyword = searchText.trim().toLowerCase();
     if (keyword) {
-      nextPosts = nextPosts.filter((post) => {
-        return (
-          post.title.toLowerCase().includes(keyword) ||
-          post.prompt.toLowerCase().includes(keyword) ||
-          post.authorName.toLowerCase().includes(keyword) ||
-          post.category.toLowerCase().includes(keyword)
-        );
-      });
+      next = next.filter((post) =>
+        [
+          post.title,
+          post.prompt,
+          post.category,
+          authorName(post),
+          post.users?.phone ?? "",
+        ]
+          .join("\n")
+          .toLowerCase()
+          .includes(keyword),
+      );
     }
 
-    return nextPosts;
-  }, [activeTab, enrichedPosts, searchText, selectedCreatorId]);
+    return next;
+  }, [activeTab, posts, searchText, selectedCreatorId]);
 
-  const heroPost = filteredPosts[0] || enrichedPosts[0];
-  const selectedCreator =
-    creators.find((creator) => creator.userId === selectedCreatorId) ?? null;
+  const creatorList = overview?.activeCreators ?? [];
+  const creatorStars = overview?.creatorStars ?? [];
+  const statCards = [
+    ["已有作品", overview?.totalWorks ?? posts.length],
+    ["创作者", overview?.totalCreators ?? 0],
+    ["累计点赞", overview?.displayTotalLikes ?? 0],
+    ["总浏览", overview?.totalViews ?? 0],
+    ["总分享", overview?.totalShares ?? 0],
+  ];
 
   return (
     <>
       <section className="pt-12">
-        <div className="max-w-[1380px]">
-          <div className="inline-flex rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-semibold tracking-[0.12em] text-white/72">
+        <div className="max-w-[1440px]">
+          <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
             成长社区
           </div>
-
-          <div className="mt-8 max-w-[1240px]">
-            <h1 className="text-[64px] font-black leading-[0.96] tracking-[-0.07em] text-white xl:text-[88px] 2xl:text-[104px]">
-              <span className="block">每一个作品</span>
-              <span className="mt-3 block xl:mt-4">都值得被看见</span>
-            </h1>
-            <div className="mt-6 h-[3px] w-24 rounded-full bg-[linear-gradient(90deg,rgba(167,108,255,0.9),rgba(97,208,255,0.9))]" />
-          </div>
-
-          <p className="mt-9 max-w-[38ch] text-[18px] leading-[2.15] text-white/60 xl:max-w-[40ch]">
-            孩子们的每一次创作，都是让世界看到的光芒。在这里分享作品、收获反馈、认识同龄创作者，让成长被真正看见。
-          </p>
-
-          <div className="mt-12 grid max-w-[980px] gap-4 sm:grid-cols-3">
-            <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(109,79,177,0.18),rgba(255,255,255,0.04))] px-6 py-6 backdrop-blur-xl">
-              <p className="text-sm text-white/46">已有作品</p>
-              <p className="mt-3 text-[34px] font-black tracking-[-0.05em] text-white">
-                {formatCount(totalWorks || 12824)}+
-              </p>
-            </div>
-            <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(109,79,177,0.18),rgba(255,255,255,0.04))] px-6 py-6 backdrop-blur-xl">
-              <p className="text-sm text-white/46">创作者</p>
-              <p className="mt-3 text-[34px] font-black tracking-[-0.05em] text-white">
-                {formatCount(totalCreators || 8326)}+
-              </p>
-            </div>
-            <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(109,79,177,0.18),rgba(255,255,255,0.04))] px-6 py-6 backdrop-blur-xl">
-              <p className="text-sm text-white/46">累计点赞</p>
-              <p className="mt-3 text-[34px] font-black tracking-[-0.05em] text-white">
-                {formatCount(totalLikes || 48210)}+
-              </p>
-            </div>
-          </div>
+          <h1 className="community-art-title mt-9 flex flex-col gap-5 font-black leading-none tracking-normal text-[#151f3d] sm:gap-6 lg:gap-7 xl:gap-8">
+            <span className="community-art-title-line block text-[58px] sm:text-[82px] lg:text-[104px] xl:text-[126px] 2xl:text-[142px]">
+              每一个作品
+            </span>
+            <span className="community-art-title-line home-gradient-text block pl-1 text-[68px] sm:pl-2 sm:text-[98px] lg:pl-4 lg:text-[126px] xl:pl-6 xl:text-[154px] 2xl:text-[176px]">
+              都值得被看见
+            </span>
+          </h1>
         </div>
       </section>
 
-      <section className="mt-8">
-        <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-end 2xl:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            {communityTabs.map((tab) => (
+      <section className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {statCards.map(([label, value]) => (
+          <div
+            key={label}
+            className="relative overflow-hidden rounded-[24px] border border-white/80 bg-white/74 px-5 py-5 shadow-[0_14px_42px_rgba(91,111,185,0.12)] backdrop-blur-2xl"
+          >
+            <div className="absolute right-[-18px] top-[-18px] h-20 w-20 rounded-full bg-[#e9ddff]" />
+            <p className="relative text-sm font-semibold text-[#7380a4]">{label}</p>
+            <p className="relative mt-3 text-[32px] font-black tracking-[-0.05em] text-[#17213f]">
+              {formatCount(Number(value))}
+            </p>
+          </div>
+        ))}
+      </section>
+
+      <section className="mt-10">
+        <div className="flex flex-col gap-5 rounded-[28px] border border-white/80 bg-white/76 p-5 shadow-[0_20px_60px_rgba(91,111,185,0.14)] backdrop-blur-2xl xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap gap-2.5">
+            {tabs.map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => setActiveTab(tab)}
-                className={`rounded-full px-4 py-2.5 text-[15px] font-medium transition ${
+                className={`rounded-full border px-4 py-2.5 text-[14px] font-black transition ${
                   activeTab === tab
-                    ? "border border-[#7251c2] bg-[linear-gradient(180deg,rgba(102,59,194,0.34),rgba(255,255,255,0.04))] text-white shadow-[0_10px_24px_rgba(91,55,190,0.22)]"
-                    : "border border-white/8 bg-white/[0.03] text-white/58 hover:text-white"
+                    ? "border-[#8c82ff] bg-[#625cff] text-white shadow-[0_12px_24px_rgba(98,92,255,0.2)]"
+                    : "border-[#dce5ff] bg-white/76 text-[#657195] hover:border-[#bccaff] hover:text-[#263252]"
                 }`}
               >
                 {tab}
@@ -332,460 +273,336 @@ export function CommunityClient({
             ))}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <label className="flex min-w-[360px] items-center gap-3 rounded-full border border-white/10 bg-[rgba(21,14,40,0.92)] px-5 py-3 text-sm text-white/64 shadow-[0_10px_28px_rgba(0,0,0,0.18)]">
-              <span className="text-white/42">⌕</span>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label className="flex min-w-0 flex-1 items-center gap-3 rounded-full border border-[#dce5ff] bg-white px-5 py-3 text-sm text-[#687394] sm:min-w-[340px] xl:min-w-[420px]">
+              <span className="text-[#9aa5c5]">⌕</span>
               <input
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
-                placeholder="搜索作品标题、提示词、创作者"
-                className="w-full bg-transparent text-white placeholder:text-white/34 focus:outline-none"
+                placeholder="搜索作品、提示词、创作者或手机号"
+                className="w-full bg-transparent text-[#273252] placeholder:text-[#9ca7c5] focus:outline-none"
               />
             </label>
             <Link
               href="/workshop?mode=coding"
-              className="inline-flex items-center justify-center rounded-full bg-[linear-gradient(90deg,#7b39ff_0%,#a24dff_100%)] px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(123,57,255,0.34)] transition hover:brightness-110"
+              className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[#ff8fbd] px-5 text-sm font-black text-white shadow-[0_12px_28px_rgba(255,143,189,0.22)] transition hover:bg-[#f178ad]"
             >
               上传作品
             </Link>
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <span className="rounded-full border border-[#7251c2] bg-[linear-gradient(180deg,rgba(102,59,194,0.34),rgba(255,255,255,0.04))] px-4 py-2 text-sm text-white">
-            当前分类：{activeTab}
-          </span>
-          {selectedCreator && (
-            <button
-              type="button"
-              onClick={() => setSelectedCreatorId(null)}
-              className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/76"
-            >
-              创作者：@{selectedCreator.name} ×
-            </button>
-          )}
-          {searchText.trim() && (
-            <button
-              type="button"
-              onClick={() => setSearchText("")}
-              className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/76"
-            >
-              搜索：{searchText} ×
-            </button>
-          )}
-        </div>
-
-        <div className="mt-8 grid gap-8 2xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="space-y-8">
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {isLoadingPosts ? (
-                Array.from({ length: 8 }).map((_, index) => (
-                  <div
-                    key={`community-skeleton-${index}`}
-                    className="overflow-hidden rounded-[28px] border border-[#44306f] bg-[linear-gradient(180deg,rgba(22,14,42,0.96),rgba(14,9,28,0.98))] shadow-[0_18px_46px_rgba(0,0,0,0.24)]"
-                  >
-                    <div className="aspect-[1.18/1] animate-pulse bg-white/8" />
-                    <div className="space-y-4 px-5 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="h-11 w-11 rounded-full bg-white/8" />
-                        <div className="flex-1 space-y-2">
-                          <div className="h-5 w-3/4 rounded-full bg-white/8" />
-                          <div className="h-4 w-1/2 rounded-full bg-white/6" />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="h-4 rounded-full bg-white/8" />
-                        <div className="h-4 rounded-full bg-white/6" />
-                        <div className="h-4 w-2/3 rounded-full bg-white/6" />
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : filteredPosts.length ? (
-                filteredPosts.map((post) => (
-                  <article
-                    key={post.id}
-                    className="overflow-hidden rounded-[28px] border border-[#44306f] bg-[linear-gradient(180deg,rgba(22,14,42,0.96),rgba(14,9,28,0.98))] shadow-[0_18px_46px_rgba(0,0,0,0.24)]"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCreatorId(post.user_id)}
-                      className="block w-full text-left"
-                    >
-                      <div
-                        className={`relative aspect-[1.18/1] overflow-hidden bg-gradient-to-br ${categoryGradients[post.category]}`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={post.preview_image_url}
-                          alt={post.title}
-                          className="h-full w-full object-cover transition duration-500 hover:scale-[1.04]"
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,5,18,0)_34%,rgba(7,5,18,0.22)_62%,rgba(7,5,18,0.78)_100%)]" />
-                        <div className="absolute left-4 top-4 flex gap-2">
-                          <span className="rounded-full bg-black/32 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-md">
-                            {post.category}
-                          </span>
-                          <span className="rounded-full bg-[#8f5dff]/72 px-2.5 py-1 text-[11px] font-semibold text-white">
-                            {post.tag}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 px-5 py-5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-sm font-black text-white"
-                            style={{ backgroundColor: post.avatarColor }}
-                          >
-                            {getAvatarInitial(post.authorName)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[18px] font-semibold text-white">
-                              {post.title}
-                            </p>
-                            <p className="mt-1 truncate text-[13px] text-white/56">
-                              @{post.authorName}
-                            </p>
-                          </div>
-                        </div>
-
-                        <p className="line-clamp-3 text-sm leading-7 text-white/58">
-                          {post.prompt}
-                        </p>
-
-                        <div className="flex items-center justify-between border-t border-white/8 pt-4 text-[13px] text-white/56">
-                          <span>{formatDate(post.created_at)}</span>
-                          <div className="flex items-center gap-4">
-                            <span>♡ {post.like_count ?? 0}</span>
-                            <span>◌ {post.commentCount}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <div className="md:col-span-2 xl:col-span-3 2xl:col-span-4">
-                  <div className="rounded-[32px] border border-[#44306f] bg-[linear-gradient(180deg,rgba(22,14,42,0.96),rgba(14,9,28,0.98))] px-8 py-16 text-center shadow-[0_24px_54px_rgba(0,0,0,0.24)]">
-                    <div className="mx-auto grid h-20 w-20 place-items-center rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(138,95,255,0.3),rgba(255,255,255,0.06))]">
-                      <Image
-                        src="/landing-assets/icon-code.png"
-                        alt="空状态"
-                        width={34}
-                        height={34}
-                        className="h-8 w-8 object-contain"
-                      />
-                    </div>
-                    <h3 className="mt-6 text-[34px] font-black tracking-[-0.06em] text-white">
-                      暂时没有符合筛选条件的作品
-                    </h3>
-                    <p className="mx-auto mt-4 max-w-[34ch] text-[16px] leading-8 text-white/58">
-                      你可以换个分类、清空搜索词，或者先去工坊完成第一份作品。
-                    </p>
-                    <div className="mt-8 flex justify-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveTab("精选作品");
-                          setSearchText("");
-                          setSelectedCreatorId(null);
-                        }}
-                        className="rounded-full border border-white/10 bg-white/6 px-6 py-3 text-sm font-semibold text-white/86"
-                      >
-                        清空筛选
-                      </button>
-                      <Link
-                        href="/workshop?mode=coding"
-                        className="inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-[#1e1338] transition hover:bg-white/92"
-                      >
-                        去生成作品
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.8fr)]">
-              <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] px-7 py-7 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-[30px] font-black tracking-[-0.05em] text-white">
-                      活跃创作者
-                    </h3>
-                    <p className="mt-2 text-sm text-white/44">
-                      点击创作者即可筛选 ta 的所有公开作品
-                    </p>
-                  </div>
-                  {selectedCreator && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCreatorId(null)}
-                      className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/76"
-                    >
-                      清空筛选
-                    </button>
-                  )}
-                </div>
-
-                <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                  {isLoadingPosts ? (
-                    Array.from({ length: 8 }).map((_, index) => (
-                      <div
-                        key={`creator-skeleton-${index}`}
-                        className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-5"
-                      >
-                        <div className="h-16 w-16 rounded-full bg-white/8" />
-                        <div className="mt-4 h-5 w-2/3 rounded-full bg-white/8" />
-                        <div className="mt-3 h-4 w-1/2 rounded-full bg-white/6" />
-                        <div className="mt-3 h-4 w-full rounded-full bg-white/6" />
-                      </div>
-                    ))
-                  ) : creators.length ? (
-                    creators.slice(0, 8).map((creator) => {
-                      const isActive = selectedCreatorId === creator.userId;
-
-                      return (
-                        <button
-                          key={creator.userId}
-                          type="button"
-                          onClick={() =>
-                            setSelectedCreatorId((current) =>
-                              current === creator.userId ? null : creator.userId,
-                            )
-                          }
-                          className={`rounded-[24px] border px-5 py-5 text-left transition ${
-                            isActive
-                              ? "border-[#7b39ff] bg-[linear-gradient(180deg,rgba(123,57,255,0.22),rgba(255,255,255,0.05))]"
-                              : "border-white/8 bg-white/[0.03] hover:bg-white/[0.05]"
-                          }`}
-                        >
-                          <div
-                            className="grid h-16 w-16 place-items-center rounded-full text-xl font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
-                            style={{ backgroundColor: creator.avatarColor }}
-                          >
-                            {getAvatarInitial(creator.name)}
-                          </div>
-                          <p className="mt-4 truncate text-[18px] font-semibold text-white">
-                            {creator.name}
-                          </p>
-                          <p className="mt-2 text-sm text-white/44">
-                            作品 {creator.works} · 点赞 {creator.likes}
-                          </p>
-                          <p className="mt-3 line-clamp-2 text-sm leading-6 text-white/56">
-                            {creator.categories.join(" / ")}
-                          </p>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="sm:col-span-2 xl:col-span-3 2xl:col-span-4">
-                      <div className="rounded-[22px] border border-white/6 bg-white/[0.03] px-5 py-8 text-center text-white/52">
-                        第一批创作者正在路上，等作品通过审核后，这里会亮起来。
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] px-7 py-7 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-                <h3 className="text-[30px] font-black tracking-[-0.05em] text-white">
-                  创作之星榜
-                </h3>
-                <p className="mt-2 text-sm text-white/44">
-                  按公开作品点赞数自动排序
-                </p>
-
-                <div className="mt-8 space-y-4">
-                  {isLoadingPosts ? (
-                    Array.from({ length: 6 }).map((_, index) => (
-                      <div
-                        key={`ranking-skeleton-${index}`}
-                        className="flex items-center gap-4 rounded-[22px] border border-white/6 bg-white/[0.03] px-4 py-4"
-                      >
-                        <div className="h-6 w-8 rounded-full bg-white/8" />
-                        <div className="h-12 w-12 rounded-full bg-white/8" />
-                        <div className="flex-1 space-y-2">
-                          <div className="h-5 w-1/3 rounded-full bg-white/8" />
-                          <div className="h-4 w-1/4 rounded-full bg-white/6" />
-                        </div>
-                      </div>
-                    ))
-                  ) : rankingUsers.length ? (
-                    rankingUsers.slice(0, 6).map((creator, index) => (
-                      <button
-                        key={`${creator.userId}-${index}`}
-                        type="button"
-                        onClick={() => setSelectedCreatorId(creator.userId)}
-                        className="flex w-full items-center gap-4 rounded-[22px] border border-white/6 bg-white/[0.03] px-4 py-4 text-left transition hover:bg-white/[0.06]"
-                      >
-                        <div className="w-8 text-center text-[22px]">
-                          {index === 0
-                            ? "🥇"
-                            : index === 1
-                              ? "🥈"
-                              : index === 2
-                                ? "🥉"
-                                : index + 1}
-                        </div>
-                        <div
-                          className="grid h-12 w-12 place-items-center rounded-full text-sm font-black text-white"
-                          style={{ backgroundColor: creator.avatarColor }}
-                        >
-                          {getAvatarInitial(creator.name)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[18px] font-semibold text-white">
-                            {creator.name}
-                          </p>
-                          <p className="mt-1 text-sm text-white/44">
-                            本周获得 {creator.likes} 赞
-                          </p>
-                        </div>
-                        <div className="text-right text-sm text-white/62">
-                          <p>{index + 1}</p>
-                          <p className="mt-1 text-white/34">作品 {creator.works}</p>
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="rounded-[22px] border border-white/6 bg-white/[0.03] px-5 py-8 text-center text-white/52">
-                      榜单会在第一批作品上线后点亮。
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-              <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] p-6 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[13px] font-semibold tracking-[0.14em] text-white/44">
-                      社区规则
-                    </p>
-                    <h4 className="mt-3 text-[28px] font-black tracking-[-0.04em] text-white">
-                      让展示更温柔，也更清晰
-                    </h4>
-                  </div>
-                </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  {[
-                    "分享入口开放在工坊生成完成之后，避免无关内容进入社区广场。",
-                    "系统会审核提示词与展示内容，过滤不适合儿童社区的表达方式。",
-                    "每个孩子都可以在个人主页里查看投稿状态和自己的成长轨迹。",
-                  ].map((rule) => (
-                    <div
-                      key={rule}
-                      className="rounded-[22px] border border-white/6 bg-white/[0.03] px-5 py-5 text-sm leading-8 text-white/58"
-                    >
-                      {rule}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] p-6 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-                <p className="text-[13px] font-semibold tracking-[0.14em] text-white/44">
-                  快速入口
-                </p>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  <Link
-                    href={isLoggedIn ? "/profile" : "/login?redirect=/profile"}
-                    className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-6 text-left transition hover:bg-white/[0.05]"
-                  >
-                    <p className="text-[18px] font-semibold text-white">
-                      {isLoggedIn ? "查看我的投稿状态" : "先登录，再管理作品"}
-                    </p>
-                    <p className="mt-2 text-sm leading-7 text-white/52">
-                      进入个人主页，查看投稿审核进度与公开展示状态。
-                    </p>
-                  </Link>
-                  <Link
-                    href="/workshop?mode=coding"
-                    className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-6 text-left transition hover:bg-white/[0.05]"
-                  >
-                    <p className="text-[18px] font-semibold text-white">
-                      去工坊继续创作
-                    </p>
-                    <p className="mt-2 text-sm leading-7 text-white/52">
-                      回到创作空间，生成新的作品并继续分享到社区。
-                    </p>
-                  </Link>
-                </div>
-              </div>
-            </div>
+        {(searchText.trim() || selectedCreatorId) && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {selectedCreatorId && (
+              <button
+                type="button"
+                onClick={() => setSelectedCreatorId(null)}
+                className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-semibold text-[#687394]"
+              >
+                清空创作者筛选
+              </button>
+            )}
+            {searchText.trim() && (
+              <button
+                type="button"
+                onClick={() => setSearchText("")}
+                className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-semibold text-[#687394]"
+              >
+                清空搜索词
+              </button>
+            )}
           </div>
+        )}
+      </section>
 
-          <aside className="space-y-6">
-            <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] p-6 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-              <p className="text-[13px] font-semibold tracking-[0.14em] text-white/44">
-                当前详情
-              </p>
-              {heroPost ? (
-                <div className="mt-5 space-y-5">
-                  <div className="overflow-hidden rounded-[24px] border border-white/8 bg-white/[0.03]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={heroPost.preview_image_url}
-                      alt={heroPost.title}
-                      className="aspect-[1.1/1] h-full w-full object-cover"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-sm text-[#c8afff]">{heroPost.category}</p>
-                    <h4 className="mt-2 text-[28px] font-black tracking-[-0.05em] text-white">
-                      {heroPost.title}
-                    </h4>
-                    <p className="mt-4 text-sm leading-7 text-white/58">
-                      {heroPost.prompt}
-                    </p>
-                  </div>
-                  <div className="grid gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCreatorId(heroPost.user_id)}
-                      className="rounded-full border border-white/10 bg-white/6 px-5 py-3 text-sm font-semibold text-white/82"
-                    >
-                      查看作者更多作品
-                    </button>
-                    <Link
-                      href="/profile"
-                      className="rounded-full border border-white/10 bg-white/[0.03] px-5 py-3 text-center text-sm font-semibold text-white/66"
-                    >
-                      去我的主页管理投稿
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-5 rounded-[22px] border border-white/6 bg-white/[0.03] px-5 py-8 text-center text-white/52">
-                  作品详情会在这里显示。
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,12,34,0.92),rgba(11,8,24,0.98))] p-6 shadow-[0_22px_58px_rgba(0,0,0,0.24)]">
-              <p className="text-[13px] font-semibold tracking-[0.14em] text-white/44">
-                分类说明
-              </p>
-              <div className="mt-5 space-y-3">
-                {Object.entries(categoryDescriptions).map(([label, description]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setActiveTab(label as CommunityTab)}
-                    className="w-full rounded-[20px] border border-white/6 bg-white/[0.03] px-4 py-4 text-left transition hover:bg-white/[0.06]"
+      <section className="mt-8 grid gap-8 2xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="space-y-8">
+          <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={`community-loading-${index}`}
+                    className="overflow-hidden rounded-[26px] border border-white/80 bg-white/70 shadow-[0_16px_44px_rgba(91,111,185,0.12)]"
                   >
-                    <p className="text-[16px] font-semibold text-white">{label}</p>
-                    <p className="mt-2 text-sm leading-7 text-white/52">{description}</p>
+                    <div className="aspect-[1.18/1] animate-pulse bg-[#e9efff]" />
+                    <div className="space-y-4 px-5 py-5">
+                      <div className="h-5 w-2/3 rounded-full bg-[#e6ecff]" />
+                      <div className="h-4 w-full rounded-full bg-[#eef3ff]" />
+                      <div className="h-4 w-3/4 rounded-full bg-[#eef3ff]" />
+                    </div>
+                  </div>
+                ))
+              : filteredPosts.map((post) => {
+                  const name = authorName(post);
+                  return (
+                    <article
+                      key={post.id}
+                      className="group overflow-hidden rounded-[26px] border border-white/80 bg-white/78 shadow-[0_18px_54px_rgba(91,111,185,0.14)] backdrop-blur-2xl transition hover:-translate-y-1 hover:shadow-[0_28px_72px_rgba(91,111,185,0.2)]"
+                    >
+                      <Link href={`/community/${post.id}`} className="block">
+                        <div
+                          className={`relative aspect-[1.18/1] overflow-hidden bg-gradient-to-br ${gradientByCategory[post.category] ?? gradientByCategory["创意编程"]}`}
+                        >
+                          <img
+                            src={post.preview_image_url}
+                            alt={post.title}
+                            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+                          />
+                          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0)_38%,rgba(18,31,61,0.58)_100%)]" />
+                          <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+                            <span className="rounded-full bg-white/84 px-3 py-1 text-[11px] font-black text-[#4d5a82] shadow-[0_8px_18px_rgba(27,39,75,0.12)]">
+                              {post.category}
+                            </span>
+                            {post.is_featured && (
+                              <span className="rounded-full bg-[#625cff] px-3 py-1 text-[11px] font-black text-white shadow-[0_8px_18px_rgba(98,92,255,0.18)]">
+                                {COMMUNITY_CATEGORY_ACCENT[
+                                  post.category as keyof typeof COMMUNITY_CATEGORY_ACCENT
+                                ] ?? "推荐"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="px-5 pb-4 pt-5">
+                          <p className="line-clamp-2 text-[21px] font-black leading-[1.2] tracking-[-0.035em] text-[#17213f]">
+                            {post.title}
+                          </p>
+                          <p className="mt-3 line-clamp-3 text-sm leading-7 text-[#6a7596]">
+                            {post.prompt}
+                          </p>
+                        </div>
+                      </Link>
+
+                      <div className="px-5 pb-5">
+                        <div className="flex items-center gap-3 border-t border-[#edf1ff] pt-4">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCreatorId((current) =>
+                                current === post.user_id ? null : post.user_id,
+                              )
+                            }
+                            className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-black text-white shadow-[0_10px_20px_rgba(91,111,185,0.16)]"
+                            style={{
+                              backgroundColor: post.user_profiles?.avatar_color ?? "#7b72ff",
+                            }}
+                          >
+                            {authorInitial(name)}
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-black text-[#3f4b6f]">
+                              @{name}
+                            </p>
+                            <p className="mt-1 text-xs text-[#8a95b5]">
+                              {formatDate(post.created_at)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-2 text-xs font-black text-[#687394]">
+                            <span>赞 {post.like_count}</span>
+                            <span>看 {post.view_count}</span>
+                            <span>享 {post.share_count}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+          </section>
+
+          {!isLoading && !filteredPosts.length && (
+            <section className="rounded-[28px] border border-white/80 bg-white/76 px-8 py-16 text-center shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+              <h3 className="text-[32px] font-black tracking-[-0.05em] text-[#17213f]">
+                暂时没有符合筛选条件的作品
+              </h3>
+              <p className="mx-auto mt-4 max-w-[36ch] text-[16px] leading-8 text-[#687394]">
+                可以换个分类、清空搜索词，或者先去工坊完成第一份作品。
+              </p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("精选作品");
+                    setSearchText("");
+                    setSelectedCreatorId(null);
+                  }}
+                  className="rounded-full border border-[#dce5ff] bg-white px-6 py-3 text-sm font-black text-[#5d688b]"
+                >
+                  清空筛选
+                </button>
+                <Link
+                  href="/workshop?mode=coding"
+                  className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white"
+                >
+                  去生成作品
+                </Link>
+              </div>
+            </section>
+          )}
+
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <div className="rounded-[28px] border border-white/80 bg-white/76 px-6 py-7 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-[30px] font-black tracking-[-0.05em] text-[#17213f]">
+                    活跃创作者
+                  </h3>
+                  <p className="mt-2 text-sm text-[#7782a4]">
+                    跟随后台排序和真实互动数据变化。
+                  </p>
+                </div>
+                {selectedCreatorId && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCreatorId(null)}
+                    className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-semibold text-[#687394]"
+                  >
+                    清空筛选
                   </button>
-                ))}
+                )}
+              </div>
+
+              <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {creatorList.length ? (
+                  creatorList.map((creator) => (
+                    <button
+                      key={creator.user_id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedCreatorId((current) =>
+                          current === creator.user_id ? null : creator.user_id,
+                        )
+                      }
+                      className={`rounded-[22px] border px-5 py-5 text-left transition hover:-translate-y-0.5 ${
+                        selectedCreatorId === creator.user_id
+                          ? "border-[#8c82ff] bg-[#f0edff]"
+                          : "border-[#e3e9ff] bg-white/72 hover:border-[#cbd5ff]"
+                      }`}
+                    >
+                      <div
+                        className="grid h-14 w-14 place-items-center rounded-full text-lg font-black text-white"
+                        style={{ backgroundColor: creator.avatar_color ?? "#7b72ff" }}
+                      >
+                        {authorInitial(creator.name)}
+                      </div>
+                      <p className="mt-4 truncate text-[18px] font-black text-[#17213f]">
+                        {creator.name}
+                      </p>
+                      <p className="mt-2 text-sm text-[#7782a4]">
+                        作品 {creator.works_count} · 点赞 {creator.total_likes}
+                      </p>
+                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#687394]">
+                        {creator.categories.join(" / ")}
+                      </p>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-[22px] border border-dashed border-[#d6def8] bg-white/64 px-5 py-8 text-center text-[#7380a4] sm:col-span-2 xl:col-span-3">
+                    第一批创作者正在路上，作品通过审核后这里会自动亮起来。
+                  </div>
+                )}
               </div>
             </div>
 
-          </aside>
+            <div className="rounded-[28px] border border-white/80 bg-white/76 px-6 py-7 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+              <h3 className="text-[30px] font-black tracking-[-0.05em] text-[#17213f]">
+                创作之星榜
+              </h3>
+              <p className="mt-2 text-sm text-[#7782a4]">
+                后台可手动排序，也可以跟随互动数据。
+              </p>
+
+              <div className="mt-7 space-y-3">
+                {(creatorStars.length ? creatorStars : creatorList.slice(0, 6)).map(
+                  (creator, index) => (
+                    <button
+                      key={`${creator.user_id}-${index}`}
+                      type="button"
+                      onClick={() => setSelectedCreatorId(creator.user_id)}
+                      className="flex w-full items-center gap-4 rounded-[22px] border border-[#e3e9ff] bg-white/72 px-4 py-4 text-left transition hover:border-[#cbd5ff]"
+                    >
+                      <div className="w-8 text-center text-[22px] font-black text-[#8c82ff]">
+                        {index + 1}
+                      </div>
+                      <div
+                        className="grid h-11 w-11 place-items-center rounded-full text-sm font-black text-white"
+                        style={{ backgroundColor: creator.avatar_color ?? "#7b72ff" }}
+                      >
+                        {authorInitial(creator.name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[17px] font-black text-[#17213f]">
+                          {creator.name}
+                        </p>
+                        <p className="mt-1 text-sm text-[#7782a4]">
+                          点赞 {creator.total_likes} · 浏览 {creator.total_views}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-semibold text-[#687394]">
+                        {creator.works_count} 件
+                      </p>
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+          </section>
         </div>
+
+        <aside className="space-y-6">
+          <section className="rounded-[28px] border border-white/80 bg-white/76 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+            <p className="text-[13px] font-black tracking-[0.16em] text-[#7782a4]">
+              分类说明
+            </p>
+            <div className="mt-5 space-y-3">
+              {COMMUNITY_CATEGORY_LABELS.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setActiveTab(label)}
+                  className={`w-full rounded-[20px] border px-4 py-4 text-left transition ${
+                    activeTab === label
+                      ? "border-[#8c82ff] bg-[#f0edff]"
+                      : "border-[#e3e9ff] bg-white/70 hover:border-[#cbd5ff]"
+                  }`}
+                >
+                  <p className="text-[16px] font-black text-[#17213f]">{label}</p>
+                  <p className="mt-2 text-sm leading-7 text-[#687394]">
+                    {COMMUNITY_CATEGORY_DESCRIPTIONS[label]}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-white/80 bg-white/76 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+            <p className="text-[13px] font-black tracking-[0.16em] text-[#7782a4]">
+              快速入口
+            </p>
+            <div className="mt-5 grid gap-3">
+              <Link
+                href={isLoggedIn ? "/profile" : "/login?redirect=/profile"}
+                className="rounded-[22px] border border-[#e3e9ff] bg-white/72 px-5 py-5 text-left transition hover:border-[#cbd5ff]"
+              >
+                <p className="text-[18px] font-black text-[#17213f]">
+                  {isLoggedIn ? "查看我的投稿状态" : "先登录，再管理作品"}
+                </p>
+                <p className="mt-2 text-sm leading-7 text-[#687394]">
+                  进入个人主页，查看审核进度、魔法币变化和作品状态。
+                </p>
+              </Link>
+              <Link
+                href="/workshop?mode=coding"
+                className="rounded-[22px] border border-[#e3e9ff] bg-white/72 px-5 py-5 text-left transition hover:border-[#cbd5ff]"
+              >
+                <p className="text-[18px] font-black text-[#17213f]">去工坊继续创作</p>
+                <p className="mt-2 text-sm leading-7 text-[#687394]">
+                  生成新的作品，然后继续分享到社区。
+                </p>
+              </Link>
+            </div>
+          </section>
+        </aside>
       </section>
     </>
   );

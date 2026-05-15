@@ -14,6 +14,7 @@ export function NotificationsConsole({
 }: NotificationsConsoleProps) {
   const [notifications, setNotifications] = useState(initialNotifications);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [statusMessage, setStatusMessage] = useState("");
   const [draft, setDraft] = useState({
     title: "",
     body: "",
@@ -43,6 +44,7 @@ export function NotificationsConsole({
       const data = (await response.json()) as {
         notification?: NotificationRecord;
         error?: string;
+        message?: string;
       };
 
       if (!response.ok || !data.notification) {
@@ -56,11 +58,20 @@ export function NotificationsConsole({
         target_type: "all",
       });
       setStatus("success");
-    } catch {
+      setStatusMessage(
+        action === "send"
+          ? data.message ?? "通知已经发送到用户端。"
+          : "草稿已经保存。",
+      );
+    } catch (error) {
       setStatus("error");
+      setStatusMessage(
+        error instanceof Error ? error.message : "通知操作失败，请稍后再试。",
+      );
     } finally {
       window.setTimeout(() => {
         setStatus("idle");
+        setStatusMessage("");
       }, 2200);
     }
   };
@@ -134,6 +145,17 @@ export function NotificationsConsole({
                     : "立即发送"}
             </button>
           </div>
+          {statusMessage && (
+            <div
+              className={`rounded-[18px] px-4 py-3 text-sm font-bold ${
+                status === "error"
+                  ? "bg-[#fff1f2] text-[#d4557c]"
+                  : "bg-[#ecfdf3] text-[#1c8b5f]"
+              }`}
+            >
+              {statusMessage}
+            </div>
+          )}
         </div>
       </section>
 

@@ -3,7 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+type BrandIdentity = {
+  siteName: string;
+  tagline: string;
+  logoUrl: string;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,7 +19,55 @@ export default function LoginPage() {
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [message, setMessage] = useState("");
+  const [brand, setBrand] = useState<BrandIdentity>({
+    siteName: "小红车魔法工坊",
+    tagline: "下一代儿童AI创造力平台",
+    logoUrl: "/logo.png",
+  });
   const redirectTarget = searchParams.get("redirect") || "/workshop";
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadBrand = async () => {
+      try {
+        const response = await fetch("/api/site/brand", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as {
+          brand?: {
+            siteName?: string;
+            tagline?: string;
+            logoUrl?: string;
+          };
+        };
+        const identity = data.brand;
+
+        if (!mounted || !identity) {
+          return;
+        }
+
+        setBrand({
+          siteName: identity.siteName ?? "小红车魔法工坊",
+          tagline: identity.tagline ?? "下一代儿童AI创造力平台",
+          logoUrl: identity.logoUrl ?? "/logo.png",
+        });
+      } catch {
+        window.console.error("品牌信息加载失败");
+      }
+    };
+
+    void loadBrand();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSendCode = async () => {
     if (!phone.trim()) {
@@ -122,19 +176,20 @@ export default function LoginPage() {
 
             <div className="mt-10 flex items-center gap-4">
               <Image
-                src="/logo.png"
-                alt="小红车魔法工坊"
+                src={brand.logoUrl}
+                alt={brand.siteName}
                 width={56}
                 height={56}
                 className="rounded-[18px] shadow-[0_12px_28px_rgba(255,255,255,0.12)]"
                 priority
+                unoptimized
               />
               <div>
                 <p className="text-[20px] font-semibold tracking-[-0.03em] text-white">
-                  小红车魔法工坊
+                  {brand.siteName}
                 </p>
                 <p className="text-[13px] tracking-[0.06em] text-white/42">
-                  下一代儿童AI创造力平台
+                  {brand.tagline}
                 </p>
               </div>
             </div>

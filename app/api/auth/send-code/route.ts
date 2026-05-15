@@ -3,10 +3,12 @@ import { hashOtpCode, generateOtpCode } from "@/lib/auth";
 import { normalizeChinaPhone } from "@/lib/phone";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { sendVerificationSms } from "@/lib/aliyun-sms";
+import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 const OTP_EXPIRES_MINUTES = 5;
 const RESEND_COOLDOWN_SECONDS = 60;
 const MAX_SENDS_PER_HOUR = 5;
+const MAX_SENDS_PER_IP_PER_10_MINUTES = 12;
 
 type PhoneOtpRow = {
   phone: string;
@@ -29,6 +31,20 @@ type PhoneOtpWritePayload = {
 
 export async function POST(request: Request) {
   try {
+    const ip = getRequestIp(request);
+    const ipRateLimit = consumeRateLimit({
+      key: `auth:send-code:${ip}`,
+      limit: MAX_SENDS_PER_IP_PER_10_MINUTES,
+      windowMs: 10 * 60 * 1000,
+    });
+
+    if (!ipRateLimit.allowed) {
+      return NextResponse.json(
+        { error: `请求太频繁了，请 ${ipRateLimit.retryAfterSeconds} 秒后再试。` },
+        { status: 429 },
+      );
+    }
+
     const { phone } = (await request.json()) as { phone?: string };
     const normalizedPhone = normalizeChinaPhone(phone ?? "");
 
@@ -82,11 +98,6 @@ export async function POST(request: Request) {
     const expiresAt = new Date(
       now + OTP_EXPIRES_MINUTES * 60 * 1000,
     ).toISOString();
-
-    console.log("【准备发送验证码】:", {
-      phone: normalizedPhone,
-      environment: process.env.NODE_ENV,
-    });
 
     await sendVerificationSms(normalizedPhone, code, OTP_EXPIRES_MINUTES);
 

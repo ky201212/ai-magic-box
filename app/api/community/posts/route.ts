@@ -72,8 +72,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("【分享作品失败】:", error);
+
+    const message =
+      error instanceof Error ? error.message : "分享作品失败，请稍后再试。";
+
     return NextResponse.json(
-      { error: "分享作品失败，请稍后再试。" },
+      { error: message },
       { status: 500 },
     );
   }

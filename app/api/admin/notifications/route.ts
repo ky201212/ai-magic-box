@@ -4,6 +4,7 @@ import {
   listNotifications,
   sendNotification,
 } from "@/lib/admin-data";
+import { appendAdminAuditLog } from "@/lib/admin-audit";
 import {
   requireAdminContext,
   requirePermission,
@@ -59,8 +60,27 @@ export async function POST(request: Request) {
     };
 
     if (body.action === "send" && body.notification_id) {
-      const notification = await sendNotification(body.notification_id);
-      return NextResponse.json({ success: true, notification });
+      const result = await sendNotification(body.notification_id);
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "notification_send",
+        targetType: "notification",
+        targetId: body.notification_id,
+        detail: {
+          recipientCount: result.recipientCount,
+        },
+      });
+      return NextResponse.json({
+        success: true,
+        notification: result.notification,
+        recipientCount: result.recipientCount,
+        message:
+          result.recipientCount > 0
+            ? `通知已发送给 ${result.recipientCount} 位目标用户。`
+            : "通知已发布，但当前没有匹配到可接收的目标用户。",
+      });
     }
 
     if (!body.title?.trim() || !body.body?.trim()) {
@@ -78,17 +98,58 @@ export async function POST(request: Request) {
       created_by: adminContext.userId,
     });
 
+    await appendAdminAuditLog({
+      actorUserId: adminContext.userId,
+      actorDisplayName: adminContext.displayName,
+      actorPhone: adminContext.phone,
+      action: body.action === "send" ? "notification_create_and_send" : "notification_create_draft",
+      targetType: "notification",
+      targetId: notification.id,
+      detail: {
+        targetType: body.target_type ?? "all",
+        targetUserCount: (body.target_user_ids ?? []).length,
+      },
+    });
+
     if (body.action === "send") {
-      const sentNotification = await sendNotification(notification.id);
-      return NextResponse.json({ success: true, notification: sentNotification });
+      const result = await sendNotification(notification.id);
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "notification_send",
+        targetType: "notification",
+        targetId: notification.id,
+        detail: {
+          recipientCount: result.recipientCount,
+        },
+      });
+      return NextResponse.json({
+        success: true,
+        notification: result.notification,
+        recipientCount: result.recipientCount,
+        message:
+          result.recipientCount > 0
+            ? `通知已发送给 ${result.recipientCount} 位目标用户。`
+            : "通知已发布，但当前没有匹配到可接收的目标用户。",
+      });
     }
 
-    return NextResponse.json({ success: true, notification });
+    return NextResponse.json({
+      success: true,
+      notification,
+      message: "通知草稿已保存。",
+    });
   } catch (requestError) {
     console.error("【后台通知操作失败】:", requestError);
 
+    const errorMessage =
+      requestError instanceof Error
+        ? requestError.message
+        : "通知操作失败，请稍后再试。";
+
     return NextResponse.json(
-      { error: "通知操作失败，请稍后再试。" },
+      { error: errorMessage },
       { status: 500 },
     );
   }

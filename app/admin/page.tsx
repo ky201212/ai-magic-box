@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { getDashboardStats, listAiModeConfigs, listAdminCommunityPosts, listAdminUsers, listNotifications } from "@/lib/admin-data";
+import {
+  getDashboardStats,
+  listAiModeConfigs,
+  listAdminCommunityPosts,
+  listAdminUsers,
+  listNotifications,
+} from "@/lib/admin-data";
 import { AdminPageHeader } from "./_components/admin-page-header";
 
 function formatCount(value: number) {
@@ -15,8 +21,8 @@ export default async function AdminDashboardPage() {
       notificationsSent: 0,
     })),
     listAiModeConfigs().catch(() => []),
-    listAdminCommunityPosts().catch(() => []),
-    listAdminUsers({ includeCreditLogs: false }).catch(() => []),
+    listAdminCommunityPosts({ limit: 5 }).catch(() => []),
+    listAdminUsers({ includeCreditLogs: false, limit: 5 }).catch(() => []),
     listNotifications(6).catch(() => []),
   ]);
 
@@ -25,8 +31,8 @@ export default async function AdminDashboardPage() {
     const payload = item.extra_payload ?? {};
     return payload.creditEnabled === true && Number(payload.creditCost ?? 0) > 0;
   }).length;
-  const pendingPosts = posts.filter((item) => item.moderation_status === "pending").slice(0, 5);
-  const newestUsers = users.slice(0, 5);
+  const pendingPosts = posts.filter((item) => item.moderation_status === "pending");
+  const newestUsers = users;
 
   return (
     <div className="space-y-5">

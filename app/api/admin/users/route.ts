@@ -19,7 +19,7 @@ export async function GET() {
   }
 
   try {
-    const users = await listAdminUsers({ includeCreditLogs: true });
+    const users = await listAdminUsers({ includeCreditLogs: false, limit: 80 });
     return NextResponse.json({ users });
   } catch (requestError) {
     console.error("【后台用户列表读取失败】:", requestError);

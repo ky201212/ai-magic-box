@@ -5,7 +5,10 @@ import { UsersConsole } from "../_components/users-console";
 
 export default async function AdminUsersPage() {
   await assertAdminPagePermission("user_management");
-  const users = await listAdminUsers({ includeCreditLogs: false }).catch(() => []);
+  const users = await listAdminUsers({
+    includeCreditLogs: false,
+    limit: 24,
+  }).catch(() => []);
 
   return (
     <div className="space-y-5">

@@ -19,7 +19,7 @@ export async function GET() {
   }
 
   try {
-    const posts = await listAdminCommunityPosts();
+    const posts = await listAdminCommunityPosts({ limit: 80 });
     return NextResponse.json({ posts });
   } catch (requestError) {
     console.error("【后台社区审核列表读取失败】:", requestError);

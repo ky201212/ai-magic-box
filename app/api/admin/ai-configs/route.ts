@@ -5,6 +5,7 @@ import {
 } from "@/lib/admin-data";
 import {
   requireAdminContext,
+  requireAiSecretManagerPermission,
   requirePermission,
 } from "@/lib/admin";
 
@@ -19,6 +20,12 @@ export async function GET() {
 
   if (permissionError) {
     return permissionError;
+  }
+
+  const secretPermissionError = requireAiSecretManagerPermission(adminContext);
+
+  if (secretPermissionError) {
+    return secretPermissionError;
   }
 
   try {
@@ -45,6 +52,12 @@ export async function POST(request: Request) {
 
   if (permissionError) {
     return permissionError;
+  }
+
+  const secretPermissionError = requireAiSecretManagerPermission(adminContext);
+
+  if (secretPermissionError) {
+    return secretPermissionError;
   }
 
   try {

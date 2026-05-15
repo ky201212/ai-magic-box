@@ -1,5 +1,11 @@
 import "server-only";
-import { createCommunityPost, getCommunityPostById, updateCommunityPostModeration } from "@/lib/community";
+import {
+  createCommunityPost,
+  getCommunityPostById,
+  updateCommunityPostModeration,
+  type CommunityPostRow,
+} from "@/lib/community";
+import { getCommunityReviewSetting } from "@/lib/admin-data";
 import { moderateCommunityPost, moderateCommunityPostByRules } from "@/lib/moderation";
 import { sendUserNotification } from "@/lib/user-notifications";
 
@@ -9,19 +15,6 @@ type QueueShareInput = {
   prompt: string;
   previewImageUrl: string;
   previewCode: string;
-};
-
-type CommunityPostRow = {
-  id: string;
-  user_id: string;
-  title: string;
-  prompt: string;
-  preview_image_url: string;
-  preview_code: string;
-  moderation_status: "pending" | "approved" | "rejected";
-  moderation_reason: string | null;
-  moderation_detail: Record<string, unknown>;
-  moderation_stage?: "rule" | "ai" | "fallback" | "manual";
 };
 
 type QueueCommunityShareResult =
@@ -97,6 +90,7 @@ export async function queueCommunityShare(
 
 export async function finalizeCommunityShareReview(postId: string) {
   const post = (await getCommunityPostById(postId)) as CommunityPostRow | null;
+  const reviewSetting = await getCommunityReviewSetting().catch(() => null);
 
   if (!post) {
     return null;
@@ -112,30 +106,56 @@ export async function finalizeCommunityShareReview(postId: string) {
     previewCode: post.preview_code,
   });
 
-  const updatedPost = await updateCommunityPostModeration(postId, {
-    moderationStatus: moderation.suggestedStatus,
-    moderationReason:
-      moderation.suggestedStatus === "approved"
+  const finalStatus =
+    moderation.suggestedStatus === "approved" &&
+    reviewSetting?.aiApprovalMode === "manual_review"
+      ? "pending"
+      : moderation.suggestedStatus;
+  const finalStage =
+    moderation.suggestedStatus === "approved" &&
+    reviewSetting?.aiApprovalMode === "manual_review"
+      ? "ai"
+      : moderation.stage;
+  const finalReason =
+    moderation.suggestedStatus === "approved" &&
+    reviewSetting?.aiApprovalMode === "manual_review"
+      ? "AI审核已通过，正在等待人工复核发布。"
+      : moderation.suggestedStatus === "approved"
         ? "作品已通过审核，现已展示到成长社区。"
-        : moderation.reason,
-    moderationDetail: moderation.detail,
-    moderationStage: moderation.stage,
+        : moderation.reason;
+
+  const updatedPost = await updateCommunityPostModeration(postId, {
+    moderationStatus: finalStatus,
+    moderationReason: finalReason,
+    moderationDetail: {
+      ...moderation.detail,
+      policy: {
+        aiApprovalMode: reviewSetting?.aiApprovalMode ?? "manual_review",
+        lockManualApproveAfterAiReject:
+          reviewSetting?.lockManualApproveAfterAiReject ?? true,
+      },
+    },
+    moderationStage: finalStage,
   });
 
   await sendUserNotification({
     userId: post.user_id,
     title:
-      moderation.suggestedStatus === "approved"
+      finalStatus === "approved"
         ? "作品审核通过啦"
-        : moderation.suggestedStatus === "rejected"
+        : finalStatus === "rejected"
           ? "作品暂时没有通过审核"
-          : "作品正在继续复审",
+          : moderation.suggestedStatus === "approved"
+            ? "作品等待人工复核"
+            : "作品正在继续复审",
     body:
-      moderation.suggestedStatus === "approved"
+      finalStatus === "approved"
         ? "你分享的作品已经通过审核，现在已经出现在成长社区里。"
-        : moderation.suggestedStatus === "rejected"
+        : finalStatus === "rejected"
           ? moderation.reason || "这次分享暂时没有通过，请调整内容后再试。"
-          : "审核服务暂时繁忙，作品还在复审队列里，稍后会继续通知你结果。",
+          : moderation.suggestedStatus === "approved"
+            ? "AI审核已经通过，作品正在等待管理员人工复核后发布。"
+            : "审核服务暂时繁忙，作品还在复审队列里，稍后会继续通知你结果。",
   }).catch((error) => {
     console.error("【发送社区审核通知失败】:", error);
   });

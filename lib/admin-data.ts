@@ -1,8 +1,17 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import type { PostgrestError } from "@supabase/supabase-js";
 import { createCreditLogEntry } from "@/lib/credits";
 import type { CreditLogRow } from "@/lib/credits";
 import { sendUserNotification } from "@/lib/user-notifications";
+import { isBootstrapAdminPhone } from "@/lib/admin";
+import {
+  deleteCommunityPostPermanently,
+  listCommunityAdminRecords,
+  updateCommunityDashboardSetting,
+  updateCommunityPostOperations,
+  type CommunityAdminSearchRecord,
+} from "@/lib/community";
 
 export type SiteSettingRecord = {
   setting_key: string;
@@ -15,6 +24,13 @@ export type SiteSettingRecord = {
 
 export type CreditPolicyRecord = {
   initialCredits: number;
+};
+
+export type CommunityReviewSettingRecord = {
+  aiApprovalMode: "auto_publish" | "manual_review";
+  aiModerationInstruction: string;
+  blockedKeywords: string[];
+  lockManualApproveAfterAiReject: boolean;
 };
 
 export type AiModeConfigRecord = {
@@ -30,6 +46,42 @@ export type AiModeConfigRecord = {
   updated_at?: string;
 };
 
+export type AiModelPresetRecord = {
+  id: string;
+  mode_key: string;
+  label: string;
+  provider: string;
+  endpoint_url: string;
+  api_key_env: string;
+  model: string;
+  description: string;
+  badge: string;
+  image_size?: string;
+};
+
+export type AiSecretStatusRecord = {
+  envName: string;
+  available: boolean;
+  source: "database" | "environment" | "missing";
+  updatedAt: string | null;
+};
+
+export type AiSecretAuditRecord = {
+  id: string;
+  envName: string;
+  action: "save" | "delete";
+  actorUserId: string;
+  actorDisplayName: string;
+  actorPhone: string;
+  createdAt: string;
+};
+
+export type AiSecretSecuritySummary = {
+  masterKeySource: "dedicated" | "fallback" | "missing";
+  storageEncryptionEnabled: boolean;
+  warningMessage: string | null;
+};
+
 export type DashboardStats = {
   usersTotal: number;
   communityPending: number;
@@ -43,11 +95,23 @@ export type AdminCommunityPostRecord = {
   title: string;
   prompt: string;
   preview_image_url: string;
+  preview_code?: string;
+  user_phone: string | null;
+  user_nickname: string | null;
+  user_display_name: string | null;
   moderation_status: "pending" | "approved" | "rejected";
   moderation_reason: string | null;
   moderation_stage: "rule" | "ai" | "fallback" | "manual";
   moderation_detail: Record<string, unknown>;
   is_featured: boolean;
+  like_count?: number;
+  view_count?: number;
+  share_count?: number;
+  category?: string;
+  manual_sort_order?: number;
+  creator_score?: number;
+  manual_creator_rank?: number | null;
+  is_creator_star?: boolean;
   created_at: string;
   reviewed_at: string | null;
 };
@@ -95,6 +159,11 @@ export type UserNotificationRecord = {
     body: string;
     sent_at: string | null;
   } | null;
+};
+
+export type UserNotificationsSummary = {
+  notifications: UserNotificationRecord[];
+  unreadCount: number;
 };
 
 export async function listSiteSettings(): Promise<SiteSettingRecord[]> {
@@ -161,6 +230,30 @@ export async function getCreditPolicySetting() {
   });
 }
 
+export async function getCommunityReviewSetting() {
+  return getSiteSettingValue<CommunityReviewSettingRecord>(
+    "community.review.policy",
+    {
+      aiApprovalMode: "manual_review",
+      aiModerationInstruction:
+        "请优先保护未成年人社区安全，重点关注是否含有违法违规、血腥暴力、色情低俗、危险模仿、诱导沉迷、辱骂攻击或明显不适合儿童公开展示的内容。",
+      blockedKeywords: [
+        "赌博",
+        "诈骗",
+        "色情",
+        "暴力",
+        "毒品",
+        "枪支",
+        "自杀",
+        "反动",
+        "恐怖",
+        "违法",
+      ],
+      lockManualApproveAfterAiReject: true,
+    },
+  );
+}
+
 export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -193,6 +286,49 @@ export async function getAiModeConfig(modeKey: string) {
   }
 
   return data;
+}
+
+export async function saveAiModelPresets(input: {
+  presets: AiModelPresetRecord[];
+  updatedBy: string;
+}) {
+  const normalizedPresets = input.presets.map((preset) => ({
+    ...preset,
+    label: preset.label.trim(),
+    provider: preset.provider.trim(),
+    endpoint_url: preset.endpoint_url.trim(),
+    api_key_env: preset.api_key_env.trim(),
+    model: preset.model.trim(),
+    description: preset.description.trim(),
+    badge: preset.badge.trim(),
+    image_size: preset.image_size?.trim() || undefined,
+  }));
+
+  await upsertSiteSettings([
+    {
+      setting_key: "ai.model-presets",
+      setting_group: "ai",
+      label: "AI模型模板库",
+      value: { presets: normalizedPresets },
+      description: "后台 AI 配置页面使用的模型模板列表。",
+      updated_by: input.updatedBy,
+    },
+  ]);
+
+  return normalizedPresets;
+}
+
+export async function getAiModelPresetsSetting() {
+  const result = await getSiteSettingValue<{ presets?: AiModelPresetRecord[] }>(
+    "ai.model-presets",
+    { presets: [] },
+  );
+
+  return result.presets ?? [];
+}
+
+export async function listAiModelPresets() {
+  return getAiModelPresetsSetting();
 }
 
 export async function upsertAiModeConfigs(
@@ -262,21 +398,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   };
 }
 
-export async function listAdminCommunityPosts(): Promise<AdminCommunityPostRecord[]> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
-    .from("community_posts")
-    .select(
-      "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, moderation_detail, is_featured, created_at, reviewed_at",
-    )
-    .order("created_at", { ascending: false })
-    .returns<AdminCommunityPostRecord[]>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data ?? [];
+export async function listAdminCommunityPosts(input?: {
+  includePreviewCode?: boolean;
+  limit?: number;
+  moderationStatus?: "pending" | "approved" | "rejected";
+}): Promise<AdminCommunityPostRecord[]> {
+  const records = await listCommunityAdminRecords(input);
+  return records as AdminCommunityPostRecord[];
 }
 
 export async function updateCommunityPostReview(
@@ -289,7 +417,70 @@ export async function updateCommunityPostReview(
   },
 ) {
   const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  type CommunityPostReviewRow = {
+    id: string;
+    user_id: string;
+    title: string;
+    prompt: string;
+    preview_image_url: string;
+    moderation_status: "pending" | "approved" | "rejected";
+    moderation_reason: string | null;
+    moderation_stage: "rule" | "ai" | "fallback" | "manual";
+    is_featured: boolean;
+    created_at: string;
+    reviewed_at: string | null;
+    moderation_detail: Record<string, unknown>;
+  };
+  const reviewSetting = await getCommunityReviewSetting().catch(() => null);
+  const primaryExistingPostResult = await supabaseAdmin
+    .from("community_posts")
+    .select("id, moderation_detail, moderation_status")
+    .eq("id", postId)
+    .single<{
+      id: string;
+      moderation_detail: Record<string, unknown>;
+      moderation_status: "pending" | "approved" | "rejected";
+    }>();
+
+  let existingPost = primaryExistingPostResult.data;
+  let existingPostError = primaryExistingPostResult.error;
+
+  if (existingPostError && isMissingModerationDetailSchemaError(existingPostError)) {
+    const fallbackExistingPostResult = await supabaseAdmin
+      .from("community_posts")
+      .select("id, moderation_status")
+      .eq("id", postId)
+      .single<{
+        id: string;
+        moderation_status: "pending" | "approved" | "rejected";
+      }>();
+
+    existingPost = fallbackExistingPostResult.data
+      ? {
+          ...fallbackExistingPostResult.data,
+          moderation_detail: {},
+        }
+      : null;
+    existingPostError = fallbackExistingPostResult.error;
+  }
+
+  if (existingPostError) {
+    throw existingPostError;
+  }
+
+  const aiDetail = ((existingPost?.moderation_detail ?? {}).ai ?? {}) as {
+    approved?: boolean | null;
+  };
+
+  if (
+    input.moderation_status === "approved" &&
+    reviewSetting?.lockManualApproveAfterAiReject &&
+    aiDetail.approved === false
+  ) {
+    throw new Error("AI 已明确拒绝该作品，当前策略下不能直接人工改为已发布。");
+  }
+
+  const primaryUpdateResult = await supabaseAdmin
     .from("community_posts")
     .update(
       {
@@ -306,6 +497,55 @@ export async function updateCommunityPostReview(
       "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, moderation_detail, is_featured, created_at, reviewed_at",
     )
     .single();
+
+  let data: CommunityPostReviewRow | null =
+    (primaryUpdateResult.data as CommunityPostReviewRow | null) ?? null;
+  let error = primaryUpdateResult.error;
+
+  if (error && isMissingModerationDetailSchemaError(error)) {
+    const fallbackUpdateResult = (await supabaseAdmin
+      .from("community_posts")
+      .update(
+        {
+          moderation_status: input.moderation_status,
+          moderation_reason: input.moderation_reason ?? null,
+          is_featured: input.is_featured ?? false,
+          reviewed_by: input.reviewed_by,
+          reviewed_at: new Date().toISOString(),
+          moderation_stage: "manual",
+        } as never,
+      )
+      .eq("id", postId)
+      .select(
+        "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, is_featured, created_at, reviewed_at",
+      )
+      .single()) as {
+      data:
+        | {
+            id: string;
+            user_id: string;
+            title: string;
+            prompt: string;
+            preview_image_url: string;
+            moderation_status: "pending" | "approved" | "rejected";
+            moderation_reason: string | null;
+            moderation_stage: "rule" | "ai" | "fallback" | "manual";
+            is_featured: boolean;
+            created_at: string;
+            reviewed_at: string | null;
+          }
+        | null;
+      error: PostgrestError | null;
+    };
+
+    data = fallbackUpdateResult.data
+      ? {
+          ...fallbackUpdateResult.data,
+          moderation_detail: existingPost?.moderation_detail ?? {},
+        }
+      : null;
+    error = fallbackUpdateResult.error;
+  }
 
   if (error) {
     throw error;
@@ -336,6 +576,59 @@ export async function updateCommunityPostReview(
   return postRecord;
 }
 
+export async function updateAdminCommunityOperations(
+  postId: string,
+  input: {
+    title?: string;
+    prompt?: string;
+    category?: string;
+    like_count?: number;
+    view_count?: number;
+    share_count?: number;
+    manual_sort_order?: number;
+    is_featured?: boolean;
+    creator_score?: number;
+    manual_creator_rank?: number | null;
+    is_creator_star?: boolean;
+    display_total_likes?: number;
+    reviewed_by: string;
+    note?: string | null;
+  },
+) {
+  if (typeof input.display_total_likes === "number") {
+    await updateCommunityDashboardSetting({
+      displayTotalLikes: input.display_total_likes,
+    });
+  }
+
+  const post = await updateCommunityPostOperations(postId, {
+    title: input.title,
+    prompt: input.prompt,
+    category: input.category as CommunityAdminSearchRecord["category"],
+    likeCount: input.like_count,
+    viewCount: input.view_count,
+    shareCount: input.share_count,
+    manualSortOrder: input.manual_sort_order,
+    isFeatured: input.is_featured,
+    creatorScore: input.creator_score,
+    manualCreatorRank: input.manual_creator_rank,
+    isCreatorStar: input.is_creator_star,
+    note: input.note,
+    adminUserId: input.reviewed_by,
+  });
+
+  if (!post) {
+    return null;
+  }
+
+  const latestPosts = await listAdminCommunityPosts();
+  return latestPosts.find((item) => item.id === postId) ?? null;
+}
+
+export async function deleteAdminCommunityPost(postId: string) {
+  return deleteCommunityPostPermanently(postId);
+}
+
 type AdminUserBaseRow = Omit<
   AdminUserRecord,
   | "credits"
@@ -355,6 +648,25 @@ type AdminUserPostRow = {
   moderation_status: "pending" | "approved" | "rejected";
   created_at: string;
 };
+
+function isMissingModerationDetailSchemaError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  if (
+    "code" in error &&
+    (error.code === "42703" || error.code === "PGRST204" || error.code === "PGRST205")
+  ) {
+    return true;
+  }
+
+  return (
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.includes("moderation_detail")
+  );
+}
 
 function isMissingCreditLogTable(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -405,6 +717,7 @@ export async function getAdminUserById(userId: string) {
 export async function listAdminUsers(input?: {
   userId?: string;
   includeCreditLogs?: boolean;
+  limit?: number;
 }): Promise<AdminUserRecord[]> {
   const supabaseAdmin = getSupabaseAdmin();
   const creditPolicy = await getCreditPolicySetting().catch(() => ({
@@ -414,25 +727,23 @@ export async function listAdminUsers(input?: {
     .from("users")
     .select("id, phone, nickname, status, last_login_at, avatar_url, notes, created_at")
     .order("created_at", { ascending: false });
+  const creditsQuery = supabaseAdmin
+    .from("user_credits")
+    .select("user_id, credits");
 
   if (input?.userId) {
     usersQuery.eq("id", input.userId);
+    creditsQuery.eq("user_id", input.userId);
+  } else if (typeof input?.limit === "number" && input.limit > 0) {
+    usersQuery.limit(input.limit);
   }
 
   const [
     { data: users, error: usersError },
     { data: credits, error: creditsError },
-    { data: posts, error: postsError },
   ] = await Promise.all([
     usersQuery.returns<AdminUserBaseRow[]>(),
-    supabaseAdmin
-      .from("user_credits")
-      .select("user_id, credits")
-      .returns<Array<{ user_id: string; credits: number }>>(),
-    supabaseAdmin
-      .from("community_posts")
-      .select("user_id, moderation_status, created_at")
-      .returns<AdminUserPostRow[]>(),
+    creditsQuery.returns<Array<{ user_id: string; credits: number }>>(),
   ]);
 
   if (usersError) {
@@ -443,13 +754,28 @@ export async function listAdminUsers(input?: {
     throw creditsError;
   }
 
-  if (postsError) {
-    throw postsError;
-  }
-
   const creditsMap = new Map(
     (credits ?? []).map((item) => [item.user_id as string, item.credits as number]),
   );
+
+  const userIds = (users ?? []).map((user) => user.id);
+  let posts: AdminUserPostRow[] = [];
+
+  if (userIds.length) {
+    const postsQuery = supabaseAdmin
+      .from("community_posts")
+      .select("user_id, moderation_status, created_at")
+      .in("user_id", userIds);
+
+    const { data: postsData, error: postsError } =
+      await postsQuery.returns<AdminUserPostRow[]>();
+
+    if (postsError) {
+      throw postsError;
+    }
+
+    posts = postsData ?? [];
+  }
 
   const postsByUser = new Map<
     string,
@@ -546,6 +872,18 @@ export async function updateAdminUser(
 ) {
   const supabaseAdmin = getSupabaseAdmin();
 
+  if (input.status === "disabled") {
+    const { data: targetUser } = await supabaseAdmin
+      .from("users")
+      .select("phone")
+      .eq("id", userId)
+      .maybeSingle<{ phone: string | null }>();
+
+    if (targetUser?.phone && isBootstrapAdminPhone(targetUser.phone)) {
+      throw new Error("系统保底超级管理员不能被停用，以免后台被彻底锁死。");
+    }
+  }
+
   if (
     input.nickname !== undefined ||
     input.status !== undefined ||
@@ -564,6 +902,17 @@ export async function updateAdminUser(
 
     if (userError) {
       throw userError;
+    }
+
+    if (input.status === "disabled") {
+      const { error: sessionError } = await supabaseAdmin
+        .from("user_sessions")
+        .delete()
+        .eq("user_id", userId);
+
+      if (sessionError) {
+        throw sessionError;
+      }
     }
   }
 
@@ -738,24 +1087,67 @@ export async function sendNotification(notificationId: string) {
     throw updateError;
   }
 
-  return updatedNotification as NotificationRecord;
+  return {
+    notification: updatedNotification as NotificationRecord,
+    recipientCount: targetUserIds.length,
+  };
 }
 
 export async function listUserNotifications(
   userId: string,
-): Promise<UserNotificationRecord[]> {
+): Promise<UserNotificationsSummary> {
   const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
-    .from("user_notifications")
-    .select("id, is_read, created_at, read_at, notifications(title, body, sent_at)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(12)
-    .returns<UserNotificationRecord[]>();
+  const [{ data, error }, unreadResult] = await Promise.all([
+    supabaseAdmin
+      .from("user_notifications")
+      .select("id, is_read, created_at, read_at, notifications(title, body, sent_at)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(12)
+      .returns<UserNotificationRecord[]>(),
+    supabaseAdmin
+      .from("user_notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("is_read", false),
+  ]);
 
   if (error) {
     throw error;
   }
 
-  return data ?? [];
+  if (unreadResult.error) {
+    throw unreadResult.error;
+  }
+
+  return {
+    notifications: data ?? [],
+    unreadCount: unreadResult.count ?? 0,
+  };
+}
+
+export async function markUserNotificationsRead(userId: string) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const readAt = new Date().toISOString();
+
+  const { data, error } = await supabaseAdmin
+    .from("user_notifications")
+    .update(
+      {
+        is_read: true,
+        read_at: readAt,
+      } as never,
+    )
+    .eq("user_id", userId)
+    .eq("is_read", false)
+    .select("id");
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    updatedCount: data?.length ?? 0,
+    readAt,
+  };
 }

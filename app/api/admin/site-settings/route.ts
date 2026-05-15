@@ -3,6 +3,7 @@ import {
   listSiteSettings,
   upsertSiteSettings,
 } from "@/lib/admin-data";
+import { appendAdminAuditLog } from "@/lib/admin-audit";
 import {
   requireAdminContext,
   requirePermission,
@@ -71,6 +72,18 @@ export async function POST(request: Request) {
         updated_by: adminContext.userId,
       })),
     );
+
+    await appendAdminAuditLog({
+      actorUserId: adminContext.userId,
+      actorDisplayName: adminContext.displayName,
+      actorPhone: adminContext.phone,
+      action: "site_settings_update",
+      targetType: "site_settings",
+      targetId: body.settings.map((item) => item.setting_key).join(","),
+      detail: {
+        settingKeys: body.settings.map((item) => item.setting_key),
+      },
+    });
 
     return NextResponse.json({ success: true, settings });
   } catch (requestError) {

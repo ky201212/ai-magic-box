@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { addCredits, consumeCredits } from "@/lib/credits";
+import { getAiSecret } from "@/lib/ai-secrets";
 
 type SiliconFlowTranscribeResponse = {
   text?: string;
@@ -9,6 +10,18 @@ type SiliconFlowTranscribeResponse = {
     message?: string;
   };
 };
+
+function mapUpstreamStatusToGatewayStatus(status: number) {
+  if (status === 401 || status === 403) {
+    return 502;
+  }
+
+  if (status >= 500) {
+    return 502;
+  }
+
+  return status;
+}
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +36,7 @@ export async function POST(request: Request) {
     }
 
     const aiConfig = await resolveAiModeConfig("transcribe");
-    const apiKey = process.env[aiConfig.apiKeyEnv];
+    const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
     const { creditEnabled, creditCost } = resolveModeCreditPolicy(
       aiConfig.extraPayload,
     );
@@ -103,7 +116,7 @@ export async function POST(request: Request) {
           error: errorData || "语音识别接口请求失败，请稍后再试。",
           remainingCredits,
         },
-        { status: upstreamResponse.status },
+        { status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status) },
       );
     }
 
