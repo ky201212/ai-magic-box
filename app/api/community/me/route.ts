@@ -6,6 +6,7 @@ import {
 } from "@/lib/community";
 import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
 import { getCurrentUser } from "@/lib/auth";
+import { listUserPaymentOrders, listUserSubscriptions } from "@/lib/payments";
 
 export async function GET() {
   try {
@@ -17,11 +18,13 @@ export async function GET() {
 
     await ensureUserProfile(currentUser.user_id, currentUser.users.phone);
 
-    const [profile, credits, posts, creditLogs] = await Promise.all([
+    const [profile, credits, posts, creditLogs, orders, subscriptions] = await Promise.all([
       getUserProfile(currentUser.user_id),
       ensureUserCredits(currentUser.user_id),
       listUserCommunityPosts(currentUser.user_id),
       listUserCreditLogs(currentUser.user_id),
+      listUserPaymentOrders(currentUser.user_id, 6),
+      listUserSubscriptions(currentUser.user_id),
     ]);
 
     return NextResponse.json({
@@ -29,6 +32,8 @@ export async function GET() {
       credits,
       creditLogs,
       posts,
+      orders,
+      subscriptions,
       phone: currentUser.users.phone,
     });
   } catch (error) {

@@ -52,29 +52,32 @@ export default async function MatrixPage() {
   const brandIdentity = await getBrandIdentitySetting();
 
   return (
-    <main className="min-h-screen bg-[#080512] text-white">
+    <main className="min-h-screen bg-[#f7fbff] text-[#17213f]">
       <div className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,#06030d_0%,#0b0616_24%,#10081f_52%,#080512_100%)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(113,219,255,0.1),transparent_18%),radial-gradient(circle_at_84%_18%,rgba(174,108,255,0.12),transparent_22%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,#f7fbff_0%,#eef5ff_44%,#fff6fb_100%)]" />
+          <div className="home-grid absolute inset-0 opacity-[0.55]" />
+          <div className="home-sweep absolute left-[-20%] top-[10%] h-[24rem] w-[140%] rotate-[-8deg] bg-[linear-gradient(90deg,transparent,rgba(135,166,255,0.18),rgba(255,177,210,0.16),transparent)] blur-2xl" />
+          <div className="absolute left-[-8%] top-[4%] h-[420px] w-[420px] rounded-full bg-[#8edaff]/18 blur-[130px]" />
+          <div className="absolute right-[-8%] top-[4%] h-[520px] w-[520px] rounded-full bg-[#ddb7ff]/22 blur-[150px]" />
         </div>
 
         <div className="relative mx-auto w-full max-w-[1920px] px-10 py-8 lg:px-14 xl:px-20">
-          <header className="flex items-center justify-between">
+          <header className="flex items-center justify-between rounded-[28px] border border-white/80 bg-white/72 px-6 py-5 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
             <Link href="/" className="flex items-center gap-4">
               <Image
                 src={brandIdentity.logoUrl}
                 alt={brandIdentity.siteName}
                 width={54}
                 height={54}
-                className="rounded-[18px]"
+                className="rounded-[18px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)]"
                 priority
               />
               <div>
-                <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">
+                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#17213f]">
                   {brandIdentity.siteName}
                 </p>
-                <p className="text-[12px] tracking-[0.08em] text-white/40">
+                <p className="text-[12px] tracking-[0.08em] text-[#6d7899]">
                   {brandIdentity.tagline}
                 </p>
               </div>
@@ -85,19 +88,19 @@ export default async function MatrixPage() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`text-[14px] font-medium tracking-[0.03em] transition hover:text-white ${
-                    item.href === "/matrix" ? "text-white" : "text-white/52"
+                  className={`text-[14px] font-semibold tracking-[0.03em] transition hover:text-[#17213f] ${
+                    item.href === "/matrix" ? "text-[#6c63ff]" : "text-[#6a7392]"
                   }`}
                 >
                   {item.label}
                 </Link>
               ))}
-              <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/6 p-2 pl-3 backdrop-blur-xl">
+              <div className="flex items-center gap-3 rounded-full border border-[#dce5ff] bg-white/78 p-2 pl-3 shadow-[0_18px_44px_rgba(116,132,185,0.1)] backdrop-blur-xl">
                 {isLoggedIn ? (
                   <form action="/api/auth/logout" method="POST">
                     <button
                       type="submit"
-                      className="rounded-full border border-white/10 bg-white/6 px-4 py-2.5 text-[13px] font-semibold text-white/78 transition hover:bg-white/10 hover:text-white"
+                      className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                     >
                       退出登录
                     </button>
@@ -105,14 +108,14 @@ export default async function MatrixPage() {
                 ) : (
                   <Link
                     href="/login"
-                    className="rounded-full border border-white/10 bg-white/6 px-4 py-2.5 text-[13px] font-semibold text-white/78 transition hover:bg-white/10 hover:text-white"
+                    className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                   >
                     手机号登录
                   </Link>
                 )}
                 <Link
                   href="/workshop?mode=coding"
-                  className="rounded-full bg-white px-6 py-2.5 text-[14px] font-semibold text-[#1e1338] transition hover:bg-white/92"
+                  className="rounded-full bg-[#17213f] px-6 py-2.5 text-[14px] font-semibold text-white shadow-[0_14px_34px_rgba(23,33,63,0.16)] transition hover:-translate-y-0.5"
                 >
                   进入工坊
                 </Link>
@@ -121,28 +124,28 @@ export default async function MatrixPage() {
           </header>
 
           <section className="py-16">
-            <div className="inline-flex rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-semibold tracking-[0.18em] text-white/66">
+            <div className="inline-flex rounded-full border border-white/80 bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#627ee6] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
               创作矩阵
             </div>
 
             <div className="mt-8 max-w-[1180px]">
-              <h1 className="text-[64px] font-black leading-[0.96] tracking-[-0.07em] text-white xl:text-[88px] 2xl:text-[102px]">
+              <h1 className="text-[64px] font-black leading-[0.96] tracking-[-0.07em] text-[#121a35] xl:text-[88px] 2xl:text-[102px]">
                 <span className="block">每一种表达方式</span>
-                <span className="mt-3 block xl:mt-4">都可以成为孩子的创作入口</span>
+                <span className="home-gradient-text mt-3 block xl:mt-4">都可以成为孩子的创作入口</span>
               </h1>
-              <div className="mt-6 h-[3px] w-24 rounded-full bg-[linear-gradient(90deg,rgba(167,108,255,0.9),rgba(97,208,255,0.9))]" />
+              <div className="mt-6 h-[3px] w-24 rounded-full bg-[linear-gradient(90deg,#ffbc7c,#ff8fc7,#8974ff)]" />
             </div>
 
-            <p className="mt-8 max-w-[38ch] text-[18px] leading-[2.1] text-white/58 xl:max-w-[40ch]">
+            <p className="mt-8 max-w-[38ch] text-[18px] leading-[2.1] text-[#657193] xl:max-w-[40ch]">
               我们把不同模态的 AI 能力，变成不同类型的创作工坊。孩子不需要先理解技术名词，只需要选择自己最想表达的方式。
             </p>
 
             <div className="mt-12 grid gap-6 lg:grid-cols-3">
               {matrixCards.map((card) => {
                 const content = (
-                  <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(43,31,102,0.56),rgba(17,11,40,0.96))] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.28)]">
+                  <div className="rounded-[30px] border border-white/80 bg-white/72 p-6 shadow-[0_18px_54px_rgba(92,116,189,0.14)] backdrop-blur-2xl">
                     <div className="flex items-start justify-between gap-4">
-                      <div className="grid h-14 w-14 place-items-center rounded-[18px] border border-white/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.06))] backdrop-blur-xl">
+                      <div className="grid h-14 w-14 place-items-center rounded-[18px] border border-white/80 bg-white/78 shadow-[0_12px_30px_rgba(101,124,190,0.12)]">
                         <Image
                           src={card.iconSrc}
                           alt={card.title}
@@ -151,17 +154,17 @@ export default async function MatrixPage() {
                           className="h-9 w-9 object-contain"
                         />
                       </div>
-                      <div className="inline-flex rounded-full border border-white/10 bg-white/8 px-3 py-1 text-xs font-semibold tracking-[0.12em] text-white/66">
+                      <div className="inline-flex rounded-full border border-[#dce5ff] bg-white/78 px-3 py-1 text-xs font-semibold tracking-[0.12em] text-[#627ee6]">
                         {card.badge}
                       </div>
                     </div>
-                    <h2 className="mt-8 text-[34px] font-black leading-[1.04] tracking-[-0.06em] text-white">
+                    <h2 className="mt-8 text-[34px] font-black leading-[1.04] tracking-[-0.06em] text-[#17213f]">
                       {card.title}
                     </h2>
-                    <p className="mt-4 text-[15px] leading-8 text-white/56">
+                    <p className="mt-4 text-[15px] leading-8 text-[#647092]">
                       {card.description}
                     </p>
-                    <div className="mt-8 inline-flex rounded-full border border-white/12 bg-white/8 px-4 py-2 text-sm font-semibold text-white/80">
+                    <div className="mt-8 inline-flex rounded-full border border-[#d7e0ff] bg-white/78 px-4 py-2 text-sm font-semibold text-[#52607e] shadow-[0_12px_30px_rgba(101,124,190,0.1)]">
                       {card.href ? "进入体验" : "敬请期待"}
                     </div>
                   </div>

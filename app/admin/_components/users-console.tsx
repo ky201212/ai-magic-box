@@ -40,6 +40,52 @@ function getCreditChangeTone(changeAmount: number) {
     : "text-rose-600 bg-rose-50";
 }
 
+function formatDateOnly(value: string | null) {
+  if (!value) {
+    return "暂无";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function formatPrice(price: number) {
+  return `¥${(price / 100).toFixed(2)}`;
+}
+
+function getSubscriptionStatusLabel(status: "active" | "expired" | "cancelled") {
+  if (status === "active") {
+    return "订阅中";
+  }
+
+  if (status === "expired") {
+    return "已到期";
+  }
+
+  return "已取消";
+}
+
+function getSubscriptionStatusTone(status: "active" | "expired" | "cancelled") {
+  if (status === "active") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "expired") {
+    return "bg-slate-100 text-slate-500";
+  }
+
+  return "bg-rose-50 text-rose-700";
+}
+
+function getSubscriptionPlanName(
+  subscription: AdminUserRecord["subscriptions"][number] | undefined,
+) {
+  return subscription?.subscription_plans?.name ?? "未知套餐";
+}
+
 export function UsersConsole({ initialUsers }: UsersConsoleProps) {
   const [users, setUsers] = useState(initialUsers);
   const [keyword, setKeyword] = useState("");
@@ -65,7 +111,12 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
       }
     >
   >({});
-  const [hasLoadedFullUsers, setHasLoadedFullUsers] = useState(false);
+  const [subscriptionActionState, setSubscriptionActionState] = useState<
+    Record<string, "idle" | "saving" | "success">
+  >({});
+  const [hasLoadedFullUsers, setHasLoadedFullUsers] = useState(
+    initialUsers.some((user) => user.creditLogs.length > 0),
+  );
   const [loadingUserDetailId, setLoadingUserDetailId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -99,16 +150,14 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
       }
     };
 
-    if (!initialUsers.some((user) => user.creditLogs.length > 0)) {
+    if (!hasLoadedFullUsers) {
       void loadFullUsers();
-    } else {
-      setHasLoadedFullUsers(true);
     }
 
     return () => {
       mounted = false;
     };
-  }, [initialUsers]);
+  }, [hasLoadedFullUsers, initialUsers]);
 
   const filteredUsers = useMemo(() => {
     const normalizedKeyword = keyword.trim();
@@ -367,6 +416,62 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
     replaceUser(updatedUser);
   };
 
+  const handleCancelSubscription = async (
+    user: AdminUserRecord,
+    subscriptionId: string,
+  ) => {
+    const subscription = user.subscriptions.find((item) => item.id === subscriptionId);
+    const planName = getSubscriptionPlanName(subscription);
+
+    if (!window.confirm(`确定要取消 ${user.phone} 的「${planName}」订阅吗？`)) {
+      return;
+    }
+
+    setSubscriptionActionState((current) => ({
+      ...current,
+      [subscriptionId]: "saving",
+    }));
+
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "cancel_subscription",
+          subscriptionId,
+        }),
+      });
+      const data = (await response.json()) as {
+        user?: AdminUserRecord;
+        error?: string;
+      };
+
+      if (!response.ok || !data.user) {
+        throw new Error(data.error ?? "订阅取消失败，请稍后再试。");
+      }
+
+      replaceUser(data.user);
+      setSubscriptionActionState((current) => ({
+        ...current,
+        [subscriptionId]: "success",
+      }));
+      window.setTimeout(() => {
+        setSubscriptionActionState((current) => ({
+          ...current,
+          [subscriptionId]: "idle",
+        }));
+      }, 1200);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "订阅取消失败，请稍后再试。");
+      setSubscriptionActionState((current) => ({
+        ...current,
+        [subscriptionId]: "idle",
+      }));
+    }
+  };
+
   return (
     <div className="space-y-5">
       <section className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
@@ -407,6 +512,9 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
             grant: "idle",
             revoke: "idle",
           };
+          const activeSubscription = user.subscriptions.find(
+            (item) => item.status === "active",
+          );
 
           return (
             <article
@@ -443,6 +551,9 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                     </span>
                     <span className="rounded-full bg-slate-50 px-3 py-1">
                       投稿：{user.postsCount}
+                    </span>
+                    <span className="rounded-full bg-slate-50 px-3 py-1">
+                      订阅：{activeSubscription ? getSubscriptionPlanName(activeSubscription) : "暂无"}
                     </span>
                   </div>
                 </div>
@@ -630,6 +741,85 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                       <p className="mt-4 text-sm leading-7 text-slate-500">
                         最近投稿：{formatDateTime(user.latestPostAt)}
                       </p>
+                    </section>
+
+                    <section className="rounded-[24px] bg-slate-50 p-5 xl:col-span-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">订阅套餐</p>
+                          <p className="mt-2 text-sm leading-7 text-slate-500">
+                            这里显示用户开通过的套餐，生效中的订阅可以直接取消。
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500">
+                          共 {user.subscriptions.length} 条
+                        </span>
+                      </div>
+
+                      <div className="mt-5 space-y-3">
+                        {user.subscriptions.length ? (
+                          user.subscriptions.map((subscription) => {
+                            const subscriptionState =
+                              subscriptionActionState[subscription.id] ?? "idle";
+
+                            return (
+                              <div
+                                key={subscription.id}
+                                className="grid gap-3 rounded-[20px] bg-white px-4 py-4 lg:grid-cols-[1fr_auto]"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-sm font-black text-slate-800">
+                                      {getSubscriptionPlanName(subscription)}
+                                    </p>
+                                    <span
+                                      className={`rounded-full px-2.5 py-1 text-xs font-bold ${getSubscriptionStatusTone(
+                                        subscription.status,
+                                      )}`}
+                                    >
+                                      {getSubscriptionStatusLabel(subscription.status)}
+                                    </span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">
+                                      {subscription.source === "payment"
+                                        ? "支付开通"
+                                        : "激活码开通"}
+                                    </span>
+                                  </div>
+                                  <p className="mt-2 text-sm leading-7 text-slate-500">
+                                    每日 {subscription.subscription_plans?.daily_coins ?? 0} 币，
+                                    周期 {subscription.subscription_plans?.duration_days ?? 0} 天，
+                                    价格 {formatPrice(subscription.subscription_plans?.price ?? 0)}
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-400">
+                                    {formatDateOnly(subscription.start_date)} 至{" "}
+                                    {formatDateOnly(subscription.end_date)}
+                                  </p>
+                                </div>
+                                {subscription.status === "active" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleCancelSubscription(user, subscription.id)
+                                    }
+                                    disabled={subscriptionState === "saving"}
+                                    className="self-start rounded-full bg-[#fff1f3] px-4 py-2.5 text-sm font-black text-[#d4557c]"
+                                  >
+                                    {subscriptionState === "saving"
+                                      ? "取消中"
+                                      : subscriptionState === "success"
+                                        ? "已取消"
+                                        : "取消订阅"}
+                                  </button>
+                                ) : null}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-[20px] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+                            这个用户暂时没有订阅套餐。
+                          </div>
+                        )}
+                      </div>
                     </section>
                   </div>
 

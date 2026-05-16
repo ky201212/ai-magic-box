@@ -133,7 +133,7 @@ async function createCreditLog(input: UserCreditLogInsertPayload) {
 
   if (error) {
     if (isMissingCreditLogTable(error)) {
-      console.error("魔法币日志表暂不可用，已写入后备日志存储。", error);
+      console.warn("魔法币日志表暂不可用，已写入后备日志存储。", error);
       await appendFallbackCreditLog(input);
       return;
     }
@@ -323,7 +323,7 @@ export async function listUserCreditLogs(userId: string, limit = 30) {
 
   if (error) {
     if (isMissingCreditLogTable(error)) {
-      console.error("魔法币日志表暂不可用，已改为读取后备日志存储。", error);
+      console.warn("魔法币日志表暂不可用，已改为读取后备日志存储。", error);
       return listFallbackCreditLogs(userId);
     }
 

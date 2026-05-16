@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const SESSION_COOKIE_NAME = "magic_session";
-const SESSION_EXPIRES_DAYS = 30;
+const SESSION_TIMEZONE_OFFSET_HOURS = 8;
 
 type CurrentUser = {
   user_id: string;
@@ -33,6 +33,13 @@ function getSessionSecret() {
 
 function sha256(input: string) {
   return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+function getNextSessionExpiryDate(now = new Date()) {
+  const localMs = now.getTime() + SESSION_TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000;
+  const localDate = new Date(localMs);
+  localDate.setUTCHours(24, 0, 0, 0);
+  return new Date(localDate.getTime() - SESSION_TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000);
 }
 
 export function generateOtpCode() {
@@ -71,9 +78,12 @@ async function resolveCookieSecureFlag() {
 export async function setSession(userId: string) {
   const token = generateSessionToken();
   const tokenHash = sha256(`${getSessionSecret()}:${token}`);
-  const expiresAt = new Date(
-    Date.now() + SESSION_EXPIRES_DAYS * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const expiresAtDate = getNextSessionExpiryDate();
+  const expiresAt = expiresAtDate.toISOString();
+  const maxAge = Math.max(
+    1,
+    Math.floor((expiresAtDate.getTime() - Date.now()) / 1000),
+  );
   const insertPayload: UserSessionInsertPayload = {
     user_id: userId,
     token_hash: tokenHash,
@@ -97,7 +107,7 @@ export async function setSession(userId: string) {
     sameSite: "strict",
     secure,
     path: "/",
-    maxAge: SESSION_EXPIRES_DAYS * 24 * 60 * 60,
+    maxAge,
   });
 }
 

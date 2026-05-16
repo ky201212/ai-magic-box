@@ -126,6 +126,24 @@ export type AdminUserRecord = {
   totalCreditsAdded: number;
   totalCreditsSpent: number;
   lastCreditChangeAt: string | null;
+  subscriptions: Array<{
+    id: string;
+    user_id: string;
+    plan_id: string;
+    status: "active" | "expired" | "cancelled";
+    start_date: string;
+    end_date: string;
+    last_grant_date: string | null;
+    source: "payment" | "activation_code";
+    reference_id: string | null;
+    created_at: string;
+    subscription_plans?: {
+      name: string;
+      daily_coins: number;
+      duration_days: number;
+      price: number;
+    } | null;
+  }>;
   creditLogs: Array<{
     id: string;
     user_id: string;

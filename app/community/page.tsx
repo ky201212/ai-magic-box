@@ -51,6 +51,7 @@ export default async function CommunityPage() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch
                   className={`relative hidden text-[14px] font-semibold tracking-[0.03em] transition sm:inline-flex ${
                     item.href === "/community"
                       ? "text-[#6c63ff]"
@@ -69,6 +70,7 @@ export default async function CommunityPage() {
                   <>
                     <Link
                       href="/profile"
+                      prefetch
                       className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                     >
                       我的主页
@@ -85,6 +87,7 @@ export default async function CommunityPage() {
                 ) : (
                   <Link
                     href="/login?redirect=/community"
+                    prefetch
                     className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                   >
                     手机号登录
@@ -92,6 +95,7 @@ export default async function CommunityPage() {
                 )}
                 <Link
                   href="/workshop?mode=coding"
+                  prefetch
                   className="rounded-full bg-[#625cff] px-5 py-2.5 text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
                 >
                   进入工坊

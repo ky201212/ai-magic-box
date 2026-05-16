@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createCreditLogEntry } from "@/lib/credits";
 import type { CreditLogRow } from "@/lib/credits";
+import type { UserSubscription } from "@/lib/payments";
 import { sendUserNotification } from "@/lib/user-notifications";
 import { isBootstrapAdminPhone } from "@/lib/admin";
 import {
@@ -12,6 +13,11 @@ import {
   updateCommunityPostOperations,
   type CommunityAdminSearchRecord,
 } from "@/lib/community";
+import {
+  defaultInfoContentPosts,
+  normalizeInfoContentPosts,
+  type InfoContentPost,
+} from "@/lib/info-content";
 
 export type SiteSettingRecord = {
   setting_key: string;
@@ -134,6 +140,7 @@ export type AdminUserRecord = {
   totalCreditsAdded: number;
   totalCreditsSpent: number;
   lastCreditChangeAt: string | null;
+  subscriptions: UserSubscription[];
   creditLogs: CreditLogRow[];
 };
 
@@ -147,6 +154,10 @@ export type NotificationRecord = {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type InfoContentSettingRecord = {
+  posts: InfoContentPost[];
 };
 
 export type UserNotificationRecord = {
@@ -252,6 +263,61 @@ export async function getCommunityReviewSetting() {
       lockManualApproveAfterAiReject: true,
     },
   );
+}
+
+export async function getInfoContentSetting() {
+  const result = await getSiteSettingValue<{ posts?: unknown }>(
+    "content.info-posts",
+    { posts: defaultInfoContentPosts },
+  );
+
+  const posts = normalizeInfoContentPosts(result.posts);
+
+  return {
+    posts: posts.length ? posts : defaultInfoContentPosts,
+  };
+}
+
+export async function listInfoContentPosts(input?: {
+  includeDrafts?: boolean;
+  limit?: number;
+}) {
+  const setting = await getInfoContentSetting();
+  const posts = input?.includeDrafts
+    ? setting.posts
+    : setting.posts.filter((post) => post.status === "published");
+
+  const sortedPosts = [...posts].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === "published" ? -1 : 1;
+    }
+
+    return a.sortOrder - b.sortOrder;
+  });
+
+  return typeof input?.limit === "number" && input.limit > 0
+    ? sortedPosts.slice(0, input.limit)
+    : sortedPosts;
+}
+
+export async function saveInfoContentPosts(input: {
+  posts: InfoContentPost[];
+  updatedBy: string;
+}) {
+  const normalizedPosts = normalizeInfoContentPosts(input.posts);
+
+  await upsertSiteSettings([
+    {
+      setting_key: "content.info-posts",
+      setting_group: "content",
+      label: "科普资讯内容",
+      value: { posts: normalizedPosts },
+      description: "科普资讯页面展示的文章、视频、获奖喜讯和活动资讯。",
+      updated_by: input.updatedBy,
+    },
+  ]);
+
+  return normalizedPosts;
 }
 
 export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
@@ -640,6 +706,7 @@ type AdminUserBaseRow = Omit<
   | "totalCreditsAdded"
   | "totalCreditsSpent"
   | "lastCreditChangeAt"
+  | "subscriptions"
   | "creditLogs"
 >;
 
@@ -676,6 +743,26 @@ function isMissingCreditLogTable(error: unknown) {
   return "code" in error && error.code === "PGRST205";
 }
 
+function isMissingPaymentSchema(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
+  const message =
+    "message" in error && typeof error.message === "string" ? error.message : "";
+
+  return (
+    code === "PGRST205" ||
+    code === "PGRST204" ||
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("user_subscriptions") ||
+    message.includes("subscription_plans")
+  );
+}
+
 async function listAdminCreditLogsForUser(userId: string, limit = 30) {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -707,6 +794,40 @@ async function listAdminCreditLogsForUser(userId: string, limit = 30) {
   }
 
   return (fallback?.value?.logs ?? []).slice(0, limit);
+}
+
+async function listAdminSubscriptionsForUsers(userIds: string[]) {
+  const subscriptionsByUser = new Map<string, UserSubscription[]>();
+
+  if (!userIds.length) {
+    return subscriptionsByUser;
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("user_subscriptions")
+    .select(
+      "id, user_id, plan_id, status, start_date, end_date, last_grant_date, source, reference_id, created_at, subscription_plans(name, daily_coins, duration_days, price)",
+    )
+    .in("user_id", userIds)
+    .order("created_at", { ascending: false })
+    .returns<UserSubscription[]>();
+
+  if (error) {
+    if (isMissingPaymentSchema(error)) {
+      return subscriptionsByUser;
+    }
+
+    throw error;
+  }
+
+  for (const subscription of data ?? []) {
+    const current = subscriptionsByUser.get(subscription.user_id) ?? [];
+    current.push(subscription);
+    subscriptionsByUser.set(subscription.user_id, current);
+  }
+
+  return subscriptionsByUser;
 }
 
 export async function getAdminUserById(userId: string) {
@@ -828,6 +949,8 @@ export async function listAdminUsers(input?: {
     }
   }
 
+  const subscriptionsByUser = await listAdminSubscriptionsForUsers(userIds);
+
   return (users ?? []).map((user) => {
     const userPosts = postsByUser.get(user.id) ?? {
       postsCount: 0,
@@ -855,6 +978,7 @@ export async function listAdminUsers(input?: {
       totalCreditsAdded,
       totalCreditsSpent,
       lastCreditChangeAt: creditLogs[0]?.created_at ?? null,
+      subscriptions: subscriptionsByUser.get(user.id) ?? [],
       creditLogs,
     };
   });

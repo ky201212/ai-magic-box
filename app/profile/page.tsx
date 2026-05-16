@@ -34,6 +34,28 @@ type ProfilePayload = {
     moderation_reason: string | null;
     created_at: string;
   }>;
+  orders: Array<{
+    order_id: string;
+    order_type: "coin_purchase" | "subscription";
+    amount: number;
+    status: "pending" | "paid" | "cancelled" | "refunded";
+    payment_method: string;
+    paid_at: string | null;
+    created_at: string;
+  }>;
+  subscriptions: Array<{
+    id: string;
+    status: "active" | "expired" | "cancelled";
+    start_date: string;
+    end_date: string;
+    last_grant_date: string | null;
+    subscription_plans?: {
+      name: string;
+      daily_coins: number;
+      duration_days: number;
+      price: number;
+    } | null;
+  }>;
   phone: string;
 };
 
@@ -62,6 +84,27 @@ const statusMap = {
   rejected: {
     label: "未通过",
     className: "bg-[#fff0f4] text-[#cc4c78] border-[#ffc7d8]",
+  },
+} as const;
+
+const moderationNoteMap = {
+  approved: {
+    eyebrow: "展示进度",
+    containerClassName:
+      "border-[#d8f2e5] bg-[#f7fffb] text-[#4e7b68] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+    badgeClassName: "bg-[#e7fff2] text-[#21956a]",
+  },
+  pending: {
+    eyebrow: "审核进度",
+    containerClassName:
+      "border-[#f4e2b2] bg-[#fffbf1] text-[#8a7141] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+    badgeClassName: "bg-[#fff2c8] text-[#ae7c18]",
+  },
+  rejected: {
+    eyebrow: "审核反馈",
+    containerClassName:
+      "border-[#f0d8de] bg-[#fff9fb] text-[#8f6270] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+    badgeClassName: "bg-[#ffe6ef] text-[#bf5a80]",
   },
 } as const;
 
@@ -135,6 +178,10 @@ export default function ProfilePage() {
       rejected: posts.filter((post) => post.moderation_status === "rejected").length,
     };
   }, [data?.posts]);
+  const activeSubscription = useMemo(
+    () => data?.subscriptions.find((item) => item.status === "active") ?? null,
+    [data?.subscriptions],
+  );
 
   if (isLoading) {
     return (
@@ -183,7 +230,7 @@ export default function ProfilePage() {
           <div className="home-sweep absolute left-[-10%] top-[18%] h-48 w-[72%] rounded-full bg-[linear-gradient(90deg,rgba(124,148,255,0),rgba(124,148,255,0.24),rgba(255,161,211,0))] blur-3xl" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1760px] px-5 py-6 sm:px-8 lg:px-12 xl:px-16">
+        <div className="relative mx-auto w-full max-w-[1520px] px-5 py-6 sm:px-8 lg:px-10">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
             <Link href="/" className="flex items-center gap-4">
               <Image
@@ -239,44 +286,139 @@ export default function ProfilePage() {
             </div>
           </header>
 
-          <section className="grid gap-8 py-12 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <aside className="space-y-5">
-              <div className="relative overflow-hidden rounded-[28px] border border-white/80 bg-white/76 p-6 shadow-[0_24px_70px_rgba(92,116,189,0.16)] backdrop-blur-2xl">
-                <div className="absolute right-[-34px] top-[-34px] h-32 w-32 rounded-full bg-[#e9ddff]" />
-                <div className="relative">
+          <section className="grid gap-6 py-8 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+              <div className="relative overflow-hidden rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_20px_56px_rgba(92,116,189,0.13)] backdrop-blur-2xl">
+                <div className="absolute right-[-42px] top-[-48px] h-36 w-36 rounded-full bg-[#e9ddff]/80" />
+                <div className="relative flex items-start gap-4">
                   <div
-                    className="grid h-20 w-20 place-items-center rounded-full text-3xl font-black text-white shadow-[0_16px_34px_rgba(91,111,185,0.18)]"
+                    className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl text-2xl font-black text-white shadow-[0_16px_34px_rgba(91,111,185,0.18)]"
                     style={{ backgroundColor: avatarColor }}
                   >
                     {displayName.slice(0, 1)}
                   </div>
-                  <h1 className="mt-5 text-[34px] font-black tracking-[-0.05em] text-[#17213f]">
-                    {displayName}
-                  </h1>
-                  <p className="mt-2 text-sm font-semibold text-[#7782a4]">
-                    {maskPhone(data.phone)}
-                  </p>
-                  <p className="mt-5 text-[15px] leading-8 text-[#687394]">
-                    {data.profile?.bio || "这里会记录你的创作投稿和社区展示进度。"}
-                  </p>
+                  <div className="min-w-0 pt-1">
+                    <h1 className="truncate text-[26px] font-black tracking-[-0.04em] text-[#17213f]">
+                      {displayName}
+                    </h1>
+                    <p className="mt-1 text-sm font-semibold text-[#7782a4]">
+                      {maskPhone(data.phone)}
+                    </p>
+                  </div>
+                </div>
+                <p className="relative mt-5 text-[14px] leading-7 text-[#687394]">
+                  {data.profile?.bio || "这里会记录你的创作投稿和社区展示进度。"}
+                </p>
+                <div className="relative mt-5 h-px bg-[#dfe7ff]" />
+                <div className="relative mt-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black tracking-[0.14em] text-[#7782a4]">
+                      创作状态
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[#687394]">
+                      {postStats.approved}/{postStats.all} 已展示
+                    </p>
+                  </div>
+                  <Link
+                    href="/workshop?mode=coding"
+                    className="rounded-full bg-[#625cff] px-4 py-2 text-xs font-black text-white shadow-[0_12px_26px_rgba(98,92,255,0.2)] transition hover:bg-[#544cf4]"
+                  >
+                    新作品
+                  </Link>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setIsCreditPanelOpen(true)}
-                className="block w-full rounded-[28px] border border-white/80 bg-white/76 p-6 text-left shadow-[0_18px_54px_rgba(92,116,189,0.13)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:border-[#cbd5ff]"
+                className="block w-full rounded-[24px] border border-white/80 bg-white/82 p-5 text-left shadow-[0_16px_44px_rgba(92,116,189,0.1)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:border-[#cbd5ff]"
               >
                 <p className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
                   魔法币
                 </p>
-                <p className="mt-3 text-[42px] font-black tracking-[-0.06em] text-[#17213f]">
+                <p className="mt-2 text-[38px] font-black tracking-[-0.06em] text-[#17213f]">
                   {data.credits.credits}
                 </p>
-                <p className="mt-3 text-sm leading-7 text-[#687394]">
+                <p className="mt-2 text-sm leading-7 text-[#687394]">
                   点开查看增加、减少和每一次变化原因。
                 </p>
               </button>
+
+              <div className="rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_16px_44px_rgba(92,116,189,0.1)] backdrop-blur-2xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
+                      当前订阅
+                    </p>
+                    {activeSubscription ? (
+                      <>
+                        <p className="mt-3 text-lg font-black text-[#17213f]">
+                          {activeSubscription.subscription_plans?.name ?? "订阅套餐"}
+                        </p>
+                        <p className="mt-2 text-sm leading-7 text-[#687394]">
+                          每日 {activeSubscription.subscription_plans?.daily_coins ?? 0} 币，
+                          到期 {activeSubscription.end_date}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-3 text-sm leading-7 text-[#687394]">
+                        还没有开通订阅，充值或开卡后每天早上会自动到账魔法币。
+                      </p>
+                    )}
+                  </div>
+                  <Link
+                    href="/billing"
+                    className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-xs font-black text-[#5c6688]"
+                  >
+                    去管理
+                  </Link>
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_16px_44px_rgba(92,116,189,0.1)] backdrop-blur-2xl">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
+                    最近订单
+                  </p>
+                  <Link
+                    href="/billing"
+                    className="text-xs font-black text-[#625cff]"
+                  >
+                    查看全部
+                  </Link>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {data.orders.length ? (
+                    data.orders.slice(0, 3).map((order) => (
+                      <div
+                        key={order.order_id}
+                        className="rounded-[18px] border border-[#e4eaff] bg-[#f8faff] px-4 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-[#17213f]">
+                              {order.order_type === "coin_purchase" ? "魔法币充值" : "订阅购买"}
+                            </p>
+                            <p className="mt-1 text-xs text-[#8a95b5]">
+                              {formatDate(order.created_at)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-black text-[#17213f]">
+                              ¥{(order.amount / 100).toFixed(2)}
+                            </p>
+                            <p className="mt-1 text-xs text-[#8a95b5]">{order.status}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-[18px] border border-dashed border-[#dce5ff] bg-[#f8faff] px-4 py-5 text-sm text-[#687394]">
+                      还没有充值或订阅订单。
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 {[
@@ -287,7 +429,7 @@ export default function ProfilePage() {
                 ].map(([label, value]) => (
                   <div
                     key={label}
-                    className="rounded-[22px] border border-white/80 bg-white/72 px-4 py-4 shadow-[0_12px_34px_rgba(92,116,189,0.1)]"
+                    className="rounded-[20px] border border-white/80 bg-white/76 px-4 py-4 shadow-[0_10px_28px_rgba(92,116,189,0.08)]"
                   >
                     <p className="text-xs font-semibold text-[#7782a4]">{label}</p>
                     <p className="mt-2 text-[28px] font-black text-[#17213f]">{value}</p>
@@ -297,47 +439,73 @@ export default function ProfilePage() {
             </aside>
 
             <section className="min-w-0">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
+              <div className="rounded-[28px] border border-white/80 bg-white/62 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.1)] backdrop-blur-2xl sm:p-7">
+                <div className="flex flex-wrap items-start justify-between gap-5">
+                  <div className="max-w-3xl">
                   <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
                     我的主页 PROFILE
                   </div>
-                  <h2 className="mt-5 text-[40px] font-black leading-[1] tracking-[-0.06em] text-[#151f3d] sm:text-[56px]">
+                    <h2 className="mt-5 text-[40px] font-black leading-[1] tracking-[-0.06em] text-[#151f3d] sm:text-[52px]">
                     我的创作档案
                   </h2>
+                    <p className="mt-4 text-sm leading-7 text-[#687394]">
+                      按时间整理你的社区投稿、审核状态和展示进度，最新作品会排在最前面。
+                    </p>
                 </div>
                 <Link
                   href="/workshop?mode=coding"
-                  className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white shadow-[0_14px_32px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                    className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white shadow-[0_14px_32px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
                 >
                   去做新作品
                 </Link>
               </div>
 
-              <div className="mt-8 space-y-4">
+                <div className="mt-6 grid gap-3 sm:grid-cols-4">
+                  {[
+                    ["全部", postStats.all],
+                    ["已展示", postStats.approved],
+                    ["审核中", postStats.pending],
+                    ["需调整", postStats.rejected],
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-[18px] border border-[#e4eaff] bg-white/72 px-4 py-3"
+                    >
+                      <p className="text-xs font-bold text-[#8190b2]">{label}</p>
+                      <p className="mt-1 text-2xl font-black text-[#17213f]">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-5 2xl:grid-cols-2">
                 {data.posts.length ? (
                   data.posts.map((post) => {
                     const status =
                       statusMap[post.moderation_status as keyof typeof statusMap] ||
                       statusMap.pending;
+                    const moderationNote =
+                      moderationNoteMap[
+                        post.moderation_status as keyof typeof moderationNoteMap
+                      ] || moderationNoteMap.pending;
 
                     return (
                       <article
                         key={post.id}
-                        className="grid gap-5 rounded-[26px] border border-white/80 bg-white/78 p-5 shadow-[0_18px_54px_rgba(91,111,185,0.13)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:shadow-[0_26px_70px_rgba(91,111,185,0.18)] lg:grid-cols-[190px_minmax(0,1fr)]"
+                        className="group grid gap-4 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_14px_42px_rgba(91,111,185,0.1)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:shadow-[0_24px_62px_rgba(91,111,185,0.16)] md:grid-cols-[154px_minmax(0,1fr)]"
                       >
-                        <div className="overflow-hidden rounded-[22px] bg-[#edf2ff]">
+                        <div className="overflow-hidden rounded-[20px] bg-[#edf2ff]">
                           <img
                             src={post.preview_image_url}
                             alt={post.title}
-                            className="aspect-[4/3] h-full w-full object-cover lg:aspect-[5/4]"
+                            className="aspect-[4/3] h-full w-full object-cover transition duration-500 group-hover:scale-[1.03] md:aspect-square"
                           />
                         </div>
 
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex min-w-0 flex-col">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span
-                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${status.className}`}
+                              className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${status.className}`}
                             >
                               {status.label}
                             </span>
@@ -346,17 +514,26 @@ export default function ProfilePage() {
                             </span>
                           </div>
 
-                          <h3 className="mt-4 text-[26px] font-black leading-[1.16] tracking-[-0.04em] text-[#17213f]">
+                          <h3 className="mt-3 line-clamp-2 text-[22px] font-black leading-[1.16] tracking-[-0.04em] text-[#17213f]">
                             {post.title}
                           </h3>
 
-                          <p className="mt-3 line-clamp-3 text-sm leading-7 text-[#687394]">
+                          <p className="mt-2 line-clamp-2 text-sm leading-7 text-[#687394]">
                             {post.prompt}
                           </p>
 
                           {post.moderation_reason && (
-                            <div className="mt-4 rounded-[18px] border border-[#ffc7d8] bg-[#fff4f7] px-4 py-3 text-sm font-semibold leading-7 text-[#c94c78]">
-                              审核说明：{post.moderation_reason}
+                            <div
+                              className={`mt-4 inline-flex max-w-full items-start gap-2 rounded-[16px] border px-3 py-2.5 text-sm leading-6 ${moderationNote.containerClassName}`}
+                            >
+                              <span
+                                className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.08em] ${moderationNote.badgeClassName}`}
+                              >
+                                {moderationNote.eyebrow}
+                              </span>
+                              <p className="min-w-0 line-clamp-2 font-semibold">
+                                {post.moderation_reason}
+                              </p>
                             </div>
                           )}
                         </div>

@@ -137,29 +137,30 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#080512] text-white">
+    <main className="relative min-h-screen overflow-hidden bg-[#f7f8ff] text-[#18213f]">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(116,221,255,0.12),transparent_16%),radial-gradient(circle_at_84%_14%,rgba(181,114,255,0.16),transparent_22%),linear-gradient(180deg,#07040f_0%,#10081f_46%,#080512_100%)]" />
-        <div className="absolute inset-0 opacity-[0.16] [background-image:radial-gradient(rgba(255,255,255,0.88)_0.7px,transparent_0.7px)] [background-size:24px_24px]" />
-        <div className="aurora-drift absolute left-[-8%] top-[6%] h-[420px] w-[420px] rounded-full bg-[#67d8ff]/10 blur-[140px]" />
-        <div className="aurora-drift absolute right-[-10%] top-[0%] h-[520px] w-[520px] rounded-full bg-[#9d6fff]/14 blur-[160px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_10%,rgba(126,171,255,0.34),transparent_28%),radial-gradient(circle_at_82%_14%,rgba(255,159,211,0.3),transparent_24%),linear-gradient(180deg,#ffffff_0%,#f7f8ff_48%,#eff5ff_100%)]" />
+        <div className="home-grid absolute inset-0 opacity-80" />
+        <div className="home-sweep absolute left-[-12%] top-[16%] h-44 w-[70%] rounded-full bg-[linear-gradient(90deg,rgba(139,165,255,0),rgba(139,165,255,0.28),rgba(255,177,213,0))] blur-3xl" />
         <div className="absolute left-[58%] top-[10%] -translate-x-1/2">
           <Image
-            src="/landing-assets/planet-smile-clean.png"
+            src="/landing-assets/planet-smile-login-clean-v2.png"
             alt="微笑星球"
             width={179}
             height={101}
             className="orbital-float h-[122px] w-auto object-contain"
             priority
+            unoptimized
           />
         </div>
-        <div className="absolute right-[12%] top-[18%]">
+        <div className="absolute right-[8%] top-[12%]">
           <Image
-            src="/landing-assets/rocket-launch.png"
+            src="/landing-assets/rocket-launch-login-clean-v2.png"
             alt="探索火箭"
             width={163}
             height={117}
-            className="orbital-float h-[98px] w-auto rotate-[8deg] object-contain"
+            className="orbital-float h-[82px] w-auto rotate-[8deg] object-contain"
+            unoptimized
           />
         </div>
       </div>
@@ -169,7 +170,7 @@ export default function LoginPage() {
           <section className="max-w-[760px]">
             <Link
               href="/"
-              className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-white/76 backdrop-blur-xl transition hover:bg-white/10 hover:text-white"
+              className="inline-flex items-center gap-3 rounded-full border border-[#dce5ff] bg-white/72 px-4 py-2 text-sm font-semibold text-[#5c6688] shadow-[0_12px_30px_rgba(112,138,215,0.1)] backdrop-blur-xl transition hover:border-[#bccaff] hover:text-[#273252]"
             >
               <span>返回首页</span>
             </Link>
@@ -180,46 +181,46 @@ export default function LoginPage() {
                 alt={brand.siteName}
                 width={56}
                 height={56}
-                className="rounded-[18px] shadow-[0_12px_28px_rgba(255,255,255,0.12)]"
+                className="rounded-[18px] shadow-[0_12px_28px_rgba(116,142,210,0.16)]"
                 priority
                 unoptimized
               />
               <div>
-                <p className="text-[20px] font-semibold tracking-[-0.03em] text-white">
+                <p className="text-[20px] font-semibold tracking-normal text-[#17213f]">
                   {brand.siteName}
                 </p>
-                <p className="text-[13px] tracking-[0.06em] text-white/42">
+                <p className="text-[13px] tracking-[0.06em] text-[#677396]">
                   {brand.tagline}
                 </p>
               </div>
             </div>
 
-            <h1 className="mt-10 text-[60px] font-black leading-[0.96] tracking-[-0.075em] text-white xl:text-[78px]">
+            <h1 className="mt-10 text-[56px] font-black leading-[1.02] tracking-normal text-[#151f3d] xl:text-[72px]">
               欢迎回来
-              <span className="mt-4 block bg-gradient-to-r from-[#8de1ff] via-[#f4b9ff] to-[#ffd788] bg-clip-text text-transparent">
+              <span className="home-gradient-text mt-4 block">
                 继续你的创作旅程
               </span>
             </h1>
 
-            <p className="mt-8 max-w-[540px] text-[19px] leading-9 text-white/60">
+            <p className="mt-8 max-w-[540px] text-[18px] leading-9 text-[#5e6b8c]">
               输入手机号与验证码，重新进入你的魔法工坊，继续把想法变成真正的作品。
             </p>
           </section>
 
           <section className="relative">
-            <div className="absolute -inset-10 rounded-full bg-[radial-gradient(circle,rgba(141,119,255,0.22),transparent_58%)] blur-3xl" />
-            <div className="relative overflow-hidden rounded-[36px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.1),rgba(255,255,255,0.04))] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255,255,255,0.1),transparent_24%),radial-gradient(circle_at_86%_80%,rgba(120,221,255,0.08),transparent_22%)]" />
+            <div className="absolute -inset-10 rounded-full bg-[radial-gradient(circle,rgba(141,119,255,0.16),transparent_58%)] blur-3xl" />
+            <div className="relative overflow-hidden rounded-[36px] border border-white/80 bg-white/78 p-7 shadow-[0_30px_90px_rgba(92,116,189,0.18)] backdrop-blur-2xl">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(124,147,255,0.16),transparent_24%),radial-gradient(circle_at_86%_80%,rgba(255,168,211,0.14),transparent_22%)]" />
 
               <div className="relative z-10">
-                <div className="inline-flex rounded-full border border-white/10 bg-white/8 px-3 py-1 text-xs font-semibold tracking-[0.12em] text-white/70">
+                <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-3 py-1 text-xs font-semibold tracking-[0.12em] text-[#6875a5]">
                   进入工坊
                 </div>
 
-                <h2 className="mt-5 text-[38px] font-black leading-[1.04] tracking-[-0.06em] text-white">
+                <h2 className="mt-5 text-[38px] font-black leading-[1.08] tracking-normal text-[#17213f]">
                   用验证码继续
                 </h2>
-                <p className="mt-3 text-[15px] leading-8 text-white/54">
+                <p className="mt-3 text-[15px] leading-8 text-[#647092]">
                   整个过程只需要几秒钟，你的创作进度会在登录后继续保留。
                 </p>
 
@@ -227,7 +228,7 @@ export default function LoginPage() {
                   <div>
                     <label
                       htmlFor="phone"
-                      className="mb-2 block text-sm font-semibold text-white/72"
+                      className="mb-2 block text-sm font-semibold text-[#52607e]"
                     >
                       手机号
                     </label>
@@ -237,14 +238,14 @@ export default function LoginPage() {
                       value={phone}
                       onChange={(event) => setPhone(event.target.value)}
                       placeholder="输入你的手机号"
-                      className="h-14 w-full rounded-[22px] border border-white/10 bg-white/6 px-5 text-[15px] text-white outline-none placeholder:text-white/28 transition focus:border-white/20 focus:bg-white/8"
+                      className="h-14 w-full rounded-[22px] border border-[#dfe7ff] bg-white/86 px-5 text-[15px] text-[#17213f] outline-none placeholder:text-[#9aa6c4] transition focus:border-[#bccaff] focus:bg-white"
                     />
                   </div>
 
                   <div>
                     <label
                       htmlFor="code"
-                      className="mb-2 block text-sm font-semibold text-white/72"
+                      className="mb-2 block text-sm font-semibold text-[#52607e]"
                     >
                       验证码
                     </label>
@@ -255,13 +256,13 @@ export default function LoginPage() {
                         value={code}
                         onChange={(event) => setCode(event.target.value)}
                         placeholder="输入验证码"
-                        className="h-14 min-w-0 flex-1 rounded-[22px] border border-white/10 bg-white/6 px-5 text-[15px] text-white outline-none placeholder:text-white/28 transition focus:border-white/20 focus:bg-white/8"
+                        className="h-14 min-w-0 flex-1 rounded-[22px] border border-[#dfe7ff] bg-white/86 px-5 text-[15px] text-[#17213f] outline-none placeholder:text-[#9aa6c4] transition focus:border-[#bccaff] focus:bg-white"
                       />
                       <button
                         type="button"
                         onClick={handleSendCode}
                         disabled={isSending}
-                        className="rounded-[22px] border border-white/10 bg-white/8 px-5 text-sm font-semibold text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-[22px] border border-[#dfe7ff] bg-white px-5 text-sm font-semibold text-[#52607e] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {isSending ? "发送中" : "获取验证码"}
                       </button>
@@ -270,7 +271,7 @@ export default function LoginPage() {
                 </div>
 
                 {message && (
-                  <div className="mt-5 rounded-[22px] border border-white/10 bg-white/6 px-4 py-3 text-sm font-medium leading-7 text-white/70">
+                  <div className="mt-5 rounded-[22px] border border-[#dfe7ff] bg-white/76 px-4 py-3 text-sm font-medium leading-7 text-[#5e6b8c]">
                     {message}
                   </div>
                 )}
@@ -279,7 +280,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={handleVerify}
                   disabled={isVerifying}
-                  className="mt-6 h-14 w-full rounded-full bg-[linear-gradient(90deg,#ffbc7c_0%,#ff8fc7_46%,#8974ff_100%)] text-[15px] font-black text-white shadow-[0_18px_40px_rgba(140,96,255,0.34)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-6 h-14 w-full rounded-full bg-[#625cff] text-[15px] font-black text-white shadow-[0_18px_40px_rgba(98,92,255,0.24)] transition hover:bg-[#544cf4] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isVerifying ? "正在进入工坊" : "进入工坊"}
                 </button>

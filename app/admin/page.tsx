@@ -218,6 +218,10 @@ export default async function AdminDashboardPage() {
               <p className="text-base font-black text-slate-800">站点内容</p>
               <p className="mt-2 text-sm leading-7 text-slate-500">编辑首页标题、按钮、品牌信息和 Logo。</p>
             </Link>
+            <Link href="/admin/info" className="rounded-[24px] bg-[#f7fff9] px-5 py-5">
+              <p className="text-base font-black text-slate-800">资讯管理</p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">发布科普知识、视频、获奖喜讯和活动资讯。</p>
+            </Link>
             <Link href="/admin/ai" className="rounded-[24px] bg-[#fffaf5] px-5 py-5">
               <p className="text-base font-black text-slate-800">AI 能力配置</p>
               <p className="mt-2 text-sm leading-7 text-slate-500">控制模型、接口、扣币和功能开关。</p>

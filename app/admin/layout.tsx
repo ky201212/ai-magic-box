@@ -40,10 +40,22 @@ const navGroups: AdminNavConfigGroup[] = [
         permission: "site_settings",
       },
       {
+        href: "/admin/info",
+        label: "资讯管理",
+        description: "发布科普知识、科普视频、获奖喜讯和活动资讯。",
+        permission: "site_settings",
+      },
+      {
         href: "/admin/notifications",
         label: "通知中心",
         description: "向全站用户、管理员或指定孩子发送消息。",
         permission: "notifications",
+      },
+      {
+        href: "/admin/payments",
+        label: "支付中心",
+        description: "维护汇率、订阅套餐、激活码与 Mock 支付订单。",
+        permission: "site_settings",
       },
     ],
   },
