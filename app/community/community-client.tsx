@@ -17,7 +17,9 @@ type CommunityClientProps = {
 type CommunityPost = {
   id: string;
   user_id: string;
+  mode: "coding" | "writing" | "painting";
   title: string;
+  description: string | null;
   prompt: string;
   preview_image_url: string;
   like_count: number;
@@ -135,6 +137,32 @@ function SectionTitle({
   );
 }
 
+function WritingPostThumbnail({
+  title,
+  prompt,
+}: {
+  title: string;
+  prompt: string;
+}) {
+  return (
+    <div className="relative flex h-full w-full overflow-hidden bg-[linear-gradient(180deg,#fff7db_0%,#fffdf4_58%,#ffeaf0_100%)] p-4">
+      <div className="absolute inset-x-5 top-5 h-px bg-[#f4cf7a]/70" />
+      <div className="absolute inset-y-4 left-6 w-px bg-[#f6b8c6]/80" />
+      <div className="relative flex h-full w-full flex-col rounded-[18px] border border-[#f3df99] bg-white/84 px-4 py-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.72)]">
+        <div className="inline-flex w-fit rounded-full bg-[#fff1c9] px-3 py-1 text-[10px] font-black text-amber-700">
+          AI写作
+        </div>
+        <p className="mt-3 line-clamp-2 text-[16px] font-black leading-tight tracking-[-0.04em] text-[#17213f]">
+          {title}
+        </p>
+        <p className="mt-2 line-clamp-3 text-xs leading-5 text-[#6f5f40]">
+          {prompt}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function CommunityClient({
   isLoggedIn,
   initialPosts,
@@ -218,6 +246,7 @@ export function CommunityClient({
       next = next.filter((post) =>
         [
           post.title,
+          post.description ?? "",
           post.prompt,
           post.category,
           authorName(post),
@@ -385,12 +414,20 @@ export function CommunityClient({
                       <div
                         className={`relative aspect-[1.18/0.82] overflow-hidden bg-gradient-to-br ${gradientByCategory[post.category] ?? gradientByCategory["创意编程"]}`}
                       >
-                        <img
-                          src={post.preview_image_url}
-                          alt={post.title}
-                          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.05]"
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0)_38%,rgba(18,31,61,0.56)_100%)]" />
+                        {post.mode === "writing" ? (
+                          <div className="h-full w-full transition duration-500 group-hover:scale-[1.03]">
+                            <WritingPostThumbnail title={post.title} prompt={post.prompt} />
+                          </div>
+                        ) : (
+                          <>
+                            <img
+                              src={post.preview_image_url}
+                              alt={post.title}
+                              className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.05]"
+                            />
+                            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0)_38%,rgba(18,31,61,0.56)_100%)]" />
+                          </>
+                        )}
                         <div className="absolute left-3 top-3 flex flex-wrap gap-2">
                           {post.is_featured && (
                             <span className="rounded-full bg-[#7c6cff] px-2.5 py-1 text-[10px] font-black text-white">
@@ -410,6 +447,9 @@ export function CommunityClient({
                       <Link href={`/community/${post.id}`} className="block">
                         <p className="line-clamp-1 text-[18px] font-black tracking-[-0.04em] text-[#182140]">
                           {post.title}
+                        </p>
+                        <p className="mt-2 line-clamp-2 min-h-[44px] text-sm leading-6 text-[#6f7b9c]">
+                          {post.description || post.prompt}
                         </p>
                       </Link>
                       <div className="mt-3 flex items-center gap-3">

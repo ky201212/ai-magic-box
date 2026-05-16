@@ -84,6 +84,7 @@ export type CommunityReviewSettingRecord = {
 export type AdminCommunityPostRecord = {
   id: string;
   user_id: string;
+  mode: "coding" | "writing" | "painting";
   title: string;
   prompt: string;
   preview_image_url: string;

@@ -3,7 +3,14 @@
 import html2canvas from "html2canvas";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 
 const codingScenes = [
   {
@@ -58,6 +65,20 @@ const modeTabs = [
 ] as const;
 
 type ModeId = (typeof modeTabs)[number]["id"];
+type ShareableMode = Extract<ModeId, "coding" | "writing" | "painting">;
+
+type ShareCropSelection = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type ShareCropDragState = {
+  startX: number;
+  startY: number;
+  startCrop: ShareCropSelection;
+};
 
 type ShareFeedbackState = {
   type: "success" | "pending" | "error";
@@ -283,6 +304,171 @@ const codeGuideFallbackAnchors: Record<
 };
 
 const WORKSHOP_DRAFT_STORAGE_KEY = "magic-workshop-draft";
+const LOCAL_WORKSHOP_DRAFT_STORAGE_KEY = "workshop-draft";
+const SHARE_COVER_ASPECT_RATIO = 4 / 5;
+const DEFAULT_SHARE_CROP: ShareCropSelection = {
+  left: 0,
+  top: 0,
+  width: 1,
+  height: 1,
+};
+
+function clampShareCropValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeShareCrop(crop: ShareCropSelection) {
+  const width = clampShareCropValue(crop.width, 0.18, 1);
+  const height = clampShareCropValue(crop.height, 0.18, 1);
+
+  return {
+    width,
+    height,
+    left: clampShareCropValue(crop.left, 0, Math.max(0, 1 - width)),
+    top: clampShareCropValue(crop.top, 0, Math.max(0, 1 - height)),
+  };
+}
+
+function createInitialShareCrop(imageWidth: number, imageHeight: number) {
+  if (!imageWidth || !imageHeight) {
+    return DEFAULT_SHARE_CROP;
+  }
+
+  const imageAspectRatio = imageWidth / imageHeight;
+  const crop =
+    imageAspectRatio > SHARE_COVER_ASPECT_RATIO
+      ? {
+          width: SHARE_COVER_ASPECT_RATIO / imageAspectRatio,
+          height: 1,
+          left: (1 - SHARE_COVER_ASPECT_RATIO / imageAspectRatio) / 2,
+          top: 0,
+        }
+      : {
+          width: 1,
+          height: imageAspectRatio / SHARE_COVER_ASPECT_RATIO,
+          left: 0,
+          top: (1 - imageAspectRatio / SHARE_COVER_ASPECT_RATIO) / 2,
+        };
+
+  return normalizeShareCrop(crop);
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("封面图片读取失败，请重新准备预览。"));
+    image.src = src;
+  });
+}
+
+async function cropShareCoverImage(
+  imageUrl: string,
+  crop: ShareCropSelection,
+) {
+  const image = await loadImageElement(imageUrl);
+  const normalizedCrop = normalizeShareCrop(crop);
+  const outputWidth = 960;
+  const outputHeight = 1200;
+  const sourceX = normalizedCrop.left * image.naturalWidth;
+  const sourceY = normalizedCrop.top * image.naturalHeight;
+  const sourceWidth = normalizedCrop.width * image.naturalWidth;
+  const sourceHeight = normalizedCrop.height * image.naturalHeight;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("封面裁剪失败，请稍后再试。");
+  }
+
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    outputWidth,
+    outputHeight,
+  );
+
+  return canvas.toDataURL("image/jpeg", 0.86);
+}
+
+function parseWorkshopDraftSnapshot(rawDraft: string | null) {
+  if (!rawDraft) {
+    return null;
+  }
+
+  const draft = JSON.parse(rawDraft) as Partial<WorkshopDraftSnapshot>;
+
+  return {
+    promptText: typeof draft.promptText === "string" ? draft.promptText : "",
+    writingPrompt:
+      typeof draft.writingPrompt === "string" ? draft.writingPrompt : "",
+    writingResult:
+      typeof draft.writingResult === "string" ? draft.writingResult : "",
+    drawingPrompt:
+      typeof draft.drawingPrompt === "string" ? draft.drawingPrompt : "",
+    generatedCode:
+      typeof draft.generatedCode === "string" && draft.generatedCode.trim()
+        ? draft.generatedCode
+        : defaultPreviewHtml,
+    generatedImageUrl:
+      typeof draft.generatedImageUrl === "string"
+        ? draft.generatedImageUrl
+        : "",
+  } satisfies WorkshopDraftSnapshot;
+}
+
+function WritingSharePreview({
+  title,
+  content,
+}: {
+  title: string;
+  content: string;
+}) {
+  return (
+    <div className="mt-4 flex aspect-[4/5] max-h-[54vh] overflow-hidden rounded-[24px] border border-[#f3df99] bg-[linear-gradient(180deg,#fff7db_0%,#fffdf4_58%,#ffeaf0_100%)] p-3">
+      <div className="relative flex min-h-0 w-full rounded-[20px] bg-gradient-to-br from-[#fffdf4] via-[#fff9eb] to-[#fff1cf] p-3 shadow-[0_16px_36px_rgba(245,158,11,0.10)]">
+        <div className="relative flex min-h-0 w-full flex-col overflow-hidden rounded-[18px] border border-[#f9e7b2] bg-white px-5 py-5">
+          <div className="absolute inset-y-0 left-5 w-px bg-[#f6b8c6]/80" />
+          <div className="relative z-10 pl-3">
+            <div className="inline-flex rounded-full bg-[#fff1c9] px-3 py-1 text-xs font-black text-amber-700">
+              AI写作展示
+            </div>
+            <p className="mt-3 line-clamp-2 text-xl font-black leading-tight tracking-[-0.04em] text-slate-800">
+              {title}
+            </p>
+          </div>
+          <div className="relative z-10 mt-4 min-h-0 flex-1 overflow-y-auto pl-3 pr-1">
+            <div className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
+              {content}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readSavedWorkshopDraft() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return (
+    parseWorkshopDraftSnapshot(
+      window.sessionStorage.getItem(WORKSHOP_DRAFT_STORAGE_KEY),
+    ) ??
+    parseWorkshopDraftSnapshot(
+      window.localStorage.getItem(LOCAL_WORKSHOP_DRAFT_STORAGE_KEY),
+    )
+  );
+}
 
 function isUpstreamCredentialError(message: string | undefined) {
   if (!message) {
@@ -1019,6 +1205,11 @@ function WorkshopContent() {
   const previewShellRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const codeGuidePreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const writingPreviewRef = useRef<HTMLDivElement | null>(null);
+  const paintingPreviewRef = useRef<HTMLDivElement | null>(null);
+  const shareCropFrameRef = useRef<HTMLDivElement | null>(null);
+  const shareCropDragRef = useRef<ShareCropDragState | null>(null);
+  const hasRestoredDraftRef = useRef(false);
   const [promptText, setPromptText] = useState("");
   const [writingPrompt, setWritingPrompt] = useState("");
   const [writingResult, setWritingResult] = useState("");
@@ -1035,11 +1226,17 @@ function WorkshopContent() {
   const [drawingError, setDrawingError] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [writingLoadingMessageIndex, setWritingLoadingMessageIndex] = useState(0);
-  const [previewDevice, setPreviewDevice] = useState<"phone" | "tablet">("phone");
   const [isSharing, setIsSharing] = useState(false);
   const [shareMessage, setShareMessage] = useState("");
   const [isShareConfirmOpen, setIsShareConfirmOpen] = useState(false);
   const [sharePreviewImageUrl, setSharePreviewImageUrl] = useState("");
+  const [shareSourceImageUrl, setShareSourceImageUrl] = useState("");
+  const [shareTitle, setShareTitle] = useState("");
+  const [shareDescription, setShareDescription] = useState("");
+  const [shareTitleError, setShareTitleError] = useState("");
+  const [shareCrop, setShareCrop] =
+    useState<ShareCropSelection>(DEFAULT_SHARE_CROP);
+  const [isShareCropDragging, setIsShareCropDragging] = useState(false);
   const [activeHeaderPanel, setActiveHeaderPanel] = useState<
     "help" | "notifications" | "credits" | null
   >(null);
@@ -1075,7 +1272,10 @@ function WorkshopContent() {
   const isCodingMode = activeMode === "coding";
   const isWritingMode = activeMode === "writing";
   const isPaintingMode = activeMode === "painting";
-  const isTabletPreview = previewDevice === "tablet";
+  const activeShareMode: ShareableMode | null =
+    isCodingMode || isWritingMode || isPaintingMode
+      ? (activeMode as ShareableMode)
+      : null;
   const hasGeneratedCode =
     Boolean(generatedCode.trim()) && generatedCode !== defaultPreviewHtml;
   const codingPreviewDoc = hasGeneratedCode ? generatedCode : defaultPreviewHtml;
@@ -1083,6 +1283,20 @@ function WorkshopContent() {
     () => buildCodeGuideRows(codingPreviewDoc),
     [codingPreviewDoc],
   );
+  const selectedCodeGuideMarkerId = useMemo(() => {
+    if (!isCodeGuideOpen) {
+      return null;
+    }
+
+    if (
+      activeCodeGuideMarkerId !== null &&
+      codeGuideRows.some((row) => row.markerId === activeCodeGuideMarkerId)
+    ) {
+      return activeCodeGuideMarkerId;
+    }
+
+    return codeGuideRows[0]?.markerId ?? null;
+  }, [activeCodeGuideMarkerId, codeGuideRows, isCodeGuideOpen]);
 
   const persistWorkshopDraft = () => {
     if (typeof window === "undefined") {
@@ -1110,42 +1324,70 @@ function WorkshopContent() {
   };
 
   useEffect(() => {
-    try {
-      const rawDraft = window.sessionStorage.getItem(WORKSHOP_DRAFT_STORAGE_KEY);
+    const timeoutId = window.setTimeout(() => {
+      try {
+        const savedDraft = readSavedWorkshopDraft();
 
-      if (!rawDraft) {
+        if (savedDraft) {
+          setPromptText(savedDraft.promptText);
+          setWritingPrompt(savedDraft.writingPrompt);
+          setWritingResult(savedDraft.writingResult);
+          setDrawingPrompt(savedDraft.drawingPrompt);
+          setGeneratedCode(savedDraft.generatedCode);
+          setGeneratedImageUrl(savedDraft.generatedImageUrl);
+        }
+      } catch {
+        window.sessionStorage.removeItem(WORKSHOP_DRAFT_STORAGE_KEY);
+        window.localStorage.removeItem(LOCAL_WORKSHOP_DRAFT_STORAGE_KEY);
+        window.console.error("创作草稿恢复失败");
+      } finally {
+        hasRestoredDraftRef.current = true;
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isShareCropDragging) {
+      return;
+    }
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const dragState = shareCropDragRef.current;
+      const frameRect = shareCropFrameRef.current?.getBoundingClientRect();
+
+      if (!dragState || !frameRect?.width || !frameRect.height) {
         return;
       }
 
-      const draft = JSON.parse(rawDraft) as Partial<WorkshopDraftSnapshot>;
+      const deltaX = (event.clientX - dragState.startX) / frameRect.width;
+      const deltaY = (event.clientY - dragState.startY) / frameRect.height;
 
-      if (typeof draft.promptText === "string") {
-        setPromptText(draft.promptText);
-      }
+      setShareCrop(
+        normalizeShareCrop({
+          ...dragState.startCrop,
+          left: dragState.startCrop.left + deltaX,
+          top: dragState.startCrop.top + deltaY,
+        }),
+      );
+    };
 
-      if (typeof draft.writingPrompt === "string") {
-        setWritingPrompt(draft.writingPrompt);
-      }
+    const handlePointerUp = () => {
+      shareCropDragRef.current = null;
+      setIsShareCropDragging(false);
+    };
 
-      if (typeof draft.writingResult === "string") {
-        setWritingResult(draft.writingResult);
-      }
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
 
-      if (typeof draft.drawingPrompt === "string") {
-        setDrawingPrompt(draft.drawingPrompt);
-      }
-
-      if (typeof draft.generatedCode === "string" && draft.generatedCode.trim()) {
-        setGeneratedCode(draft.generatedCode);
-      }
-
-      if (typeof draft.generatedImageUrl === "string") {
-        setGeneratedImageUrl(draft.generatedImageUrl);
-      }
-    } catch {
-      window.console.error("创作草稿恢复失败");
-    }
-  }, []);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isShareCropDragging]);
 
   useEffect(() => {
     if (!isCodeGuideOpen) {
@@ -1293,54 +1535,13 @@ function WorkshopContent() {
   }, [codeGuideRows, codingPreviewDoc, isCodeGuideOpen]);
 
   useEffect(() => {
-    if (!isCodeGuideOpen) {
+    if (!hasRestoredDraftRef.current) {
       return;
     }
 
-    setActiveCodeGuideMarkerId((currentMarkerId) => {
-      if (
-        currentMarkerId !== null &&
-        codeGuideRows.some((row) => row.markerId === currentMarkerId)
-      ) {
-        return currentMarkerId;
-      }
-
-      return codeGuideRows[0]?.markerId ?? null;
-    });
-  }, [codeGuideRows, isCodeGuideOpen]);
-
-  useEffect(() => {
-    try {
-      const savedDraft = window.localStorage.getItem("workshop-draft");
-
-      if (!savedDraft) {
-        return;
-      }
-
-      const parsedDraft = JSON.parse(savedDraft) as {
-        promptText?: string;
-        writingPrompt?: string;
-        writingResult?: string;
-        drawingPrompt?: string;
-        generatedCode?: string;
-        generatedImageUrl?: string;
-      };
-
-      setPromptText(parsedDraft.promptText ?? "");
-      setWritingPrompt(parsedDraft.writingPrompt ?? "");
-      setWritingResult(parsedDraft.writingResult ?? "");
-      setDrawingPrompt(parsedDraft.drawingPrompt ?? "");
-      setGeneratedCode(parsedDraft.generatedCode ?? defaultPreviewHtml);
-      setGeneratedImageUrl(parsedDraft.generatedImageUrl ?? "");
-    } catch {
-      window.localStorage.removeItem("workshop-draft");
-    }
-  }, []);
-
-  useEffect(() => {
     try {
       window.localStorage.setItem(
-        "workshop-draft",
+        LOCAL_WORKSHOP_DRAFT_STORAGE_KEY,
         JSON.stringify({
           promptText,
           writingPrompt,
@@ -1511,6 +1712,9 @@ function WorkshopContent() {
   };
 
   const handleModeChange = (mode: ModeId) => {
+    setShareMessage("");
+    setShareFeedback(null);
+    setIsShareConfirmOpen(false);
     router.replace(`${pathname}?mode=${mode}`, { scroll: false });
   };
 
@@ -1553,11 +1757,29 @@ function WorkshopContent() {
     router.push(`/login?redirect=${encodeURIComponent(redirectPath)}`);
   };
 
-  const buildShareTitle = () => {
-    const condensedPrompt = promptText.replace(/\s+/g, " ").trim();
+  const getSharePrompt = (mode: ShareableMode | null = activeShareMode) => {
+    if (mode === "writing") {
+      return writingPrompt;
+    }
+
+    if (mode === "painting") {
+      return drawingPrompt;
+    }
+
+    return promptText;
+  };
+
+  const getDefaultShareTitle = (mode: ShareableMode | null = activeShareMode) => {
+    const condensedPrompt = getSharePrompt(mode).replace(/\s+/g, " ").trim();
+    const fallbackTitle =
+      mode === "writing"
+        ? "我的写作作品"
+        : mode === "painting"
+          ? "我的绘画作品"
+          : "我的编程作品";
 
     if (!condensedPrompt) {
-      return "我的创作作品";
+      return fallbackTitle;
     }
 
     return condensedPrompt.length > 18
@@ -1565,7 +1787,44 @@ function WorkshopContent() {
       : condensedPrompt;
   };
 
-  const capturePreviewImage = async () => {
+  const buildShareTitle = () => shareTitle.trim() || getDefaultShareTitle();
+  const buildShareDescription = () => shareDescription.trim();
+
+  const buildSharePreviewCode = () => {
+    if (activeShareMode === "writing") {
+      return writingResult.trim();
+    }
+
+    if (activeShareMode === "painting") {
+      return [
+        "AI绘画作品",
+        `绘画描述：${drawingPrompt.trim()}`,
+        generatedImageUrl ? `图片地址：${generatedImageUrl}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    return generatedCode;
+  };
+
+  const capturePreviewImage = async (mode: ShareableMode) => {
+    if (mode === "writing") {
+      return createWritingShareCoverImage({
+        title: getDefaultShareTitle("writing"),
+        prompt: writingPrompt,
+        result: writingResult,
+      });
+    }
+
+    if (mode === "painting") {
+      if (generatedImageUrl) {
+        return generatedImageUrl;
+      }
+
+      throw new Error("绘画预览还没有准备好，请先完成作画。");
+    }
+
     const iframe = previewIframeRef.current;
 
     if (iframe?.contentDocument?.documentElement) {
@@ -1590,6 +1849,42 @@ function WorkshopContent() {
     }
 
     throw new Error("预览截图失败，请重新生成后再试。");
+  };
+
+  const validateShareReady = (mode: ShareableMode | null) => {
+    if (!mode) {
+      return "当前模式还不能分享到社区。";
+    }
+
+    if (!getSharePrompt(mode).trim()) {
+      return "先写下创作想法，再把作品分享出去。";
+    }
+
+    if (mode === "coding" && (!hasGeneratedCode || isLoading)) {
+      return "先完成一次生成，才能把作品分享到社区。";
+    }
+
+    if (mode === "writing" && (!writingResult.trim() || isWritingLoading)) {
+      return "先完成一篇文章，才能把作品分享到社区。";
+    }
+
+    if (mode === "painting" && (!generatedImageUrl.trim() || isDrawing)) {
+      return "先完成一张画，才能把作品分享到社区。";
+    }
+
+    return "";
+  };
+
+  const handleShareCropPointerDown = (
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    shareCropDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startCrop: shareCrop,
+    };
+    setIsShareCropDragging(true);
   };
 
   const transcribeAudio = async (audioBlob: Blob) => {
@@ -1781,23 +2076,26 @@ function WorkshopContent() {
   };
 
   const openShareConfirm = async () => {
-    if (!promptText.trim()) {
-      window.alert("先写下创作想法，再把作品分享出去。");
-      return;
-    }
+    const mode = activeShareMode;
+    const shareReadyError = validateShareReady(mode);
 
-    if (!hasGeneratedCode || isLoading) {
-      window.alert("先完成一次生成，才能把作品分享到社区。");
+    if (shareReadyError || !mode) {
+      window.alert(shareReadyError);
       return;
     }
 
     setIsSharing(true);
     setShareMessage("");
     setShareFeedback(null);
+    setShareTitleError("");
 
     try {
-      const previewImageUrl = await capturePreviewImage();
+      const previewImageUrl = await capturePreviewImage(mode);
+      setShareSourceImageUrl(previewImageUrl);
       setSharePreviewImageUrl(previewImageUrl);
+      setShareTitle(getDefaultShareTitle(mode));
+      setShareDescription("");
+      setShareCrop(DEFAULT_SHARE_CROP);
       setIsShareConfirmOpen(true);
     } catch (error) {
       setShareMessage(
@@ -1809,7 +2107,23 @@ function WorkshopContent() {
   };
 
   const handleShareToCommunity = async () => {
-    if (!sharePreviewImageUrl) {
+    const mode = activeShareMode;
+    const shareReadyError = validateShareReady(mode);
+
+    if (shareReadyError || !mode) {
+      setIsShareConfirmOpen(false);
+      window.alert(shareReadyError);
+      return;
+    }
+
+    const normalizedTitle = buildShareTitle().trim();
+
+    if (!normalizedTitle) {
+      setShareTitleError("请给这次分享起一个标题。");
+      return;
+    }
+
+    if (!sharePreviewImageUrl && !shareSourceImageUrl) {
       setIsShareConfirmOpen(false);
       await openShareConfirm();
       return;
@@ -1818,19 +2132,25 @@ function WorkshopContent() {
     setIsSharing(true);
     setShareMessage("");
     setShareFeedback(null);
+    setShareTitleError("");
 
     try {
+      const finalPreviewImageUrl =
+        mode === "coding" && shareSourceImageUrl
+          ? await cropShareCoverImage(shareSourceImageUrl, shareCrop)
+          : sharePreviewImageUrl || shareSourceImageUrl;
       const response = await fetch("/api/community/posts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          title: buildShareTitle(),
-          prompt: promptText,
-          previewImageUrl: sharePreviewImageUrl,
-          previewCode: generatedCode,
-          mode: "coding",
+          title: normalizedTitle,
+          description: buildShareDescription(),
+          prompt: getSharePrompt(mode),
+          previewImageUrl: finalPreviewImageUrl,
+          previewCode: buildSharePreviewCode(),
+          mode,
         }),
       });
 
@@ -1980,6 +2300,9 @@ function WorkshopContent() {
 
     setGeneratedImageUrl("");
     setDrawingError("");
+    setShareMessage("");
+    setShareFeedback(null);
+    setIsShareConfirmOpen(false);
     setIsDrawing(true);
 
     try {
@@ -2018,9 +2341,21 @@ function WorkshopContent() {
 
       if (!response.ok || !data.imageUrl) {
         setDrawingError(data.error ?? "这次作画没有成功，我们再试一次。");
+        setGeneratedImageUrl("");
         return;
       }
 
+      if (!/^(https?:\/\/|data:image\/|blob:)/i.test(data.imageUrl.trim())) {
+        setGeneratedImageUrl("");
+        setDrawingError(
+          data.imageUrl.toLowerCase().includes("invalid token")
+            ? "绘画接口返回 Invalid token，请检查后台 AI 绘画配置里的接口密钥。"
+            : "绘画接口没有返回可显示的图片地址，请检查后台 AI 绘画配置。",
+        );
+        return;
+      }
+
+      setDrawingError("");
       setGeneratedImageUrl(data.imageUrl);
     } catch {
       setDrawingError("刚刚和画板星云失去了一下联系，请稍后再试试。");
@@ -2713,7 +3048,7 @@ function WorkshopContent() {
                   </div>
                 )}
 
-                {shareMessage && isCodingMode && (
+                {shareMessage && activeShareMode && (
                   <div className="mt-4 rounded-[18px] bg-[#fff7e8] px-4 py-3 text-sm font-bold leading-7 text-[#b7791f]">
                     {shareMessage}
                   </div>
@@ -2813,6 +3148,16 @@ function WorkshopContent() {
                       >
                         {isWritingLoading ? "创作中" : "开始创作"}
                       </button>
+                      {writingResult && (
+                        <button
+                          type="button"
+                          onClick={openShareConfirm}
+                          disabled={isSharing}
+                          className="inline-flex h-11 items-center justify-center rounded-full bg-[linear-gradient(90deg,#fff0c8_0%,#ffd8e6_52%,#e8efff_100%)] px-6 text-base font-black text-amber-900 shadow-[0_14px_28px_rgba(251,191,36,0.16)] disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {isSharing ? "正在分享" : "分享到社区"}
+                        </button>
+                      )}
                     </div>
                   ) : isPaintingMode ? (
                     <div className="flex flex-wrap items-center gap-3">
@@ -2834,6 +3179,16 @@ function WorkshopContent() {
                       >
                         {isDrawing ? "作画中" : "开始作画"}
                       </button>
+                      {generatedImageUrl && (
+                        <button
+                          type="button"
+                          onClick={openShareConfirm}
+                          disabled={isSharing}
+                          className="inline-flex h-11 items-center justify-center rounded-full bg-[linear-gradient(90deg,#ffd9ea_0%,#ffe7c7_52%,#dcecff_100%)] px-6 text-base font-black text-slate-700 shadow-[0_14px_28px_rgba(251,191,188,0.2)] disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {isSharing ? "正在分享" : "分享到社区"}
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-wrap items-center gap-3">
@@ -2955,6 +3310,7 @@ function WorkshopContent() {
                               </div>
                             ) : writingResult ? (
                               <div
+                                ref={writingPreviewRef}
                                 className="relative h-full min-h-0 w-full overflow-hidden rounded-[24px] border border-[#f6e4ae] bg-white px-8 py-10 shadow-[0_18px_45px_rgba(251,191,36,0.1)]"
                               >
                                 <div className="absolute inset-y-0 left-6 w-px bg-[#f6b8c6]/80" />
@@ -3033,6 +3389,7 @@ function WorkshopContent() {
                               </div>
                             ) : generatedImageUrl ? (
                               <div
+                                ref={paintingPreviewRef}
                                 className="flex h-full min-h-0 w-full items-center justify-center overflow-y-auto"
                               >
                                 <img
@@ -3142,7 +3499,7 @@ function WorkshopContent() {
 
       {isShareConfirmOpen && (
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#7d8eb0]/18 px-6 backdrop-blur-md">
-          <div className="w-full max-w-3xl rounded-[36px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-6 shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[36px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-6 shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-bold tracking-[0.16em] text-[#8aa0ca]">
@@ -3164,44 +3521,152 @@ function WorkshopContent() {
               </button>
             </div>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[260px_1fr]">
-              <div className="overflow-hidden rounded-[28px] bg-white shadow-[0_18px_40px_rgba(148,163,184,0.14)]">
-                {sharePreviewImageUrl ? (
-                  <img
-                    src={sharePreviewImageUrl}
-                    alt="作品分享预览"
-                    className="aspect-[4/5] h-full w-full object-cover"
+            <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1fr)]">
+              <section className="min-w-0 rounded-[28px] bg-white p-5 shadow-[0_18px_40px_rgba(148,163,184,0.14)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                      {activeShareMode === "writing" ? "社区展示" : "社区封面"}
+                    </p>
+                    <p className="mt-2 text-sm font-bold text-slate-600">
+                      {activeShareMode === "coding"
+                        ? "拖动选框，决定社区里先看到哪一块"
+                        : activeShareMode === "writing"
+                          ? "这段文字会以可滚动的信纸展示在社区里"
+                          : "这张图会作为社区卡片封面"}
+                    </p>
+                  </div>
+                  {activeShareMode === "coding" && (
+                    <button
+                      type="button"
+                      onClick={() => setShareCrop(DEFAULT_SHARE_CROP)}
+                      className="rounded-full bg-[#f4f7ff] px-4 py-2 text-xs font-black text-[#5e78c7]"
+                    >
+                      重新居中
+                    </button>
+                  )}
+                </div>
+
+                {activeShareMode === "writing" ? (
+                  <WritingSharePreview
+                    title={shareTitle || getDefaultShareTitle("writing")}
+                    content={writingResult}
                   />
+                ) : shareSourceImageUrl ? (
+                  activeShareMode === "coding" ? (
+                    <div className="mt-4 rounded-[24px] bg-[#f5f8ff] p-3">
+                      <div
+                        ref={shareCropFrameRef}
+                        className="relative overflow-hidden rounded-[20px] bg-white shadow-[inset_0_0_0_1px_rgba(219,234,254,0.9)]"
+                      >
+                        <img
+                          src={shareSourceImageUrl}
+                          alt="可裁剪的作品封面"
+                          draggable={false}
+                          onLoad={(event) =>
+                            setShareCrop(
+                              createInitialShareCrop(
+                                event.currentTarget.naturalWidth,
+                                event.currentTarget.naturalHeight,
+                              ),
+                            )
+                          }
+                          className="block max-h-[58vh] w-full select-none object-contain"
+                        />
+                        <div className="pointer-events-none absolute inset-0 bg-slate-900/26" />
+                        <div
+                          role="presentation"
+                          onPointerDown={handleShareCropPointerDown}
+                          className={`absolute rounded-[18px] border-2 border-white bg-white/10 shadow-[0_0_0_999px_rgba(15,23,42,0.32),0_16px_34px_rgba(15,23,42,0.22)] ring-2 ring-[#ffd6e8] ${
+                            isShareCropDragging ? "cursor-grabbing" : "cursor-grab"
+                          }`}
+                          style={{
+                            left: `${shareCrop.left * 100}%`,
+                            top: `${shareCrop.top * 100}%`,
+                            width: `${shareCrop.width * 100}%`,
+                            height: `${shareCrop.height * 100}%`,
+                            touchAction: "none",
+                          }}
+                        >
+                          <div className="absolute inset-3 rounded-[14px] border border-dashed border-white/88" />
+                          <div className="absolute left-1/2 top-1/2 rounded-full bg-white/92 px-3 py-1 text-xs font-black text-[#6b7fe8] shadow-[0_8px_18px_rgba(15,23,42,0.14)] -translate-x-1/2 -translate-y-1/2">
+                            拖动封面
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex max-h-[54vh] justify-center overflow-hidden rounded-[24px] bg-[#f7fbff] p-3">
+                      <img
+                        src={shareSourceImageUrl}
+                        alt="作品分享预览"
+                        className="aspect-[4/5] max-h-[50vh] max-w-full rounded-[18px] object-contain"
+                      />
+                    </div>
+                  )
                 ) : (
-                  <div className="flex aspect-[4/5] items-center justify-center bg-[#f7fbff] text-sm font-bold text-slate-400">
+                  <div className="mt-4 flex aspect-[4/5] items-center justify-center rounded-[24px] bg-[#f7fbff] text-sm font-bold text-slate-400">
                     正在准备预览
                   </div>
                 )}
-              </div>
+              </section>
 
-              <div className="space-y-4">
+              <section className="space-y-4">
                 <div className="rounded-[26px] bg-white p-5 shadow-[0_16px_36px_rgba(148,163,184,0.1)]">
-                  <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                  <label
+                    htmlFor="share-title"
+                    className="text-xs font-bold tracking-[0.14em] text-slate-400"
+                  >
                     分享标题
-                  </p>
-                  <p className="mt-3 text-xl font-black text-slate-700">
-                    {buildShareTitle()}
-                  </p>
+                  </label>
+                  <input
+                    id="share-title"
+                    value={shareTitle}
+                    maxLength={48}
+                    onChange={(event) => {
+                      setShareTitle(event.target.value);
+                      setShareTitleError("");
+                    }}
+                    placeholder="给作品起一个标题"
+                    className="mt-3 w-full rounded-[18px] border border-[#dce7ff] bg-[#fbfdff] px-4 py-3 text-base font-black text-slate-700 outline-none transition focus:bg-white focus:shadow-[0_0_0_4px_rgba(219,234,254,0.55)]"
+                  />
+                  {shareTitleError && (
+                    <p className="mt-2 text-sm font-bold text-[#d45b85]">
+                      {shareTitleError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-[26px] bg-white p-5 shadow-[0_16px_36px_rgba(148,163,184,0.1)]">
+                  <label
+                    htmlFor="share-description"
+                    className="text-xs font-bold tracking-[0.14em] text-slate-400"
+                  >
+                    分享描述
+                  </label>
+                  <textarea
+                    id="share-description"
+                    value={shareDescription}
+                    maxLength={160}
+                    onChange={(event) => setShareDescription(event.target.value)}
+                    placeholder="可以补充作品亮点、玩法或创作想法，不填也可以。"
+                    className="mt-3 min-h-[112px] w-full resize-none rounded-[18px] border border-[#dce7ff] bg-[#fbfdff] px-4 py-3 text-sm leading-7 text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(219,234,254,0.55)]"
+                  />
                 </div>
 
                 <div className="rounded-[26px] bg-white p-5 shadow-[0_16px_36px_rgba(148,163,184,0.1)]">
                   <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
                     提示词内容
                   </p>
-                  <p className="mt-3 max-h-[180px] overflow-y-auto text-sm leading-7 text-slate-600">
-                    {promptText}
+                  <p className="mt-3 max-h-[160px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-600">
+                    {getSharePrompt()}
                   </p>
                 </div>
 
                 <div className="rounded-[24px] bg-[#fff7e8] px-4 py-3 text-sm font-bold leading-7 text-[#b7791f]">
                   分享后会优先经过规则审核，再进入智能复审，确保社区内容适合孩子们公开浏览。
                 </div>
-              </div>
+              </section>
             </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
@@ -3365,7 +3830,8 @@ function WorkshopContent() {
                   <div className="max-h-[64vh] space-y-3 overflow-auto pr-1">
                     {codeGuideRows.map((row) => {
                       const targetMeta = codeGuideTargetMeta[row.previewTarget];
-                      const isActiveGuide = activeCodeGuideMarkerId === row.markerId;
+                      const isActiveGuide =
+                        selectedCodeGuideMarkerId === row.markerId;
 
                       return (
                         <button
@@ -3465,7 +3931,7 @@ function WorkshopContent() {
                         scrolling="yes"
                       />
 
-                      {!activeCodeGuideMarkerId && (
+                      {!selectedCodeGuideMarkerId && (
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white/58 backdrop-blur-[2px]">
                           <div className="rounded-[24px] bg-white/96 px-6 py-5 text-center shadow-[0_18px_40px_rgba(148,163,184,0.14)]">
                             <p className="text-sm font-black text-[#7a67db]">
@@ -3480,7 +3946,7 @@ function WorkshopContent() {
 
                       <div className="pointer-events-none absolute inset-0 z-20">
                         {codeGuideRows.map((row) => {
-                          if (row.markerId !== activeCodeGuideMarkerId) {
+                          if (row.markerId !== selectedCodeGuideMarkerId) {
                             return null;
                           }
 

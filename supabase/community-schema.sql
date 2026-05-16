@@ -1,7 +1,7 @@
 create table if not exists public.community_posts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
-  mode text not null check (mode in ('coding')),
+  mode text not null check (mode in ('coding', 'writing', 'painting')),
   title text not null,
   prompt text not null,
   preview_image_url text not null,
@@ -19,6 +19,12 @@ alter table public.community_posts
   add column if not exists reviewed_at timestamptz,
   add column if not exists is_featured boolean not null default false,
   add column if not exists moderation_detail jsonb not null default '{}'::jsonb;
+
+alter table public.community_posts
+  drop constraint if exists community_posts_mode_check;
+
+alter table public.community_posts
+  add constraint community_posts_mode_check check (mode in ('coding', 'writing', 'painting'));
 
 create table if not exists public.user_profiles (
   user_id uuid primary key references public.users(id) on delete cascade,

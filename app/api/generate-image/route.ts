@@ -94,7 +94,10 @@ function parsePossibleJson(rawText: string) {
 function extractImageUrl(data: SiliconFlowImageResponse) {
   const directUrl = data.images?.[0]?.url ?? data.data?.[0]?.url;
 
-  if (directUrl) {
+  if (
+    directUrl &&
+    /^(https?:\/\/|data:image\/|blob:)/i.test(directUrl.trim())
+  ) {
     return directUrl;
   }
 
@@ -123,6 +126,14 @@ function buildImageErrorMessage(rawText: string, model: string, endpointUrl: str
 
   if (normalizedMessage.includes("invalid_api_key") || normalizedMessage.includes("api key")) {
     return "绘画接口的密钥无效，或者这个密钥没有开通图片生成权限，请检查后台填写的 key。";
+  }
+
+  if (
+    normalizedMessage.includes("invalid token") ||
+    normalizedMessage.includes("invalid_token") ||
+    normalizedMessage.includes("token")
+  ) {
+    return "绘画接口返回 Invalid token，请检查后台 AI 绘画配置里的接口密钥是否正确、是否过期，或者是否填到了正确的密钥环境变量。";
   }
 
   if (normalizedMessage.includes("invalid url")) {
@@ -246,6 +257,13 @@ export async function POST(request: Request) {
     const imageUrl = extractImageUrl(data);
 
     if (!imageUrl) {
+      const upstreamMessage =
+        data.error?.message ??
+        data.images?.[0]?.url ??
+        data.data?.[0]?.url ??
+        data.data?.[0]?.b64_json ??
+        "";
+
       if (shouldCharge && chargedUserId) {
         remainingCredits = await addCredits(chargedUserId, creditCost, {
           reasonCode: "painting_refund",
@@ -257,6 +275,11 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
+            buildImageErrorMessage(
+              upstreamMessage,
+              aiConfig.model,
+              requestEndpoint,
+            ) ||
             "图像模型已经返回结果了，但没有带回可直接展示的图片地址或图片数据。",
           remainingCredits,
         },

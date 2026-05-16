@@ -27,18 +27,20 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as {
       title?: string;
+      description?: string;
       prompt?: string;
       previewImageUrl?: string;
       previewCode?: string;
-      mode?: "coding";
+      mode?: "coding" | "writing" | "painting";
     };
+    const mode = body.mode;
 
     if (
       !body.title?.trim() ||
       !body.prompt?.trim() ||
       !body.previewImageUrl?.trim() ||
       !body.previewCode?.trim() ||
-      body.mode !== "coding"
+      (mode !== "coding" && mode !== "writing" && mode !== "painting")
     ) {
       return NextResponse.json(
         { error: "分享内容不完整，请重新生成后再试。" },
@@ -51,9 +53,11 @@ export async function POST(request: Request) {
     const result = await queueCommunityShare({
       userId: currentUser.user_id,
       title: body.title.trim(),
+      description: body.description?.trim() || null,
       prompt: body.prompt.trim(),
       previewImageUrl: body.previewImageUrl.trim(),
       previewCode: body.previewCode.trim(),
+      mode,
     });
 
     if (result.immediateStatus === "pending") {

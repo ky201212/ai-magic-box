@@ -13,6 +13,35 @@ type ReviewConsoleProps = {
 
 type ReviewFilter = "all" | "pending" | "approved" | "rejected";
 type ReviewSaveStatus = "idle" | "saving" | "success" | "error";
+type OperationSaveStatus = ReviewSaveStatus;
+
+function getStatusLabel(status: AdminCommunityPostRecord["moderation_status"]) {
+  if (status === "approved") {
+    return "已发布";
+  }
+
+  if (status === "rejected") {
+    return "已拒绝";
+  }
+
+  return "待审核";
+}
+
+function getStageLabel(stage: AdminCommunityPostRecord["moderation_stage"]) {
+  if (stage === "ai") {
+    return "AI 审核";
+  }
+
+  if (stage === "fallback") {
+    return "备用流程";
+  }
+
+  if (stage === "manual") {
+    return "人工处理";
+  }
+
+  return "规则审核";
+}
 
 function parseModerationDetail(post: AdminCommunityPostRecord) {
   const detail = post.moderation_detail ?? {};
@@ -83,6 +112,11 @@ export function ReviewConsole({
     useState<ReviewSaveStatus>("idle");
   const [isRefreshingPosts, setIsRefreshingPosts] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [expandedPostIds, setExpandedPostIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [operationSaveStatusByPostId, setOperationSaveStatusByPostId] =
+    useState<Record<string, OperationSaveStatus>>({});
   const [operationDrafts, setOperationDrafts] = useState<
     Record<
       string,
@@ -330,41 +364,77 @@ export function ReviewConsole({
       return;
     }
 
-    const response = await fetch(`/api/admin/community-posts/${postId}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: draft.title.trim(),
-        prompt: draft.prompt.trim(),
-        category: draft.category,
-        like_count: Number(draft.like_count || 0),
-        view_count: Number(draft.view_count || 0),
-        share_count: Number(draft.share_count || 0),
-        manual_sort_order: Number(draft.manual_sort_order || 0),
-        creator_score: Number(draft.creator_score || 0),
-        manual_creator_rank: draft.manual_creator_rank.trim()
-          ? Number(draft.manual_creator_rank)
-          : null,
-        is_featured: draft.is_featured,
-        is_creator_star: draft.is_creator_star,
-      }),
-    });
+    setOperationSaveStatusByPostId((current) => ({
+      ...current,
+      [postId]: "saving",
+    }));
 
-    const data = (await response.json()) as {
-      post?: AdminCommunityPostRecord;
-      error?: string;
-    };
+    try {
+      const response = await fetch(`/api/admin/community-posts/${postId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: draft.title.trim(),
+          prompt: draft.prompt.trim(),
+          category: draft.category,
+          like_count: Number(draft.like_count || 0),
+          view_count: Number(draft.view_count || 0),
+          share_count: Number(draft.share_count || 0),
+          manual_sort_order: Number(draft.manual_sort_order || 0),
+          creator_score: Number(draft.creator_score || 0),
+          manual_creator_rank: draft.manual_creator_rank.trim()
+            ? Number(draft.manual_creator_rank)
+            : null,
+          is_featured: draft.is_featured,
+          is_creator_star: draft.is_creator_star,
+        }),
+      });
 
-    if (!response.ok || !data.post) {
-      window.alert(data.error ?? "社区运营数据保存失败。");
-      return;
+      const data = (await response.json()) as {
+        post?: AdminCommunityPostRecord;
+        error?: string;
+      };
+
+      if (!response.ok || !data.post) {
+        throw new Error(data.error ?? "社区运营数据保存失败。");
+      }
+
+      setPosts((current) =>
+        current.map((item) => (item.id === postId ? data.post! : item)),
+      );
+      setOperationDrafts((current) => ({
+        ...current,
+        [postId]: buildOperationDraft(data.post!),
+      }));
+      setOperationSaveStatusByPostId((current) => ({
+        ...current,
+        [postId]: "success",
+      }));
+    } catch (error) {
+      setOperationSaveStatusByPostId((current) => ({
+        ...current,
+        [postId]: "error",
+      }));
+      window.alert(
+        error instanceof Error ? error.message : "社区运营数据保存失败。",
+      );
+    } finally {
+      window.setTimeout(() => {
+        setOperationSaveStatusByPostId((current) => ({
+          ...current,
+          [postId]: "idle",
+        }));
+      }, 2200);
     }
+  };
 
-    setPosts((current) =>
-      current.map((item) => (item.id === postId ? data.post! : item)),
-    );
+  const togglePostExpanded = (postId: string) => {
+    setExpandedPostIds((current) => ({
+      ...current,
+      [postId]: !current[postId],
+    }));
   };
 
   const handleDeletePost = async (post: AdminCommunityPostRecord) => {
@@ -398,6 +468,11 @@ export function ReviewConsole({
         return next;
       });
       setOperationDrafts((current) => {
+        const next = { ...current };
+        delete next[post.id];
+        return next;
+      });
+      setExpandedPostIds((current) => {
         const next = { ...current };
         delete next[post.id];
         return next;
@@ -681,33 +756,36 @@ export function ReviewConsole({
           const { rule, ai, policy } = parseModerationDetail(post);
           const lockedByAiReject =
             reviewSetting.lockManualApproveAfterAiReject && ai.approved === false;
+          const isExpanded = Boolean(expandedPostIds[post.id]);
+          const operationSaveStatus =
+            operationSaveStatusByPostId[post.id] ?? "idle";
 
           return (
             <article
               key={post.id}
-              className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]"
+              className="rounded-[30px] border border-white/80 bg-white p-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] sm:p-5"
             >
-              <div className="grid gap-6 xl:grid-cols-[220px_1fr]">
-                <div className="overflow-hidden rounded-[24px] bg-slate-50">
+              <div className="grid gap-4 lg:grid-cols-[112px_minmax(0,1fr)]">
+                <div className="h-32 overflow-hidden rounded-[22px] bg-slate-50 lg:h-36">
                   <img
                     src={post.preview_image_url}
                     alt={post.title}
-                    className="aspect-[4/5] h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                   />
                 </div>
 
-                <div className="space-y-5">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap gap-2">
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                          当前状态：{post.moderation_status}
+                          {getStatusLabel(post.moderation_status)}
                         </span>
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                          当前阶段：{post.moderation_stage}
+                          {getStageLabel(post.moderation_stage)}
                         </span>
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                          AI 通过后策略：
+                          AI 通过后：
                           {policy.aiApprovalMode === "auto_publish" ||
                           reviewSetting.aiApprovalMode === "auto_publish"
                             ? "直发"
@@ -717,16 +795,16 @@ export function ReviewConsole({
                       <h3 className="mt-4 text-2xl font-black text-slate-900">
                         {post.title}
                       </h3>
-                      <p className="mt-3 text-sm font-bold text-slate-600">
+                      <p className="mt-2 text-sm font-bold text-slate-600">
                         发布者：{getUserLabel(post)}
                         {post.user_phone ? ` / ${post.user_phone}` : ""}
                       </p>
-                      <p className="mt-3 text-sm leading-7 text-slate-500">
+                      <p className="mt-2 line-clamp-2 text-sm leading-7 text-slate-500">
                         {post.prompt}
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
                       <button
                         type="button"
                         disabled={lockedByAiReject}
@@ -757,9 +835,21 @@ export function ReviewConsole({
                       >
                         {deletingPostId === post.id ? "删除中" : "永久删除"}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => togglePostExpanded(post.id)}
+                        aria-expanded={isExpanded}
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700"
+                      >
+                        {isExpanded ? "收起详情" : "展开详情"}
+                      </button>
                     </div>
                   </div>
+                </div>
+              </div>
 
+              {isExpanded && (
+                <div className="mt-5 space-y-5 border-t border-slate-100 pt-5 lg:ml-32">
                   {lockedByAiReject && (
                     <div className="rounded-[20px] bg-[#fff7ed] px-4 py-3 text-sm font-bold leading-7 text-[#b86a12]">
                       AI 已明确拒绝该作品，当前策略下人工不能直接改成已发布。请先查看拒绝原因并让用户修改后重新提交。
@@ -843,11 +933,26 @@ export function ReviewConsole({
                       <button
                         type="button"
                         onClick={() => void handleSaveOperations(post.id)}
-                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-black text-white"
+                        disabled={operationSaveStatus === "saving"}
+                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        保存运营数据
+                        {operationSaveStatus === "saving"
+                          ? "保存中..."
+                          : operationSaveStatus === "success"
+                            ? "已保存"
+                            : "保存运营数据"}
                       </button>
                     </div>
+                    {operationSaveStatus === "success" && (
+                      <div className="mt-3 rounded-[16px] bg-[#ecfdf3] px-4 py-3 text-sm font-bold text-[#1c8b5f]">
+                        运营数据已保存，社区页面刷新后会展示最新数据。
+                      </div>
+                    )}
+                    {operationSaveStatus === "error" && (
+                      <div className="mt-3 rounded-[16px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d4557c]">
+                        保存失败，请检查权限或稍后再试。
+                      </div>
+                    )}
 
                     <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {[
@@ -969,7 +1074,7 @@ export function ReviewConsole({
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
             </article>
           );
         })}

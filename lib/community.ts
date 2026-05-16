@@ -1,7 +1,6 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
-  inferCommunityCategory,
   normalizeCommunityCategory,
   type CommunityCategory,
 } from "@/lib/community-config";
@@ -14,11 +13,14 @@ export type UserProfile = {
 };
 
 export type CommunityPostStatus = "pending" | "approved" | "rejected";
+export type CommunityPostMode = "coding" | "writing" | "painting";
 
 export type UserCommunityPost = {
   id: string;
   user_id: string;
+  mode: CommunityPostMode;
   title: string;
+  description: string | null;
   prompt: string;
   preview_image_url: string;
   moderation_status: CommunityPostStatus;
@@ -33,7 +35,7 @@ export type UserCommunityPost = {
 export type CommunityPostRow = {
   id: string;
   user_id: string;
-  mode: "coding";
+  mode: CommunityPostMode;
   title: string;
   prompt: string;
   preview_image_url: string;
@@ -65,7 +67,9 @@ type CommunityProfileRow = {
 export type ApprovedCommunityPost = {
   id: string;
   user_id: string;
+  mode: CommunityPostMode;
   title: string;
+  description: string | null;
   prompt: string;
   preview_image_url: string;
   like_count: number;
@@ -125,6 +129,7 @@ export type CommunityOverview = {
 export type CommunityAdminSearchRecord = {
   id: string;
   user_id: string;
+  mode: CommunityPostMode;
   title: string;
   prompt: string;
   preview_image_url: string;
@@ -152,10 +157,11 @@ export type CommunityAdminSearchRecord = {
 type CommunityPostInsert = {
   userId: string;
   title: string;
+  description?: string | null;
   prompt: string;
   previewImageUrl: string;
   previewCode: string;
-  mode: "coding";
+  mode: CommunityPostMode;
   moderationStatus: CommunityPostStatus;
   moderationReason?: string;
   moderationDetail?: Record<string, unknown>;
@@ -163,6 +169,8 @@ type CommunityPostInsert = {
 
 type PostMeta = {
   category?: string;
+  description?: string | null;
+  workMode?: CommunityPostMode;
   viewCount?: number;
   shareCount?: number;
   manualSortOrder?: number;
@@ -215,12 +223,53 @@ function isMissingSchemaObject(error: unknown, name: string) {
   );
 }
 
+function isCommunityPostModeConstraintError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message.toLowerCase()
+      : "";
+
+  const details =
+    "details" in error && typeof error.details === "string"
+      ? error.details.toLowerCase()
+      : "";
+
+  return (
+    ("code" in error && error.code === "23514") &&
+    (message.includes("community_posts_mode") ||
+      details.includes("mode") ||
+      message.includes("mode"))
+  );
+}
+
 function normalizePostMeta(input: unknown): PostMeta {
   if (!input || typeof input !== "object") {
     return {};
   }
 
   return input as PostMeta;
+}
+
+function normalizePostMode(value: unknown): CommunityPostMode | null {
+  return value === "coding" || value === "writing" || value === "painting"
+    ? value
+    : null;
+}
+
+function getCategoryForPostMode(mode: CommunityPostMode): CommunityCategory {
+  if (mode === "writing") {
+    return "故事写作";
+  }
+
+  if (mode === "painting") {
+    return "绘画设计";
+  }
+
+  return "创意编程";
 }
 
 function normalizeCount(value: unknown) {
@@ -316,13 +365,43 @@ function mergeCommunityDetail(
 
 function resolveCategory(post: {
   title: string;
+  mode?: string;
   prompt: string;
   moderation_detail?: Record<string, unknown>;
 }) {
   const meta = getPostMeta(post.moderation_detail);
-  return normalizeCommunityCategory(
-    typeof meta.category === "string" ? meta.category : null,
-  ) || inferCommunityCategory({ title: post.title, prompt: post.prompt });
+  const mode =
+    normalizePostMode(meta.workMode) ?? normalizePostMode(post.mode) ?? "coding";
+  const modeCategory = getCategoryForPostMode(mode);
+  const normalizedMetaCategory =
+    typeof meta.category === "string"
+      ? normalizeCommunityCategory(meta.category)
+      : null;
+
+  if (!normalizedMetaCategory) {
+    return modeCategory;
+  }
+
+  if (mode !== "coding" && normalizedMetaCategory === "创意编程") {
+    return modeCategory;
+  }
+
+  return normalizedMetaCategory;
+}
+
+function resolvePostMode(post: {
+  mode?: string;
+  moderation_detail?: Record<string, unknown>;
+}) {
+  const meta = getPostMeta(post.moderation_detail);
+  return normalizePostMode(meta.workMode) ?? normalizePostMode(post.mode) ?? "coding";
+}
+
+function resolveDescription(post: { moderation_detail?: Record<string, unknown> }) {
+  const meta = getPostMeta(post.moderation_detail);
+  return typeof meta.description === "string" && meta.description.trim()
+    ? meta.description.trim()
+    : null;
 }
 
 function resolveFeatured(post: {
@@ -497,13 +576,12 @@ export async function getUserProfile(userId: string) {
 
 export async function createCommunityPost(input: CommunityPostInsert) {
   const supabaseAdmin = getSupabaseAdmin();
-  const category = inferCommunityCategory({
-    title: input.title,
-    prompt: input.prompt,
-  });
+  const category = getCategoryForPostMode(input.mode);
 
   const detail = mergeCommunityDetail(input.moderationDetail, {
     category,
+    description: input.description?.trim() || null,
+    workMode: input.mode,
     viewCount: 0,
     shareCount: 0,
     manualSortOrder: 0,
@@ -512,24 +590,34 @@ export async function createCommunityPost(input: CommunityPostInsert) {
     manualCreatorRank: null,
     isCreatorStar: false,
   });
+  const insertWithMode = (mode: CommunityPostMode) =>
+    supabaseAdmin
+      .from("community_posts")
+      .insert(
+        {
+          user_id: input.userId,
+          title: input.title,
+          prompt: input.prompt,
+          preview_image_url: input.previewImageUrl,
+          preview_code: input.previewCode,
+          mode,
+          moderation_status: input.moderationStatus,
+          moderation_reason: input.moderationReason ?? null,
+          moderation_detail: detail,
+        } as never,
+      )
+      .select("*")
+      .single();
 
-  const primaryResult = await supabaseAdmin
-    .from("community_posts")
-    .insert(
-      {
-        user_id: input.userId,
-        title: input.title,
-        prompt: input.prompt,
-        preview_image_url: input.previewImageUrl,
-        preview_code: input.previewCode,
-        mode: input.mode,
-        moderation_status: input.moderationStatus,
-        moderation_reason: input.moderationReason ?? null,
-        moderation_detail: detail,
-      } as never,
-    )
-    .select("*")
-    .single();
+  let primaryResult = await insertWithMode(input.mode);
+
+  if (
+    primaryResult.error &&
+    input.mode !== "coding" &&
+    isCommunityPostModeConstraintError(primaryResult.error)
+  ) {
+    primaryResult = await insertWithMode("coding");
+  }
 
   if (!primaryResult.error) {
     return primaryResult.data as CommunityPostRow;
@@ -539,34 +627,48 @@ export async function createCommunityPost(input: CommunityPostInsert) {
     throw primaryResult.error;
   }
 
-  const fallbackResult = (await supabaseAdmin
-    .from("community_posts")
-    .insert(
-      {
-        user_id: input.userId,
-        title: input.title,
-        prompt: input.prompt,
-        preview_image_url: input.previewImageUrl,
-        preview_code: input.previewCode,
-        mode: input.mode,
-        moderation_status: input.moderationStatus,
-        moderation_reason: input.moderationReason ?? null,
-      } as never,
-    )
-    .select("*")
-    .single()) as {
+  const insertFallbackWithMode = (mode: CommunityPostMode) =>
+    supabaseAdmin
+      .from("community_posts")
+      .insert(
+        {
+          user_id: input.userId,
+          title: input.title,
+          prompt: input.prompt,
+          preview_image_url: input.previewImageUrl,
+          preview_code: input.previewCode,
+          mode,
+          moderation_status: input.moderationStatus,
+          moderation_reason: input.moderationReason ?? null,
+        } as never,
+      )
+      .select("*")
+      .single();
+
+  let fallbackResult = (await insertFallbackWithMode(input.mode)) as {
     data: CommunityPostRow | null;
     error: unknown;
   };
+
+  if (
+    fallbackResult.error &&
+    input.mode !== "coding" &&
+    isCommunityPostModeConstraintError(fallbackResult.error)
+  ) {
+    fallbackResult = (await insertFallbackWithMode("coding")) as {
+      data: CommunityPostRow | null;
+      error: unknown;
+    };
+  }
 
   if (fallbackResult.error) {
     throw fallbackResult.error;
   }
 
-  if (input.moderationDetail && fallbackResult.data?.id) {
+  if (fallbackResult.data?.id) {
     await writeModerationDetailFallback(
       fallbackResult.data.id,
-      input.moderationDetail,
+      detail,
     );
   }
 
@@ -701,7 +803,7 @@ export async function listApprovedCommunityPosts(
   const primaryResult = await supabaseAdmin
     .from("community_posts")
     .select(
-      "id, user_id, title, prompt, preview_image_url, like_count, created_at, is_featured, moderation_detail",
+      "id, user_id, mode, title, prompt, preview_image_url, like_count, created_at, is_featured, moderation_detail",
     )
     .eq("moderation_status", "approved")
     .order("created_at", { ascending: false })
@@ -711,6 +813,7 @@ export async function listApprovedCommunityPosts(
           CommunityPostRow,
           | "id"
           | "user_id"
+          | "mode"
           | "title"
           | "prompt"
           | "preview_image_url"
@@ -729,7 +832,7 @@ export async function listApprovedCommunityPosts(
     const fallbackResult = await supabaseAdmin
       .from("community_posts")
       .select(
-        "id, user_id, title, prompt, preview_image_url, like_count, created_at, is_featured",
+        "id, user_id, mode, title, prompt, preview_image_url, like_count, created_at, is_featured",
       )
       .eq("moderation_status", "approved")
       .order("created_at", { ascending: false })
@@ -739,6 +842,7 @@ export async function listApprovedCommunityPosts(
             CommunityPostRow,
             | "id"
             | "user_id"
+            | "mode"
             | "title"
             | "prompt"
             | "preview_image_url"
@@ -771,7 +875,9 @@ export async function listApprovedCommunityPosts(
   let enriched = posts.map((post) => ({
     id: post.id,
     user_id: post.user_id,
+    mode: resolvePostMode(post),
     title: post.title,
+    description: resolveDescription(post),
     prompt: post.prompt,
     preview_image_url: post.preview_image_url,
     like_count: normalizeCount(post.like_count),
@@ -801,6 +907,7 @@ export async function listApprovedCommunityPosts(
     enriched = enriched.filter((post) =>
       [
         post.title,
+        post.description ?? "",
         post.prompt,
         post.category,
         post.user_profiles?.display_name ?? "",
@@ -823,7 +930,7 @@ export async function listUserCommunityPosts(
   const primaryResult = await supabaseAdmin
     .from("community_posts")
     .select(
-      "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, like_count, created_at, moderation_detail",
+      "id, user_id, mode, title, prompt, preview_image_url, moderation_status, moderation_reason, like_count, created_at, moderation_detail",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
@@ -833,6 +940,7 @@ export async function listUserCommunityPosts(
           CommunityPostRow,
           | "id"
           | "user_id"
+          | "mode"
           | "title"
           | "prompt"
           | "preview_image_url"
@@ -852,7 +960,7 @@ export async function listUserCommunityPosts(
     const fallbackResult = await supabaseAdmin
       .from("community_posts")
       .select(
-        "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, like_count, created_at",
+        "id, user_id, mode, title, prompt, preview_image_url, moderation_status, moderation_reason, like_count, created_at",
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
@@ -862,6 +970,7 @@ export async function listUserCommunityPosts(
             CommunityPostRow,
             | "id"
             | "user_id"
+            | "mode"
             | "title"
             | "prompt"
             | "preview_image_url"
@@ -886,6 +995,8 @@ export async function listUserCommunityPosts(
 
   return (data ?? []).map((post) => ({
     ...post,
+    mode: resolvePostMode(post),
+    description: resolveDescription(post),
     view_count: resolveViewCount(post),
     share_count: resolveShareCount(post),
     category: resolveCategory(post),
@@ -908,7 +1019,9 @@ export async function getApprovedCommunityPostDetail(
   return {
     id: post.id,
     user_id: post.user_id,
+    mode: resolvePostMode(post),
     title: post.title,
+    description: resolveDescription(post),
     prompt: post.prompt,
     preview_image_url: post.preview_image_url,
     preview_code: post.preview_code,
@@ -1371,6 +1484,7 @@ export async function listCommunityAdminRecords(input?: {
   const selectFields = [
     "id",
     "user_id",
+    "mode",
     "title",
     "prompt",
     "preview_image_url",
@@ -1406,6 +1520,7 @@ export async function listCommunityAdminRecords(input?: {
         CommunityPostRow,
         | "id"
         | "user_id"
+        | "mode"
         | "title"
         | "prompt"
         | "preview_image_url"
@@ -1429,6 +1544,7 @@ export async function listCommunityAdminRecords(input?: {
     const fallbackSelectFields = [
       "id",
       "user_id",
+      "mode",
       "title",
       "prompt",
       "preview_image_url",
@@ -1463,6 +1579,7 @@ export async function listCommunityAdminRecords(input?: {
           CommunityPostRow,
           | "id"
           | "user_id"
+          | "mode"
           | "title"
           | "prompt"
           | "preview_image_url"
@@ -1500,6 +1617,7 @@ export async function listCommunityAdminRecords(input?: {
   return posts.map((post) => ({
     id: post.id,
     user_id: post.user_id,
+    mode: resolvePostMode(post),
     title: post.title,
     prompt: post.prompt,
     preview_image_url: post.preview_image_url,

@@ -1,0 +1,8 @@
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          57388
+- Dir:          D:\科普网址\ai-magic-box
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 57388 /F to stop it.

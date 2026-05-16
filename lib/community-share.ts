@@ -4,6 +4,7 @@ import {
   getCommunityPostById,
   updateCommunityPostModeration,
   type CommunityPostRow,
+  type CommunityPostMode,
 } from "@/lib/community";
 import { getCommunityReviewSetting } from "@/lib/admin-data";
 import { moderateCommunityPost, moderateCommunityPostByRules } from "@/lib/moderation";
@@ -12,9 +13,11 @@ import { sendUserNotification } from "@/lib/user-notifications";
 type QueueShareInput = {
   userId: string;
   title: string;
+  description?: string | null;
   prompt: string;
   previewImageUrl: string;
   previewCode: string;
+  mode: CommunityPostMode;
 };
 
 type QueueCommunityShareResult =
@@ -34,7 +37,7 @@ export async function queueCommunityShare(
 ): Promise<QueueCommunityShareResult> {
   const ruleResult = moderateCommunityPostByRules({
     title: input.title,
-    prompt: input.prompt,
+    prompt: [input.prompt, input.description].filter(Boolean).join("\n"),
     previewCode: input.previewCode,
   });
 
@@ -42,10 +45,11 @@ export async function queueCommunityShare(
     const post = await createCommunityPost({
       userId: input.userId,
       title: input.title,
+      description: input.description,
       prompt: input.prompt,
       previewImageUrl: input.previewImageUrl,
       previewCode: input.previewCode,
-      mode: "coding",
+      mode: input.mode,
       moderationStatus: "rejected",
       moderationReason: ruleResult.reason,
       moderationDetail: ruleResult.detail,
@@ -69,10 +73,11 @@ export async function queueCommunityShare(
   const post = await createCommunityPost({
     userId: input.userId,
     title: input.title,
+    description: input.description,
     prompt: input.prompt,
     previewImageUrl: input.previewImageUrl,
     previewCode: input.previewCode,
-    mode: "coding",
+    mode: input.mode,
     moderationStatus: "pending",
     moderationReason: "作品已提交，正在进入智能复审。",
     moderationDetail: {
@@ -102,7 +107,16 @@ export async function finalizeCommunityShareReview(postId: string) {
 
   const moderation = await moderateCommunityPost({
     title: post.title,
-    prompt: post.prompt,
+    prompt: [
+      post.prompt,
+      typeof post.moderation_detail?.community_meta === "object" &&
+      post.moderation_detail.community_meta &&
+      "description" in post.moderation_detail.community_meta
+        ? post.moderation_detail.community_meta.description
+        : null,
+    ]
+      .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      .join("\n"),
     previewCode: post.preview_code,
   });
 
@@ -123,12 +137,18 @@ export async function finalizeCommunityShareReview(postId: string) {
       : moderation.suggestedStatus === "approved"
         ? "作品已通过审核，现已展示到成长社区。"
         : moderation.reason;
+  const currentCommunityMeta =
+    post.moderation_detail && typeof post.moderation_detail.community_meta === "object"
+      ? post.moderation_detail.community_meta
+      : undefined;
 
   const updatedPost = await updateCommunityPostModeration(postId, {
     moderationStatus: finalStatus,
     moderationReason: finalReason,
     moderationDetail: {
+      ...post.moderation_detail,
       ...moderation.detail,
+      ...(currentCommunityMeta ? { community_meta: currentCommunityMeta } : {}),
       policy: {
         aiApprovalMode: reviewSetting?.aiApprovalMode ?? "manual_review",
         lockManualApproveAfterAiReject:

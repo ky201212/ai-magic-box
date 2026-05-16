@@ -100,29 +100,6 @@ export function moderateCommunityPostByRules(
     };
   }
 
-  if (input.prompt.trim().length < 8) {
-    return {
-      approved: false,
-      reason: "提示词内容太短，暂不适合直接公开展示。",
-      stage: "rule",
-      suggestedStatus: "rejected",
-      detail: {
-        rule: {
-          approved: false,
-          reason: "提示词内容太短，暂不适合直接公开展示。",
-          matchedKeyword: null,
-        },
-        ai: {
-          executed: false,
-          approved: null,
-          reason: null,
-          raw: null,
-          error: null,
-        },
-      },
-    };
-  }
-
   if (input.previewCode.length < 120) {
     return {
       approved: false,

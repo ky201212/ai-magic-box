@@ -1,0 +1,22 @@
+
+> ai-magic-box@0.1.0 dev
+> next dev --webpack
+
+▲ Next.js 16.2.6 (webpack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.101.162:3000
+- Environments: .env.local
+✓ Ready in 839ms
+
+ GET /community 200 in 8.5s (next.js: 2.6s, application-code: 5.8s)
+ GET /admin/review 200 in 12.5s (next.js: 2.6s, application-code: 9.9s)
+ GET /api/community/posts 200 in 6.0s (next.js: 1030ms, application-code: 5.0s)
+ GET /api/admin/community-posts 200 in 7.5s (next.js: 549ms, proxy.ts: 183ms, application-code: 6.8s)
+ GET /api/admin/community-posts 200 in 7.7s (next.js: 5ms, proxy.ts: 7ms, application-code: 7.6s)
+ GET /api/admin/community-posts 200 in 8.3s (next.js: 3ms, proxy.ts: 8ms, application-code: 8.3s)
+ GET /api/community/posts 200 in 4.5s (next.js: 2ms, application-code: 4.5s)
+ GET /api/community/posts 200 in 5.1s (next.js: 13ms, application-code: 5.1s)
+ GET /api/admin/community-posts 200 in 6.8s (next.js: 3ms, proxy.ts: 6ms, application-code: 6.8s)
+ GET /api/admin/community-posts 200 in 7.3s (next.js: 3ms, proxy.ts: 6ms, application-code: 7.3s)
+ GET /api/admin/community-posts 200 in 7.6s (next.js: 4ms, proxy.ts: 7ms, application-code: 7.6s)
+ GET /api/admin/community-posts 200 in 10.0s (next.js: 3ms, proxy.ts: 6ms, application-code: 10.0s)

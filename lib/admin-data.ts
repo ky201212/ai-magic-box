@@ -98,6 +98,7 @@ export type DashboardStats = {
 export type AdminCommunityPostRecord = {
   id: string;
   user_id: string;
+  mode: "coding" | "writing" | "painting";
   title: string;
   prompt: string;
   preview_image_url: string;
@@ -486,6 +487,7 @@ export async function updateCommunityPostReview(
   type CommunityPostReviewRow = {
     id: string;
     user_id: string;
+    mode: "coding" | "writing" | "painting";
     title: string;
     prompt: string;
     preview_image_url: string;
@@ -560,7 +562,7 @@ export async function updateCommunityPostReview(
     )
     .eq("id", postId)
     .select(
-      "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, moderation_detail, is_featured, created_at, reviewed_at",
+      "id, user_id, mode, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, moderation_detail, is_featured, created_at, reviewed_at",
     )
     .single();
 
@@ -583,13 +585,14 @@ export async function updateCommunityPostReview(
       )
       .eq("id", postId)
       .select(
-        "id, user_id, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, is_featured, created_at, reviewed_at",
+        "id, user_id, mode, title, prompt, preview_image_url, moderation_status, moderation_reason, moderation_stage, is_featured, created_at, reviewed_at",
       )
       .single()) as {
       data:
         | {
             id: string;
             user_id: string;
+            mode: "coding" | "writing" | "painting";
             title: string;
             prompt: string;
             preview_image_url: string;

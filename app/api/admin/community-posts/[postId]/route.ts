@@ -111,6 +111,13 @@ export async function POST(request: Request, context: RouteContext) {
       reviewed_by: adminContext.userId,
     });
 
+    if (!post) {
+      return NextResponse.json(
+        { error: "没有找到要更新的社区作品。" },
+        { status: 404 },
+      );
+    }
+
     await appendAdminAuditLog({
       actorUserId: adminContext.userId,
       actorDisplayName: adminContext.displayName,

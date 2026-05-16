@@ -77,6 +77,12 @@ alter table public.community_posts
   add column if not exists is_featured boolean not null default false,
   add column if not exists moderation_detail jsonb not null default '{}'::jsonb;
 
+alter table public.community_posts
+  drop constraint if exists community_posts_mode_check;
+
+alter table public.community_posts
+  add constraint community_posts_mode_check check (mode in ('coding', 'writing', 'painting'));
+
 alter table public.users
   add column if not exists nickname text,
   add column if not exists status text not null default 'active' check (status in ('active', 'disabled')),
