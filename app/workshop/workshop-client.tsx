@@ -455,6 +455,90 @@ function WritingSharePreview({
   );
 }
 
+function createWritingShareCoverImage(input: {
+  title: string;
+  prompt: string;
+  result: string;
+}) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("写作封面生成失败，请稍后再试。");
+  }
+
+  canvas.width = 960;
+  canvas.height = 1200;
+
+  const backgroundGradient = context.createLinearGradient(0, 0, 960, 1200);
+  backgroundGradient.addColorStop(0, "#fff7dd");
+  backgroundGradient.addColorStop(0.52, "#fffdf4");
+  backgroundGradient.addColorStop(1, "#ffe9ef");
+  context.fillStyle = backgroundGradient;
+  context.fillRect(0, 0, 960, 1200);
+
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = "#f4cf7a";
+  context.lineWidth = 3;
+  context.beginPath();
+  context.roundRect(88, 96, 784, 1008, 42);
+  context.fill();
+  context.stroke();
+
+  context.fillStyle = "#fff3c8";
+  context.beginPath();
+  context.roundRect(132, 144, 180, 54, 27);
+  context.fill();
+  context.fillStyle = "#bf7a16";
+  context.font = "700 26px 'Microsoft YaHei', sans-serif";
+  context.fillText("AI写作作品", 162, 180);
+
+  context.fillStyle = "#24304f";
+  context.font = "900 46px 'Microsoft YaHei', sans-serif";
+  const titleLines = wrapCanvasText(
+    context,
+    input.title || "我的写作作品",
+    680,
+    2,
+    { shouldEllipsize: true },
+  );
+  titleLines.forEach((line, index) => {
+    context.fillText(line, 132, 268 + index * 58);
+  });
+
+  context.fillStyle = "#8a6a25";
+  context.font = "700 22px 'Microsoft YaHei', sans-serif";
+  const promptLines = wrapCanvasText(context, input.prompt, 696, 3, {
+    shouldEllipsize: true,
+  });
+  promptLines.forEach((line, index) => {
+    context.fillText(line, 132, 422 + index * 36);
+  });
+
+  context.strokeStyle = "#f4cf7a";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.moveTo(132, 560);
+  context.lineTo(828, 560);
+  context.stroke();
+
+  context.fillStyle = "#3b465f";
+  context.font = "400 25px 'Microsoft YaHei', sans-serif";
+  const resultLines = wrapCanvasText(context, input.result, 696, 9, {
+    shouldEllipsize: true,
+  });
+  resultLines.forEach((line, index) => {
+    context.fillText(line, 132, 630 + index * 42);
+  });
+
+  context.fillStyle = "#f9d982";
+  context.beginPath();
+  context.roundRect(132, 1012, 696, 12, 6);
+  context.fill();
+
+  return canvas.toDataURL("image/jpeg", 0.88);
+}
+
 function readSavedWorkshopDraft() {
   if (typeof window === "undefined") {
     return null;
@@ -1810,11 +1894,7 @@ function WorkshopContent() {
 
   const capturePreviewImage = async (mode: ShareableMode) => {
     if (mode === "writing") {
-      return createWritingShareCoverImage({
-        title: getDefaultShareTitle("writing"),
-        prompt: writingPrompt,
-        result: writingResult,
-      });
+      return WRITING_SHARE_PLACEHOLDER_IMAGE_URL;
     }
 
     if (mode === "painting") {
