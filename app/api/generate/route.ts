@@ -22,6 +22,8 @@ type ChatCompletionResponse = {
   };
 };
 
+const DEFAULT_AI_REQUEST_TIMEOUT_MS = 55_000;
+
 function resolveChatCompletionEndpoint(endpointUrl: string) {
   const trimmedEndpoint = endpointUrl.trim();
   const normalizedEndpoint = trimmedEndpoint.toLowerCase();
@@ -106,6 +108,34 @@ function mapUpstreamStatusToGatewayStatus(status: number) {
   }
 
   return status;
+}
+
+function resolveAiRequestTimeoutMs() {
+  const rawValue = process.env.AI_REQUEST_TIMEOUT_MS;
+  const parsedValue = Number(rawValue);
+
+  if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
+    return DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  }
+
+  return Math.floor(parsedValue);
+}
+
+function isAiUpstreamTimeoutError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalizedName = error.name.toLowerCase();
+  const normalizedMessage = error.message.toLowerCase();
+
+  return (
+    normalizedName.includes("timeout") ||
+    normalizedName.includes("abort") ||
+    normalizedMessage.includes("timeout") ||
+    normalizedMessage.includes("timed out") ||
+    normalizedMessage.includes("aborted")
+  );
 }
 
 export async function POST(request: Request) {
@@ -199,6 +229,7 @@ export async function POST(request: Request) {
     const requestEndpoint = resolveChatCompletionEndpoint(aiConfig.endpointUrl);
     const upstreamResponse = await fetch(requestEndpoint, {
       method: "POST",
+      signal: AbortSignal.timeout(resolveAiRequestTimeoutMs()),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -298,13 +329,17 @@ export async function POST(request: Request) {
     );
 
     console.error("【生成接口异常】:", error);
+    const isTimeoutError = isAiUpstreamTimeoutError(error);
+
     return NextResponse.json(
       {
         error:
-          "生成接口暂时出了点小状况。已经自动检查并退回本次失败消耗的魔法币，请稍后再试，或检查后台 AI 接口地址是否填写正确。",
+          isTimeoutError
+            ? "服务器等待 AI 接口返回超时了。若本地能生成、线上部署后总是失败，通常是服务器到模型渠道的网络不通，或者 Nginx / CDN 在 AI 返回前先超时断开了。请优先检查服务器出网连通性，并把 /api/generate 的反向代理超时调大到 300 秒左右。"
+            : "生成接口暂时出了点小状况。已经自动检查并退回本次失败消耗的魔法币，请稍后再试，或检查后台 AI 接口地址是否填写正确。",
         remainingCredits,
       },
-      { status: 500 },
+      { status: isTimeoutError ? 504 : 500 },
     );
   }
 }

@@ -570,6 +570,57 @@ function isUpstreamCredentialError(message: string | undefined) {
   );
 }
 
+async function parseApiResponse<T extends Record<string, unknown>>(
+  response: Response,
+) {
+  const rawText = await response.text();
+  let data: T | null = null;
+
+  try {
+    data = JSON.parse(rawText) as T;
+  } catch {
+    data = null;
+  }
+
+  return {
+    data,
+    rawText,
+  };
+}
+
+function toReadableApiError(
+  response: Response,
+  fallbackMessage: string,
+  payloadError?: string,
+  rawText?: string,
+) {
+  if (payloadError?.trim()) {
+    return payloadError.trim();
+  }
+
+  const normalizedRawText = rawText?.trim() ?? "";
+
+  if (!normalizedRawText) {
+    return `${fallbackMessage}（HTTP ${response.status}）`;
+  }
+
+  if (
+    normalizedRawText.startsWith("<!DOCTYPE html") ||
+    normalizedRawText.startsWith("<html") ||
+    normalizedRawText.startsWith("<!doctype html")
+  ) {
+    if (response.status === 502 || response.status === 504) {
+      return `服务器网关超时或上游连接失败（HTTP ${response.status}）。如果本地正常、服务器异常，通常是 Nginx / CDN 超时，或者服务器访问模型接口不通。`;
+    }
+
+    return `服务器返回了网页错误页（HTTP ${response.status}），不是接口 JSON。请检查服务器反向代理和线上日志。`;
+  }
+
+  return normalizedRawText.length > 240
+    ? `${normalizedRawText.slice(0, 240)}...`
+    : normalizedRawText;
+}
+
 function clampMarkerValue(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -2095,17 +2146,17 @@ function WorkshopContent() {
         }),
       });
 
-      const data = (await response.json()) as {
+      const { data, rawText } = await parseApiResponse<{
         code?: string;
         error?: string;
         remainingCredits?: number;
-      };
+      }>(response);
       if (response.status === 401) {
-        if (isUpstreamCredentialError(data.error)) {
+        if (isUpstreamCredentialError(data?.error)) {
           setGeneratedCode(
             createMessagePreviewHtml(
               "模型密钥需要检查",
-              data.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
+              data?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
             ),
           );
           return;
@@ -2123,15 +2174,20 @@ function WorkshopContent() {
         return;
       }
 
-      if (typeof data.remainingCredits === "number") {
+      if (typeof data?.remainingCredits === "number") {
         setMagicCredits(data.remainingCredits);
       }
 
-      if (!response.ok || !data.code) {
+      if (!response.ok || !data?.code) {
         setGeneratedCode(
           createMessagePreviewHtml(
             "生成未完成",
-            data.error ?? "这次创作没有成功，我们再试一次。",
+            toReadableApiError(
+              response,
+              "这次创作没有成功，我们再试一次。",
+              data?.error,
+              rawText,
+            ),
           ),
         );
         return;
@@ -2331,15 +2387,15 @@ function WorkshopContent() {
         }),
       });
 
-      const data = (await response.json()) as {
+      const { data, rawText } = await parseApiResponse<{
         code?: string;
         error?: string;
         remainingCredits?: number;
-      };
+      }>(response);
       if (response.status === 401) {
-        if (isUpstreamCredentialError(data.error)) {
+        if (isUpstreamCredentialError(data?.error)) {
           setWritingError(
-            data.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
+            data?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
           );
           return;
         }
@@ -2350,12 +2406,19 @@ function WorkshopContent() {
         return;
       }
 
-      if (typeof data.remainingCredits === "number") {
+      if (typeof data?.remainingCredits === "number") {
         setMagicCredits(data.remainingCredits);
       }
 
-      if (!response.ok || !data.code) {
-        setWritingError(data.error ?? "这次创作没有成功，我们再试一次。");
+      if (!response.ok || !data?.code) {
+        setWritingError(
+          toReadableApiError(
+            response,
+            "这次创作没有成功，我们再试一次。",
+            data?.error,
+            rawText,
+          ),
+        );
         return;
       }
 
