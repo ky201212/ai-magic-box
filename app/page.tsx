@@ -9,10 +9,10 @@ function PixelField() {
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="absolute inset-0 bg-[linear-gradient(180deg,#f7fbff_0%,#eef5ff_44%,#fff6fb_100%)]" />
       <div className="home-grid absolute inset-0 opacity-[0.5]" />
-      <div className="home-sweep absolute left-[-20%] top-[12%] h-[24rem] w-[140%] rotate-[-8deg] bg-[linear-gradient(90deg,transparent,rgba(135,166,255,0.18),rgba(255,177,210,0.16),transparent)] blur-2xl" />
-      <div className="absolute left-[-8%] top-[6%] h-[420px] w-[420px] rounded-full bg-[#8edaff]/18 blur-[130px]" />
-      <div className="absolute right-[-8%] top-[4%] h-[520px] w-[520px] rounded-full bg-[#ddb7ff]/22 blur-[150px]" />
-      <div className="absolute left-[38%] bottom-[2%] h-[320px] w-[320px] rounded-full bg-[#ffd59e]/18 blur-[120px]" />
+      <div className="home-sweep absolute left-[-20%] top-[12%] h-[16rem] w-[140%] rotate-[-8deg] bg-[linear-gradient(90deg,transparent,rgba(135,166,255,0.18),rgba(255,177,210,0.16),transparent)] blur-2xl sm:h-[24rem]" />
+      <div className="absolute left-[-8%] top-[6%] h-[260px] w-[260px] rounded-full bg-[#8edaff]/18 blur-[110px] sm:h-[420px] sm:w-[420px] sm:blur-[130px]" />
+      <div className="absolute right-[-8%] top-[4%] h-[320px] w-[320px] rounded-full bg-[#ddb7ff]/22 blur-[120px] sm:h-[520px] sm:w-[520px] sm:blur-[150px]" />
+      <div className="absolute bottom-[2%] left-[38%] h-[220px] w-[220px] rounded-full bg-[#ffd59e]/18 blur-[100px] sm:h-[320px] sm:w-[320px] sm:blur-[120px]" />
       <div className="absolute inset-x-0 bottom-0 h-48 bg-[linear-gradient(180deg,transparent,rgba(255,255,255,0.88))]" />
     </div>
   );
@@ -31,21 +31,21 @@ export default async function HomePage() {
       <section className="relative min-h-screen overflow-hidden">
         <PixelField />
 
-        <div className="relative z-20 mx-auto flex w-full max-w-[1920px] items-center justify-between px-10 py-7 lg:px-14 xl:px-20">
-          <Link href="/" className="flex items-center gap-4">
+        <div className="relative z-20 mx-auto flex w-full max-w-[1920px] flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-14 lg:py-7 xl:px-20">
+          <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
             <Image
               src={brandIdentity.logoUrl}
               alt={brandIdentity.siteName}
               width={54}
               height={54}
-              className="rounded-[18px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)]"
+              className="h-11 w-11 rounded-[14px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
               priority
             />
-            <div>
-              <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#17213f]">
+            <div className="min-w-0">
+              <p className="truncate text-[16px] font-semibold tracking-[-0.03em] text-[#17213f] sm:text-[18px]">
                 {brandIdentity.siteName}
               </p>
-              <p className="text-[12px] tracking-[0.08em] text-[#6d7899]">
+              <p className="truncate text-[11px] tracking-[0.08em] text-[#6d7899] sm:text-[12px]">
                 {brandIdentity.tagline}
               </p>
             </div>
@@ -87,33 +87,72 @@ export default async function HomePage() {
               </Link>
             </div>
           </div>
+
+          <div className="flex w-full flex-col gap-3 lg:hidden">
+            <div className="flex flex-wrap items-center gap-3 text-[13px] font-semibold text-[#5f6b8e]">
+              {marketingNavItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="transition hover:text-[#5b78dc]"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              {isLoggedIn ? (
+                <form action="/api/auth/logout" method="POST" className="sm:flex-1">
+                  <button
+                    type="submit"
+                    className="w-full rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                  >
+                    退出登录
+                  </button>
+                </form>
+              ) : (
+                <Link
+                  href="/login"
+                  className="inline-flex items-center justify-center rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-1"
+                >
+                  手机号登录
+                </Link>
+              )}
+              <Link
+                href="/workshop?mode=coding"
+                className="inline-flex items-center justify-center rounded-full bg-[#17213f] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_14px_34px_rgba(23,33,63,0.16)] transition hover:-translate-y-0.5 sm:flex-1"
+              >
+                进入工坊
+              </Link>
+            </div>
+          </div>
         </div>
 
-        <div className="relative z-20 mx-auto grid min-h-[calc(100vh-108px)] w-full max-w-[1920px] items-center gap-8 px-10 pb-12 pt-2 lg:grid-cols-[minmax(0,980px)_minmax(560px,1fr)] lg:px-14 xl:px-20">
-          <div className="max-w-[980px] py-6">
+        <div className="relative z-20 mx-auto grid w-full max-w-[1920px] items-center gap-8 px-4 pb-12 pt-2 sm:px-6 lg:min-h-[calc(100vh-108px)] lg:grid-cols-[minmax(0,980px)_minmax(560px,1fr)] lg:px-14 xl:px-20">
+          <div className="max-w-[980px] py-4 sm:py-6">
             <div className="inline-flex items-center rounded-full border border-white/80 bg-white/68 px-4 py-2 text-[12px] font-black tracking-[0.08em] text-[#627ee6] shadow-[0_18px_42px_rgba(116,132,185,0.1)] backdrop-blur-xl">
               为青少年打造的未来学习与创造空间
             </div>
 
-            <h1 className="mt-10 max-w-none text-[72px] font-black leading-[1.01] tracking-[-0.055em] text-[#121a35] xl:text-[102px] 2xl:text-[116px]">
+            <h1 className="mt-8 max-w-none text-[40px] font-black leading-[1.04] tracking-[-0.055em] text-[#121a35] sm:mt-10 sm:text-[56px] xl:text-[102px] 2xl:text-[116px]">
               <span className="block">{heroSetting.title}</span>
-              <span className="home-gradient-text mt-5 block whitespace-nowrap pr-3 text-[72px] leading-[1.03] tracking-[-0.055em] xl:text-[102px] 2xl:text-[116px]">
+              <span className="home-gradient-text mt-3 block pr-1 text-[40px] leading-[1.05] tracking-[-0.055em] sm:mt-5 sm:pr-3 sm:text-[56px] xl:text-[102px] 2xl:text-[116px]">
                 {heroSetting.subtitle}
               </span>
             </h1>
 
-            <p className="mt-8 max-w-none whitespace-nowrap text-[19px] leading-9 text-[#657193] xl:text-[20px]">
+            <p className="mt-6 max-w-[36ch] text-[16px] leading-7 text-[#657193] sm:mt-8 sm:text-[19px] sm:leading-9 xl:text-[20px]">
               {heroSetting.description}
             </p>
 
             <div className="mt-12 flex flex-col gap-4 sm:flex-row">
               <Link
                 href={heroSetting.primaryButtonHref}
-                className="home-button-glow inline-flex items-center justify-center rounded-full bg-[linear-gradient(90deg,#ffbc7c_0%,#ff8fc7_46%,#8974ff_100%)] px-8 py-4 text-[16px] font-semibold text-white shadow-[0_20px_48px_rgba(140,96,255,0.22)] transition hover:-translate-y-0.5"
+                className="home-button-glow inline-flex items-center justify-center rounded-full bg-[linear-gradient(90deg,#ffbc7c_0%,#ff8fc7_46%,#8974ff_100%)] px-8 py-4 text-center text-[16px] font-semibold text-white shadow-[0_20px_48px_rgba(140,96,255,0.22)] transition hover:-translate-y-0.5 sm:min-w-[180px]"
               >
                 {heroSetting.primaryButtonLabel}
               </Link>
-              <div className="inline-flex items-center justify-center rounded-full border border-white/80 bg-white/68 px-6 py-4 text-[15px] font-semibold text-[#5f6b8e] shadow-[0_18px_42px_rgba(116,132,185,0.1)] backdrop-blur-xl">
+              <div className="inline-flex items-center justify-center rounded-full border border-white/80 bg-white/68 px-6 py-4 text-center text-[15px] font-semibold text-[#5f6b8e] shadow-[0_18px_42px_rgba(116,132,185,0.1)] backdrop-blur-xl">
                 {heroSetting.secondaryBadge}
               </div>
             </div>

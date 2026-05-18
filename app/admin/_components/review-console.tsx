@@ -11,11 +11,15 @@ type ReviewConsoleProps = {
   initialReviewSetting: CommunityReviewSettingRecord;
 };
 
-type ReviewFilter = "all" | "pending" | "approved" | "rejected";
+type ReviewFilter = "all" | "draft" | "pending" | "approved" | "rejected";
 type ReviewSaveStatus = "idle" | "saving" | "success" | "error";
 type OperationSaveStatus = ReviewSaveStatus;
 
 function getStatusLabel(status: AdminCommunityPostRecord["moderation_status"]) {
+  if (status === "draft") {
+    return "已保存未发布";
+  }
+
   if (status === "approved") {
     return "已发布";
   }
@@ -205,6 +209,7 @@ export function ReviewConsole({
       all: posts.length,
       pending: posts.filter((post) => post.moderation_status === "pending").length,
       approved: posts.filter((post) => post.moderation_status === "approved").length,
+      draft: posts.filter((post) => post.moderation_status === "draft").length,
       rejected: posts.filter((post) => post.moderation_status === "rejected").length,
     }),
     [posts],
@@ -295,6 +300,7 @@ export function ReviewConsole({
           blockedKeywords: reviewSetting.blockedKeywords,
           lockManualApproveAfterAiReject:
             reviewSetting.lockManualApproveAfterAiReject,
+          dailyPostLimit: Math.max(0, Math.floor(reviewSetting.dailyPostLimit || 0)),
         },
       },
     ];
@@ -495,11 +501,12 @@ export function ReviewConsole({
             </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
-              {[
-                { key: "all", label: "全部作品" },
-                { key: "pending", label: "待处理" },
-                { key: "approved", label: "已发布" },
-                { key: "rejected", label: "已拒绝" },
+                {[
+                  { key: "all", label: "全部作品" },
+                  { key: "draft", label: "已保存" },
+                  { key: "pending", label: "待处理" },
+                  { key: "approved", label: "已发布" },
+                  { key: "rejected", label: "已拒绝" },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -514,6 +521,8 @@ export function ReviewConsole({
                   {item.label}
                   {item.key === "all"
                     ? ` ${reviewStats.all}`
+                    : item.key === "draft"
+                      ? ` ${reviewStats.draft}`
                     : item.key === "pending"
                       ? ` ${reviewStats.pending}`
                       : item.key === "approved"
@@ -530,6 +539,14 @@ export function ReviewConsole({
                 </p>
                 <p className="mt-3 text-3xl font-black text-slate-900">
                   {reviewStats.all}
+                </p>
+              </div>
+              <div className="rounded-[22px] bg-[#eef3ff] px-4 py-4">
+                <p className="text-xs font-bold tracking-[0.14em] text-[#5b6fd4]">
+                  已保存
+                </p>
+                <p className="mt-3 text-3xl font-black text-[#5b6fd4]">
+                  {reviewStats.draft}
                 </p>
               </div>
               <div className="rounded-[22px] bg-[#fff7ed] px-4 py-4">
@@ -622,6 +639,29 @@ export function ReviewConsole({
                   </button>
                 </div>
               </div>
+
+              <label className="block">
+                <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                  每位用户每天可发布次数
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <input
+                    type="number"
+                    min={0}
+                    value={reviewSetting.dailyPostLimit}
+                    onChange={(event) =>
+                      setReviewSetting((current) => ({
+                        ...current,
+                        dailyPostLimit: Math.max(0, Number(event.target.value) || 0),
+                      }))
+                    }
+                    className="h-11 w-32 rounded-[16px] border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none"
+                  />
+                  <p className="text-sm leading-7 text-slate-500">
+                    `0` 表示不限制。超过后作品会保存在个人主页，但不会继续进入社区审核。
+                  </p>
+                </div>
+              </label>
 
               <label className="block">
                 <p className="text-xs font-bold tracking-[0.14em] text-slate-400">

@@ -165,9 +165,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1920px] items-center px-8 py-10 lg:px-14 xl:px-20">
-        <div className="grid w-full items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_520px]">
-          <section className="max-w-[760px]">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1920px] items-center px-4 py-8 sm:px-6 lg:px-14 lg:py-10 xl:px-20">
+        <div className="grid w-full items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_520px] lg:gap-10">
+          <section className="order-2 max-w-[760px] lg:order-1">
             <Link
               href="/"
               className="inline-flex items-center gap-3 rounded-full border border-[#dce5ff] bg-white/72 px-4 py-2 text-sm font-semibold text-[#5c6688] shadow-[0_12px_30px_rgba(112,138,215,0.1)] backdrop-blur-xl transition hover:border-[#bccaff] hover:text-[#273252]"
@@ -175,7 +175,7 @@ export default function LoginPage() {
               <span>返回首页</span>
             </Link>
 
-            <div className="mt-10 flex items-center gap-4">
+            <div className="mt-8 flex min-w-0 items-center gap-4 sm:mt-10">
               <Image
                 src={brand.logoUrl}
                 alt={brand.siteName}
@@ -185,31 +185,31 @@ export default function LoginPage() {
                 priority
                 unoptimized
               />
-              <div>
-                <p className="text-[20px] font-semibold tracking-normal text-[#17213f]">
+              <div className="min-w-0">
+                <p className="truncate text-[18px] font-semibold tracking-normal text-[#17213f] sm:text-[20px]">
                   {brand.siteName}
                 </p>
-                <p className="text-[13px] tracking-[0.06em] text-[#677396]">
+                <p className="truncate text-[12px] tracking-[0.06em] text-[#677396] sm:text-[13px]">
                   {brand.tagline}
                 </p>
               </div>
             </div>
 
-            <h1 className="mt-10 text-[56px] font-black leading-[1.02] tracking-normal text-[#151f3d] xl:text-[72px]">
+            <h1 className="mt-8 text-[40px] font-black leading-[1.05] tracking-normal text-[#151f3d] sm:mt-10 sm:text-[48px] xl:text-[72px]">
               欢迎回来
               <span className="home-gradient-text mt-4 block">
                 继续你的创作旅程
               </span>
             </h1>
 
-            <p className="mt-8 max-w-[540px] text-[18px] leading-9 text-[#5e6b8c]">
+            <p className="mt-6 max-w-[34ch] text-[16px] leading-7 text-[#5e6b8c] sm:mt-8 sm:text-[18px] sm:leading-9">
               输入手机号与验证码，重新进入你的魔法工坊，继续把想法变成真正的作品。
             </p>
           </section>
 
-          <section className="relative">
+          <section className="order-1 relative lg:order-2">
             <div className="absolute -inset-10 rounded-full bg-[radial-gradient(circle,rgba(141,119,255,0.16),transparent_58%)] blur-3xl" />
-            <div className="relative overflow-hidden rounded-[36px] border border-white/80 bg-white/78 p-7 shadow-[0_30px_90px_rgba(92,116,189,0.18)] backdrop-blur-2xl">
+            <div className="relative overflow-hidden rounded-[28px] border border-white/80 bg-white/78 p-5 shadow-[0_30px_90px_rgba(92,116,189,0.18)] backdrop-blur-2xl sm:rounded-[36px] sm:p-7">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(124,147,255,0.16),transparent_24%),radial-gradient(circle_at_86%_80%,rgba(255,168,211,0.14),transparent_22%)]" />
 
               <div className="relative z-10">
@@ -217,7 +217,7 @@ export default function LoginPage() {
                   进入工坊
                 </div>
 
-                <h2 className="mt-5 text-[38px] font-black leading-[1.08] tracking-normal text-[#17213f]">
+                <h2 className="mt-5 text-[30px] font-black leading-[1.08] tracking-normal text-[#17213f] sm:text-[38px]">
                   用验证码继续
                 </h2>
                 <p className="mt-3 text-[15px] leading-8 text-[#647092]">
@@ -249,7 +249,7 @@ export default function LoginPage() {
                     >
                       验证码
                     </label>
-                    <div className="flex gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row">
                       <input
                         id="code"
                         type="text"
@@ -262,7 +262,7 @@ export default function LoginPage() {
                         type="button"
                         onClick={handleSendCode}
                         disabled={isSending}
-                        className="rounded-[22px] border border-[#dfe7ff] bg-white px-5 text-sm font-semibold text-[#52607e] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-14 rounded-[22px] border border-[#dfe7ff] bg-white px-5 text-sm font-semibold text-[#52607e] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-60 sm:h-auto"
                       >
                         {isSending ? "发送中" : "获取验证码"}
                       </button>

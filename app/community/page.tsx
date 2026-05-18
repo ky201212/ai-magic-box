@@ -25,22 +25,22 @@ export default async function CommunityPage() {
           <div className="float-soft absolute right-[6%] top-[18%] h-24 w-24 rounded-[28px] border border-white/80 bg-white/60 shadow-[0_22px_50px_rgba(104,126,190,0.16)]" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1800px] px-5 pb-16 pt-6 sm:px-8 lg:px-12 2xl:px-16">
+        <div className="relative mx-auto w-full max-w-[1800px] px-4 pb-12 pt-5 sm:px-6 sm:pb-16 sm:pt-6 lg:px-12 2xl:px-16">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" className="flex items-center gap-4">
+            <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
               <Image
                 src={brandIdentity.logoUrl}
                 alt={brandIdentity.siteName}
                 width={54}
                 height={54}
-                className="rounded-[18px] shadow-[0_12px_28px_rgba(116,142,210,0.16)]"
+                className="h-11 w-11 rounded-[14px] shadow-[0_12px_28px_rgba(116,142,210,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
                 priority
               />
-              <div>
-                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#17213f]">
+              <div className="min-w-0">
+                <p className="truncate text-[16px] font-semibold tracking-[-0.03em] text-[#17213f] sm:text-[18px]">
                   {brandIdentity.siteName}
                 </p>
-                <p className="text-[12px] tracking-[0.08em] text-[#677396]">
+                <p className="truncate text-[11px] tracking-[0.08em] text-[#677396] sm:text-[12px]">
                   {brandIdentity.tagline}
                 </p>
               </div>
@@ -65,13 +65,13 @@ export default async function CommunityPage() {
                 </Link>
               ))}
 
-              <div className="flex items-center gap-2 rounded-full border border-[#dce5ff] bg-white/78 p-1.5">
+              <div className="flex w-full flex-wrap items-center gap-2 rounded-[22px] border border-[#dce5ff] bg-white/78 p-1.5 sm:w-auto sm:rounded-full">
                 {isLoggedIn ? (
                   <>
                     <Link
                       href="/profile"
                       prefetch
-                      className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                      className="flex-1 rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-center text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
                     >
                       我的主页
                     </Link>
@@ -88,7 +88,7 @@ export default async function CommunityPage() {
                   <Link
                     href="/login?redirect=/community"
                     prefetch
-                    className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    className="flex-1 rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-center text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
                   >
                     手机号登录
                   </Link>
@@ -96,7 +96,7 @@ export default async function CommunityPage() {
                 <Link
                   href="/workshop?mode=coding"
                   prefetch
-                  className="rounded-full bg-[#625cff] px-5 py-2.5 text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                  className="flex-1 rounded-full bg-[#625cff] px-5 py-2.5 text-center text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4] sm:flex-none"
                 >
                   进入工坊
                 </Link>

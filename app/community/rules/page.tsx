@@ -53,7 +53,7 @@ const ruleSections = [
 
 export default function CommunityRulesPage() {
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-5 py-8 text-[#17213f] sm:px-8 lg:px-12">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#17213f] sm:px-6 lg:px-12">
       <div className="mx-auto max-w-[1120px]">
         <div className="rounded-[28px] border border-white/80 bg-white/82 p-6 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-4">

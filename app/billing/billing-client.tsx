@@ -88,7 +88,7 @@ function formatOrderStatus(status: string) {
   }
 
   if (status === "cancelled") {
-    return "已取消";
+    return "支付失败";
   }
 
   if (status === "refunded") {
@@ -96,6 +96,62 @@ function formatOrderStatus(status: string) {
   }
 
   return status;
+}
+
+const ORDER_PREVIEW_LIMIT = 5;
+const PENDING_CHECKOUT_STORAGE_KEY = "magic-box:pending-checkout-order";
+
+type PendingCheckoutOrder = {
+  orderId: string;
+  channel: string;
+  createdAt: number;
+};
+
+function rememberPendingCheckoutOrder(orderId: string, channel: string) {
+  window.sessionStorage.setItem(
+    PENDING_CHECKOUT_STORAGE_KEY,
+    JSON.stringify({
+      orderId,
+      channel,
+      createdAt: Date.now(),
+    } satisfies PendingCheckoutOrder),
+  );
+}
+
+function readPendingCheckoutOrder() {
+  const raw = window.sessionStorage.getItem(PENDING_CHECKOUT_STORAGE_KEY);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingCheckoutOrder>;
+
+    if (!parsed.orderId || !parsed.channel) {
+      window.sessionStorage.removeItem(PENDING_CHECKOUT_STORAGE_KEY);
+      return null;
+    }
+
+    return {
+      orderId: parsed.orderId,
+      channel: parsed.channel,
+      createdAt: Number(parsed.createdAt ?? 0),
+    };
+  } catch {
+    window.sessionStorage.removeItem(PENDING_CHECKOUT_STORAGE_KEY);
+    return null;
+  }
+}
+
+function forgetPendingCheckoutOrder(orderId?: string) {
+  const pending = readPendingCheckoutOrder();
+
+  if (!pending || (orderId && pending.orderId !== orderId)) {
+    return;
+  }
+
+  window.sessionStorage.removeItem(PENDING_CHECKOUT_STORAGE_KEY);
 }
 
 export function BillingClient({ initialData }: { initialData: BillingPayload }) {
@@ -120,6 +176,10 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
   const activeSubscription = useMemo(
     () => data.subscriptions.find((item) => item.status === "active") ?? null,
     [data.subscriptions],
+  );
+  const previewOrders = useMemo(
+    () => data.orders.slice(0, ORDER_PREVIEW_LIMIT),
+    [data.orders],
   );
 
   const fetchBillingSummary = useCallback(async () => {
@@ -150,6 +210,106 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
       setIsRefreshing(false);
     }
   }, [fetchBillingSummary]);
+
+  useEffect(() => {
+    const returnOrderId = searchParams.get("order_id");
+    const returnChannel = searchParams.get("channel");
+
+    if (returnOrderId && returnChannel === "alipay_pc") {
+      return;
+    }
+
+    let isStopped = false;
+    let isReconciling = false;
+
+    const reconcilePendingCheckout = async () => {
+      if (isReconciling) {
+        return;
+      }
+
+      const pending = readPendingCheckoutOrder();
+
+      if (!pending) {
+        return;
+      }
+
+      isReconciling = true;
+
+      try {
+        const response = await fetch(`/api/billing/orders/${pending.orderId}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          order?: BillingPayload["orders"][number];
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "读取订单状态失败。");
+        }
+
+        if (payload.order?.status === "pending") {
+          const cancelResponse = await fetch(
+            `/api/billing/orders/${pending.orderId}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "cancel",
+              }),
+            },
+          );
+          const cancelPayload = (await cancelResponse.json()) as {
+            error?: string;
+          };
+
+          if (!cancelResponse.ok) {
+            throw new Error(cancelPayload.error ?? "订单取消失败。");
+          }
+
+          if (!isStopped) {
+            setMessage("本次支付未完成，订单已自动记为失败。");
+          }
+        }
+
+        if (!isStopped) {
+          await refreshData();
+        }
+
+        forgetPendingCheckoutOrder(pending.orderId);
+      } catch (requestError) {
+        if (!isStopped) {
+          setMessage(
+            requestError instanceof Error
+              ? requestError.message
+              : "支付结果确认失败，请稍后刷新查看。",
+          );
+        }
+      } finally {
+        isReconciling = false;
+      }
+    };
+
+    const handleVisible = () => {
+      if (document.visibilityState === "visible") {
+        void reconcilePendingCheckout();
+      }
+    };
+
+    void reconcilePendingCheckout();
+    window.addEventListener("focus", reconcilePendingCheckout);
+    window.addEventListener("pageshow", reconcilePendingCheckout);
+    document.addEventListener("visibilitychange", handleVisible);
+
+    return () => {
+      isStopped = true;
+      window.removeEventListener("focus", reconcilePendingCheckout);
+      window.removeEventListener("pageshow", reconcilePendingCheckout);
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [refreshData, searchParams]);
 
   useEffect(() => {
     const orderId = searchParams.get("order_id");
@@ -183,6 +343,38 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
             setSubscriptionOrderState("success");
             setCoinOrderState("success");
             setMessage("支付成功，订单已经到账。");
+            forgetPendingCheckoutOrder(orderId);
+            await refreshData();
+
+            const nextParams = new URLSearchParams(searchParams.toString());
+            nextParams.delete("order_id");
+            nextParams.delete("channel");
+            const nextQuery = nextParams.toString();
+            router.replace(nextQuery ? `/billing?${nextQuery}` : "/billing");
+            return;
+          }
+
+          if (attempts >= 6 && payload.order?.status === "pending") {
+            const cancelResponse = await fetch(`/api/billing/orders/${orderId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "cancel",
+              }),
+            });
+            const cancelPayload = (await cancelResponse.json()) as {
+              error?: string;
+              order?: BillingPayload["orders"][number];
+            };
+
+            if (!cancelResponse.ok) {
+              throw new Error(cancelPayload.error ?? "订单取消失败。");
+            }
+
+            setMessage("本次支付未完成，订单已自动记为失败。");
+            forgetPendingCheckoutOrder(orderId);
             await refreshData();
 
             const nextParams = new URLSearchParams(searchParams.toString());
@@ -265,7 +457,11 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
         throw new Error(payload.error ?? "充值订单创建失败。");
       }
 
-      setMessage("正在跳转到支付宝收银台。");
+      rememberPendingCheckoutOrder(
+        payload.order.order_id,
+        payload.payment.channel,
+      );
+      setMessage(`正在跳转到${formatPaymentMethod(payload.payment.channel)}收银台。`);
       window.location.assign(payload.payment.paymentUrl);
     } catch (requestError) {
       setCoinOrderState("error");
@@ -323,7 +519,11 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
         throw new Error(payload.error ?? "订阅订单创建失败。");
       }
 
-      setMessage("正在跳转到支付宝收银台。");
+      rememberPendingCheckoutOrder(
+        payload.order.order_id,
+        payload.payment.channel,
+      );
+      setMessage(`正在跳转到${formatPaymentMethod(payload.payment.channel)}收银台。`);
       window.location.assign(payload.payment.paymentUrl);
     } catch (requestError) {
       setSubscriptionOrderState("error");
@@ -382,7 +582,7 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_10%,rgba(117,159,255,0.34),transparent_26%),radial-gradient(circle_at_84%_14%,rgba(255,166,213,0.28),transparent_24%),linear-gradient(180deg,#ffffff_0%,#f8f9ff_44%,#eff5ff_100%)]" />
         <div className="home-grid pointer-events-none absolute inset-0 opacity-80" />
 
-        <div className="relative mx-auto w-full max-w-[1480px] px-5 py-6 sm:px-8 lg:px-10">
+        <div className="relative mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 sm:py-6 lg:px-10">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
             <Link href="/" prefetch className="text-lg font-black text-[#17213f]">
               小红车魔法工坊
@@ -394,7 +594,7 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   key={item.href}
                   href={item.href}
                   prefetch
-                  className="text-sm font-semibold text-[#6a7392]"
+                  className="hidden text-sm font-semibold text-[#6a7392] sm:inline-flex"
                 >
                   {item.label}
                 </Link>
@@ -415,7 +615,7 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                 <p className="text-xs font-black tracking-[0.16em] text-[#7b88ac]">
                   钱包余额
                 </p>
-                <p className="mt-3 text-[48px] font-black tracking-[-0.06em] text-[#17213f]">
+                <p className="mt-3 text-[40px] font-black tracking-[-0.06em] text-[#17213f] sm:text-[48px]">
                   {data.credits.credits}
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[#687394]">
@@ -483,7 +683,7 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
               <div className="rounded-[30px] border border-white/80 bg-white/72 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.1)] backdrop-blur-2xl">
                 <div className="flex flex-wrap items-end justify-between gap-4">
                   <div>
-                    <h1 className="text-[42px] font-black tracking-[-0.06em] text-[#151f3d]">
+                    <h1 className="text-[32px] font-black tracking-[-0.06em] text-[#151f3d] sm:text-[42px]">
                       充值、订阅与激活码
                     </h1>
                   </div>
@@ -617,11 +817,19 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   <div>
                     <p className="text-lg font-black text-[#17213f]">订单记录</p>
                   </div>
+                  {data.orders.length > ORDER_PREVIEW_LIMIT ? (
+                    <Link
+                      href="/billing/orders"
+                      className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-bold text-[#5c6688]"
+                    >
+                      更多
+                    </Link>
+                  ) : null}
                 </div>
 
                 <div className="mt-5 space-y-3">
-                  {data.orders.length ? (
-                    data.orders.map((order) => (
+                  {previewOrders.length ? (
+                    previewOrders.map((order) => (
                       <div
                         key={order.order_id}
                         className="grid gap-3 rounded-[20px] border border-[#e4eaff] bg-[#fbfcff] px-4 py-4 md:grid-cols-[1fr_auto]"

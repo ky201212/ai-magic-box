@@ -79,6 +79,7 @@ export type CommunityReviewSettingRecord = {
   aiModerationInstruction: string;
   blockedKeywords: string[];
   lockManualApproveAfterAiReject: boolean;
+  dailyPostLimit: number;
 };
 
 export type AdminCommunityPostRecord = {
@@ -92,7 +93,7 @@ export type AdminCommunityPostRecord = {
   user_phone: string | null;
   user_nickname: string | null;
   user_display_name: string | null;
-  moderation_status: "pending" | "approved" | "rejected";
+  moderation_status: "draft" | "pending" | "approved" | "rejected";
   moderation_reason: string | null;
   moderation_stage: "rule" | "ai" | "fallback" | "manual";
   moderation_detail: Record<string, unknown>;

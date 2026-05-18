@@ -1,3 +1,5 @@
+import http from "node:http";
+import https from "node:https";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
@@ -17,30 +19,113 @@ type ChatCompletionResponse = {
     text?: string;
   }>;
   output_text?: string;
+  output?: Array<{
+    type?: string;
+    role?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
   error?: {
     message?: string;
   };
 };
 
-const DEFAULT_AI_REQUEST_TIMEOUT_MS = 55_000;
+function requestUpstreamJson(input: {
+  endpoint: string;
+  apiKey: string;
+  body: string;
+  timeoutMs: number | null;
+}) {
+  const targetUrl = new URL(input.endpoint);
+  const transport = targetUrl.protocol === "http:" ? http : https;
 
-function resolveChatCompletionEndpoint(endpointUrl: string) {
+  return new Promise<{
+    status: number;
+    text: string;
+  }>((resolve, reject) => {
+    const request = transport.request(
+      {
+        protocol: targetUrl.protocol,
+        hostname: targetUrl.hostname,
+        port: targetUrl.port
+          ? Number(targetUrl.port)
+          : targetUrl.protocol === "http:"
+            ? 80
+            : 443,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(input.body),
+          Authorization: `Bearer ${input.apiKey}`,
+          Connection: "close",
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 500,
+            text: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+
+    if (input.timeoutMs) {
+      request.setTimeout(input.timeoutMs, () => {
+        request.destroy(new Error("Upstream request timed out"));
+      });
+    }
+
+    request.on("error", (error) => {
+      reject(error);
+    });
+
+    request.write(input.body);
+    request.end();
+  });
+}
+
+function shouldUseResponsesApi(endpointUrl: string, model: string) {
+  const normalizedEndpoint = endpointUrl.trim().toLowerCase();
+  const normalizedModel = model.trim().toLowerCase();
+
+  return (
+    normalizedEndpoint.includes("qlcodeapi.com") ||
+    normalizedModel.startsWith("gpt-5")
+  );
+}
+
+function resolveGenerationEndpoint(endpointUrl: string, useResponsesApi: boolean) {
   const trimmedEndpoint = endpointUrl.trim();
   const normalizedEndpoint = trimmedEndpoint.toLowerCase();
 
-  if (
-    normalizedEndpoint.endsWith("/chat/completions") ||
-    normalizedEndpoint.endsWith("/responses")
-  ) {
+  if (useResponsesApi && normalizedEndpoint.endsWith("/responses")) {
+    return trimmedEndpoint;
+  }
+
+  if (!useResponsesApi && normalizedEndpoint.endsWith("/chat/completions")) {
     return trimmedEndpoint;
   }
 
   if (normalizedEndpoint.endsWith("/v1")) {
-    return `${trimmedEndpoint}/chat/completions`;
+    return useResponsesApi
+      ? `${trimmedEndpoint}/responses`
+      : `${trimmedEndpoint}/chat/completions`;
   }
 
   if (normalizedEndpoint.endsWith("/v1/")) {
-    return `${trimmedEndpoint}chat/completions`;
+    return useResponsesApi
+      ? `${trimmedEndpoint}responses`
+      : `${trimmedEndpoint}chat/completions`;
   }
 
   return trimmedEndpoint;
@@ -71,13 +156,33 @@ function extractMessageContent(
 
 function extractGeneratedContent(data: ChatCompletionResponse) {
   const choice = data.choices?.[0];
+  const responseOutputText =
+    data.output
+      ?.flatMap((item) => item.content ?? [])
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim() ?? "";
 
   return (
+    responseOutputText ||
     extractMessageContent(choice?.message?.content) ||
     choice?.text?.trim() ||
     data.output_text?.trim() ||
     ""
   );
+}
+
+function sanitizeGeneratedContent(rawText: string) {
+  const trimmedText = rawText.trim();
+  const fencedMatch = trimmedText.match(
+    /^```(?:html|htm|xml)?\s*([\s\S]*?)\s*```$/i,
+  );
+
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim();
+  }
+
+  return trimmedText;
 }
 
 function parsePossibleJson(rawText: string) {
@@ -115,7 +220,7 @@ function resolveAiRequestTimeoutMs() {
   const parsedValue = Number(rawValue);
 
   if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
-    return DEFAULT_AI_REQUEST_TIMEOUT_MS;
+    return null;
   }
 
   return Math.floor(parsedValue);
@@ -226,33 +331,72 @@ export async function POST(request: Request) {
       chargedUserId = currentUser.user_id;
     }
 
-    const requestEndpoint = resolveChatCompletionEndpoint(aiConfig.endpointUrl);
-    const upstreamResponse = await fetch(requestEndpoint, {
-      method: "POST",
-      signal: AbortSignal.timeout(resolveAiRequestTimeoutMs()),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: aiConfig.model,
-        messages: [
-          {
-            role: "system",
-            content: aiConfig.systemPrompt,
+    const useResponsesApi = shouldUseResponsesApi(
+      aiConfig.endpointUrl,
+      aiConfig.model,
+    );
+    const requestEndpoint = resolveGenerationEndpoint(
+      aiConfig.endpointUrl,
+      useResponsesApi,
+    );
+    const requestTimeoutMs = resolveAiRequestTimeoutMs();
+    const upstreamPayload = JSON.stringify(
+      useResponsesApi
+        ? {
+            model: aiConfig.model,
+            ...(typeof aiConfig.extraPayload.reasoningEffort === "string"
+              ? {
+                  reasoning: {
+                    effort: aiConfig.extraPayload.reasoningEffort,
+                  },
+                }
+              : {}),
+            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+              ? {
+                  max_output_tokens: aiConfig.extraPayload.maxCompletionTokens,
+                }
+              : {}),
+            input: [
+              {
+                role: "system",
+                content: aiConfig.systemPrompt,
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+          }
+        : {
+            model: aiConfig.model,
+            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+              ? {
+                  max_tokens: aiConfig.extraPayload.maxCompletionTokens,
+                }
+              : {}),
+            messages: [
+              {
+                role: "system",
+                content: aiConfig.systemPrompt,
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
           },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
+    );
+    const upstreamResponse = await requestUpstreamJson({
+      endpoint: requestEndpoint,
+      apiKey,
+      body: upstreamPayload,
+      timeoutMs: requestTimeoutMs,
     });
 
-    const upstreamText = await upstreamResponse.text();
+    const upstreamText = upstreamResponse.text;
     const upstreamData = parsePossibleJson(upstreamText);
 
-    if (!upstreamResponse.ok) {
+    if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
       console.error("【AI 上游接口报错】:", {
         status: upstreamResponse.status,
         endpoint: requestEndpoint,
@@ -302,7 +446,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const generatedContent = extractGeneratedContent(upstreamData);
+    const generatedContent = sanitizeGeneratedContent(
+      extractGeneratedContent(upstreamData),
+    );
 
     if (!generatedContent) {
       await refundCredits(

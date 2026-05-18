@@ -7,13 +7,22 @@ type RouteContext = {
   params: Promise<{
     postId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export default async function CommunityPostDetailPage(context: RouteContext) {
   const { postId } = await context.params;
+  const resolvedSearchParams = context.searchParams
+    ? await context.searchParams
+    : undefined;
   const brandIdentity = await getBrandIdentitySetting();
   const cookieStore = await cookies();
   const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const modeParam = resolvedSearchParams?.mode;
+  const workshopMode =
+    modeParam === "writing" || modeParam === "painting" || modeParam === "coding"
+      ? modeParam
+      : "coding";
 
   return (
     <main className="min-h-screen bg-[#f7f8ff] text-[#17213f]">
@@ -25,33 +34,33 @@ export default async function CommunityPostDetailPage(context: RouteContext) {
           <div className="float-soft absolute right-[6%] top-[18%] h-24 w-24 rounded-[28px] border border-white/80 bg-white/60 shadow-[0_22px_50px_rgba(104,126,190,0.16)]" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1880px] px-5 pb-16 pt-6 sm:px-8 lg:px-12 2xl:px-20">
+        <div className="relative mx-auto w-full max-w-[1880px] px-4 pb-12 pt-5 sm:px-6 sm:pb-16 sm:pt-6 lg:px-12 2xl:px-20">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm tracking-[0.14em] text-[#677396]">
                 {brandIdentity.siteName}
               </p>
-              <h1 className="mt-2 text-[30px] font-black tracking-[-0.05em] text-[#17213f]">
+              <h1 className="mt-2 text-[24px] font-black tracking-[-0.05em] text-[#17213f] sm:text-[30px]">
                 社区作品详情
               </h1>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
               <Link
                 href="/community"
-                className="rounded-full border border-[#dce5ff] bg-white/78 px-5 py-3 text-sm font-semibold text-[#5c6688] shadow-[0_10px_24px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                className="flex-1 rounded-full border border-[#dce5ff] bg-white/78 px-5 py-3 text-center text-sm font-semibold text-[#5c6688] shadow-[0_10px_24px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
               >
                 返回成长社区
               </Link>
               <Link
                 href={isLoggedIn ? "/profile" : "/login?redirect=/profile"}
-                className="rounded-full border border-[#dce5ff] bg-white/78 px-5 py-3 text-sm font-semibold text-[#5c6688] shadow-[0_10px_24px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                className="flex-1 rounded-full border border-[#dce5ff] bg-white/78 px-5 py-3 text-center text-sm font-semibold text-[#5c6688] shadow-[0_10px_24px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
               >
                 {isLoggedIn ? "我的投稿" : "先登录"}
               </Link>
               <Link
-                href="/workshop?mode=coding"
-                className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                href={`/workshop?mode=${workshopMode}`}
+                className="flex-1 rounded-full bg-[#625cff] px-6 py-3 text-center text-sm font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4] sm:flex-none"
               >
                 进入工坊
               </Link>

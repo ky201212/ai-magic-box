@@ -27,11 +27,14 @@ type ProfilePayload = {
   }>;
   posts: Array<{
     id: string;
+    mode: "coding" | "writing" | "painting";
     title: string;
+    description: string | null;
     prompt: string;
     preview_image_url: string;
-    moderation_status: "pending" | "approved" | "rejected";
+    moderation_status: "draft" | "pending" | "approved" | "rejected";
     moderation_reason: string | null;
+    category: string;
     created_at: string;
   }>;
   orders: Array<{
@@ -72,7 +75,31 @@ function formatDate(date: string) {
   }).format(new Date(date));
 }
 
+function formatOrderStatus(status: ProfilePayload["orders"][number]["status"]) {
+  if (status === "pending") {
+    return "待支付";
+  }
+
+  if (status === "paid") {
+    return "已支付";
+  }
+
+  if (status === "cancelled") {
+    return "已取消";
+  }
+
+  if (status === "refunded") {
+    return "已退款";
+  }
+
+  return status;
+}
+
 const statusMap = {
+  draft: {
+    label: "已保存未发布",
+    className: "bg-[#eef3ff] text-[#5571c7] border-[#d4ddff]",
+  },
   approved: {
     label: "已通过审核",
     className: "bg-[#e7fff2] text-[#1e9b66] border-[#b9f1d2]",
@@ -87,12 +114,20 @@ const statusMap = {
   },
 } as const;
 
+function getPostDetailHref(post: ProfilePayload["posts"][number]) {
+  return `/community/${post.id}?mode=${post.mode}`;
+}
+
+function getWorkshopReuseHref(post: ProfilePayload["posts"][number]) {
+  return `/workshop?mode=${post.mode}&fromCommunity=${post.id}`;
+}
+
 const moderationNoteMap = {
-  approved: {
-    eyebrow: "展示进度",
+  draft: {
+    eyebrow: "发布限制",
     containerClassName:
-      "border-[#d8f2e5] bg-[#f7fffb] text-[#4e7b68] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
-    badgeClassName: "bg-[#e7fff2] text-[#21956a]",
+      "border-[#d9e3ff] bg-[#f7f9ff] text-[#5a6f9c] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+    badgeClassName: "bg-[#e8eeff] text-[#5b6fd4]",
   },
   pending: {
     eyebrow: "审核进度",
@@ -114,6 +149,7 @@ export default function ProfilePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [isCreditPanelOpen, setIsCreditPanelOpen] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -173,6 +209,7 @@ export default function ProfilePage() {
     const posts = data?.posts ?? [];
     return {
       all: posts.length,
+      draft: posts.filter((post) => post.moderation_status === "draft").length,
       approved: posts.filter((post) => post.moderation_status === "approved").length,
       pending: posts.filter((post) => post.moderation_status === "pending").length,
       rejected: posts.filter((post) => post.moderation_status === "rejected").length,
@@ -230,22 +267,22 @@ export default function ProfilePage() {
           <div className="home-sweep absolute left-[-10%] top-[18%] h-48 w-[72%] rounded-full bg-[linear-gradient(90deg,rgba(124,148,255,0),rgba(124,148,255,0.24),rgba(255,161,211,0))] blur-3xl" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1520px] px-5 py-6 sm:px-8 lg:px-10">
+        <div className="relative mx-auto w-full max-w-[1520px] px-4 py-5 sm:px-6 sm:py-6 lg:px-10">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" className="flex items-center gap-4">
+            <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
               <Image
                 src="/logo.png"
                 alt="小红车魔法工坊"
                 width={54}
                 height={54}
-                className="rounded-[18px] shadow-[0_12px_28px_rgba(116,142,210,0.16)]"
+                className="h-11 w-11 rounded-[14px] shadow-[0_12px_28px_rgba(116,142,210,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
                 priority
               />
-              <div>
-                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#17213f]">
+              <div className="min-w-0">
+                <p className="truncate text-[16px] font-semibold tracking-[-0.03em] text-[#17213f] sm:text-[18px]">
                   小红车魔法工坊
                 </p>
-                <p className="text-[12px] tracking-[0.08em] text-[#677396]">
+                <p className="truncate text-[11px] tracking-[0.08em] text-[#677396] sm:text-[12px]">
                   下一代儿童AI创造力平台
                 </p>
               </div>
@@ -261,10 +298,10 @@ export default function ProfilePage() {
                   {item.label}
                 </Link>
               ))}
-              <div className="flex items-center gap-2 rounded-full border border-[#dce5ff] bg-white/78 p-1.5">
+              <div className="flex w-full flex-wrap items-center gap-2 rounded-[22px] border border-[#dce5ff] bg-white/78 p-1.5 sm:w-auto sm:rounded-full">
                 <Link
                   href="/community"
-                  className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                  className="flex-1 rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-center text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
                 >
                   社区广场
                 </Link>
@@ -278,7 +315,7 @@ export default function ProfilePage() {
                 </form>
                 <Link
                   href="/workshop?mode=coding"
-                  className="rounded-full bg-[#625cff] px-5 py-2.5 text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                  className="flex-1 rounded-full bg-[#625cff] px-5 py-2.5 text-center text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4] sm:flex-none"
                 >
                   进入工坊
                 </Link>
@@ -407,7 +444,9 @@ export default function ProfilePage() {
                             <p className="text-sm font-black text-[#17213f]">
                               ¥{(order.amount / 100).toFixed(2)}
                             </p>
-                            <p className="mt-1 text-xs text-[#8a95b5]">{order.status}</p>
+                            <p className="mt-1 text-xs text-[#8a95b5]">
+                              {formatOrderStatus(order.status)}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -423,6 +462,7 @@ export default function ProfilePage() {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   ["全部投稿", postStats.all],
+                  ["已保存", postStats.draft],
                   ["已通过", postStats.approved],
                   ["审核中", postStats.pending],
                   ["未通过", postStats.rejected],
@@ -445,7 +485,7 @@ export default function ProfilePage() {
                   <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
                     我的主页 PROFILE
                   </div>
-                    <h2 className="mt-5 text-[40px] font-black leading-[1] tracking-[-0.06em] text-[#151f3d] sm:text-[52px]">
+                    <h2 className="mt-5 text-[32px] font-black leading-[1.05] tracking-[-0.06em] text-[#151f3d] sm:text-[52px]">
                     我的创作档案
                   </h2>
                     <p className="mt-4 text-sm leading-7 text-[#687394]">
@@ -460,9 +500,10 @@ export default function ProfilePage() {
                 </Link>
               </div>
 
-                <div className="mt-6 grid gap-3 sm:grid-cols-4">
+                <div className="mt-6 grid gap-3 sm:grid-cols-5">
                   {[
                     ["全部", postStats.all],
+                    ["未发布", postStats.draft],
                     ["已展示", postStats.approved],
                     ["审核中", postStats.pending],
                     ["需调整", postStats.rejected],
@@ -485,9 +526,11 @@ export default function ProfilePage() {
                       statusMap[post.moderation_status as keyof typeof statusMap] ||
                       statusMap.pending;
                     const moderationNote =
-                      moderationNoteMap[
-                        post.moderation_status as keyof typeof moderationNoteMap
-                      ] || moderationNoteMap.pending;
+                      post.moderation_status === "approved"
+                        ? null
+                        : moderationNoteMap[
+                            post.moderation_status as keyof typeof moderationNoteMap
+                          ] || moderationNoteMap.pending;
 
                     return (
                       <article
@@ -509,6 +552,9 @@ export default function ProfilePage() {
                             >
                               {status.label}
                             </span>
+                            <span className="inline-flex rounded-full border border-[#dfe7ff] bg-[#f8f9ff] px-2.5 py-1 text-[11px] font-black text-[#627ee6]">
+                              {post.category}
+                            </span>
                             <span className="text-xs font-semibold text-[#8a95b5]">
                               {formatDate(post.created_at)}
                             </span>
@@ -519,10 +565,10 @@ export default function ProfilePage() {
                           </h3>
 
                           <p className="mt-2 line-clamp-2 text-sm leading-7 text-[#687394]">
-                            {post.prompt}
+                            {post.description || post.prompt}
                           </p>
 
-                          {post.moderation_reason && (
+                          {post.moderation_reason && moderationNote && (
                             <div
                               className={`mt-4 inline-flex max-w-full items-start gap-2 rounded-[16px] border px-3 py-2.5 text-sm leading-6 ${moderationNote.containerClassName}`}
                             >
@@ -536,6 +582,72 @@ export default function ProfilePage() {
                               </p>
                             </div>
                           )}
+
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <Link
+                              href={getPostDetailHref(post)}
+                              className="inline-flex min-h-10 items-center justify-center rounded-full bg-[#625cff] px-4 py-2 text-center text-xs font-black text-white shadow-[0_12px_26px_rgba(98,92,255,0.18)] transition hover:bg-[#544cf4]"
+                            >
+                              打开作品
+                            </Link>
+                            <Link
+                              href={getWorkshopReuseHref(post)}
+                              className="inline-flex min-h-10 items-center justify-center rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-center text-xs font-black text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                            >
+                              复用到工坊
+                            </Link>
+                            <button
+                              type="button"
+                              disabled={deletingPostId === post.id}
+                              onClick={async () => {
+                                const confirmed = window.confirm(
+                                  `确定删除《${post.title}》吗？删除后会同步从成长社区移除，点赞和互动记录也会一起清掉。`,
+                                );
+
+                                if (!confirmed) {
+                                  return;
+                                }
+
+                                setDeletingPostId(post.id);
+
+                                try {
+                                  const response = await fetch(
+                                    `/api/community/posts/${post.id}`,
+                                    { method: "DELETE" },
+                                  );
+                                  const payload = (await response.json()) as {
+                                    error?: string;
+                                  };
+
+                                  if (!response.ok) {
+                                    throw new Error(payload.error ?? "删除作品失败。");
+                                  }
+
+                                  setData((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          posts: current.posts.filter(
+                                            (item) => item.id !== post.id,
+                                          ),
+                                        }
+                                      : current,
+                                  );
+                                } catch (requestError) {
+                                  window.alert(
+                                    requestError instanceof Error
+                                      ? requestError.message
+                                      : "删除作品失败。",
+                                  );
+                                } finally {
+                                  setDeletingPostId(null);
+                                }
+                              }}
+                              className="inline-flex min-h-10 items-center justify-center rounded-full border border-[#ffd2de] bg-white px-4 py-2 text-center text-xs font-black text-[#c45a7e] transition hover:border-[#ffb1c6] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {deletingPostId === post.id ? "删除中" : "删除作品"}
+                            </button>
+                          </div>
                         </div>
                       </article>
                     );
@@ -565,14 +677,14 @@ export default function ProfilePage() {
       </div>
 
       {isCreditPanelOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#17213f]/28 px-5 backdrop-blur-md">
-          <div className="w-full max-w-3xl rounded-[28px] border border-white/80 bg-white/92 p-6 shadow-[0_30px_90px_rgba(40,53,100,0.26)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#17213f]/28 px-4 py-4 backdrop-blur-md sm:px-5">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-white/80 bg-white/92 p-5 shadow-[0_30px_90px_rgba(40,53,100,0.26)] sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
                   魔法币明细
                 </p>
-                <h3 className="mt-2 text-[34px] font-black tracking-[-0.05em] text-[#17213f]">
+                <h3 className="mt-2 text-[28px] font-black tracking-[-0.05em] text-[#17213f] sm:text-[34px]">
                   我的魔法币账本
                 </h3>
                 <p className="mt-3 text-sm leading-7 text-[#687394]">
@@ -590,7 +702,7 @@ export default function ProfilePage() {
 
             <div className="mt-6 rounded-[22px] border border-[#e3e9ff] bg-[#f8faff] p-5">
               <p className="text-sm font-semibold text-[#7782a4]">当前剩余魔法币</p>
-              <p className="mt-2 text-[42px] font-black tracking-[-0.06em] text-[#17213f]">
+              <p className="mt-2 text-[34px] font-black tracking-[-0.06em] text-[#17213f] sm:text-[42px]">
                 {data.credits.credits}
               </p>
             </div>

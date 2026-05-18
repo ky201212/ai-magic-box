@@ -1079,6 +1079,9 @@ export function AiConfigForm({
         {configs.map((config) => {
           const creditEnabled = config.extra_payload.creditEnabled === true;
           const creditCost = Number(config.extra_payload.creditCost ?? 0);
+          const maxCompletionTokens = Number(
+            config.extra_payload.maxCompletionTokens ?? 0,
+          );
           const imageSize =
             typeof config.extra_payload.image_size === "string"
               ? config.extra_payload.image_size
@@ -1389,6 +1392,23 @@ export function AiConfigForm({
                           handleExtraPayloadChange(
                             config.mode_key,
                             "creditCost",
+                            Number(event.target.value),
+                          )
+                        }
+                        className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+                      />
+                    </label>
+
+                    <label className="block text-sm font-bold text-slate-600">
+                      输出上限 tokens
+                      <input
+                        type="number"
+                        min={0}
+                        value={maxCompletionTokens}
+                        onChange={(event) =>
+                          handleExtraPayloadChange(
+                            config.mode_key,
+                            "maxCompletionTokens",
                             Number(event.target.value),
                           )
                         }

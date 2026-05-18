@@ -62,22 +62,22 @@ export default async function MatrixPage() {
           <div className="absolute right-[-8%] top-[4%] h-[520px] w-[520px] rounded-full bg-[#ddb7ff]/22 blur-[150px]" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1920px] px-10 py-8 lg:px-14 xl:px-20">
-          <header className="flex items-center justify-between rounded-[28px] border border-white/80 bg-white/72 px-6 py-5 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" className="flex items-center gap-4">
+        <div className="relative mx-auto w-full max-w-[1920px] px-4 py-6 sm:px-6 sm:py-8 lg:px-14 xl:px-20">
+          <header className="flex flex-col gap-4 rounded-[28px] border border-white/80 bg-white/72 px-4 py-4 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
+            <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
               <Image
                 src={brandIdentity.logoUrl}
                 alt={brandIdentity.siteName}
                 width={54}
                 height={54}
-                className="rounded-[18px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)]"
+                className="h-11 w-11 rounded-[14px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
                 priority
               />
-              <div>
-                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#17213f]">
+              <div className="min-w-0">
+                <p className="truncate text-[16px] font-semibold tracking-[-0.03em] text-[#17213f] sm:text-[18px]">
                   {brandIdentity.siteName}
                 </p>
-                <p className="text-[12px] tracking-[0.08em] text-[#6d7899]">
+                <p className="truncate text-[11px] tracking-[0.08em] text-[#6d7899] sm:text-[12px]">
                   {brandIdentity.tagline}
                 </p>
               </div>
@@ -121,22 +121,63 @@ export default async function MatrixPage() {
                 </Link>
               </div>
             </div>
+
+            <div className="flex w-full flex-col gap-3 lg:hidden">
+              <div className="flex flex-wrap items-center gap-3 text-[13px] font-semibold text-[#5f6b8e]">
+                {marketingNavItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`transition hover:text-[#17213f] ${
+                      item.href === "/matrix" ? "text-[#6c63ff]" : "text-[#6a7392]"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                {isLoggedIn ? (
+                  <form action="/api/auth/logout" method="POST" className="sm:flex-1">
+                    <button
+                      type="submit"
+                      className="w-full rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    >
+                      退出登录
+                    </button>
+                  </form>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center justify-center rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-1"
+                  >
+                    手机号登录
+                  </Link>
+                )}
+                <Link
+                  href="/workshop?mode=coding"
+                  className="inline-flex items-center justify-center rounded-full bg-[#17213f] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_14px_34px_rgba(23,33,63,0.16)] transition hover:-translate-y-0.5 sm:flex-1"
+                >
+                  进入工坊
+                </Link>
+              </div>
+            </div>
           </header>
 
-          <section className="py-16">
+          <section className="py-12 sm:py-16">
             <div className="inline-flex rounded-full border border-white/80 bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#627ee6] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
               创作矩阵
             </div>
 
             <div className="mt-8 max-w-[1180px]">
-              <h1 className="text-[64px] font-black leading-[0.96] tracking-[-0.07em] text-[#121a35] xl:text-[88px] 2xl:text-[102px]">
+              <h1 className="text-[38px] font-black leading-[1.02] tracking-[-0.07em] text-[#121a35] sm:text-[52px] xl:text-[88px] 2xl:text-[102px]">
                 <span className="block">每一种表达方式</span>
                 <span className="home-gradient-text mt-3 block xl:mt-4">都可以成为孩子的创作入口</span>
               </h1>
               <div className="mt-6 h-[3px] w-24 rounded-full bg-[linear-gradient(90deg,#ffbc7c,#ff8fc7,#8974ff)]" />
             </div>
 
-            <p className="mt-8 max-w-[38ch] text-[18px] leading-[2.1] text-[#657193] xl:max-w-[40ch]">
+            <p className="mt-8 max-w-[38ch] text-[16px] leading-8 text-[#657193] sm:text-[18px] sm:leading-[2.1] xl:max-w-[40ch]">
               我们把不同模态的 AI 能力，变成不同类型的创作工坊。孩子不需要先理解技术名词，只需要选择自己最想表达的方式。
             </p>
 
@@ -158,7 +199,7 @@ export default async function MatrixPage() {
                         {card.badge}
                       </div>
                     </div>
-                    <h2 className="mt-8 text-[34px] font-black leading-[1.04] tracking-[-0.06em] text-[#17213f]">
+                    <h2 className="mt-8 text-[28px] font-black leading-[1.08] tracking-[-0.06em] text-[#17213f] sm:text-[34px]">
                       {card.title}
                     </h2>
                     <p className="mt-4 text-[15px] leading-8 text-[#647092]">

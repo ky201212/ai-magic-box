@@ -31,22 +31,22 @@ export default async function WorldPage() {
           <div className="float-soft absolute right-[9%] top-[20%] h-36 w-36 rounded-[36px] border border-white/70 bg-white/60 shadow-[0_24px_60px_rgba(112,138,215,0.18)]" />
         </div>
 
-        <div className="relative mx-auto w-full max-w-[1760px] px-5 py-6 sm:px-8 lg:px-12 xl:px-16">
+        <div className="relative mx-auto w-full max-w-[1760px] px-4 py-5 sm:px-6 sm:py-6 lg:px-12 xl:px-16">
           <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" className="flex items-center gap-4">
+            <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
               <Image
                 src={brandIdentity.logoUrl}
                 alt={brandIdentity.siteName}
                 width={54}
                 height={54}
-                className="rounded-[18px] shadow-[0_12px_28px_rgba(116,142,210,0.16)]"
+                className="h-11 w-11 rounded-[14px] shadow-[0_12px_28px_rgba(116,142,210,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
                 priority
               />
-              <div>
-                <p className="text-[18px] font-semibold tracking-normal text-[#17213f]">
+              <div className="min-w-0">
+                <p className="truncate text-[16px] font-semibold tracking-normal text-[#17213f] sm:text-[18px]">
                   {brandIdentity.siteName}
                 </p>
-                <p className="text-[12px] tracking-[0.08em] text-[#677396]">
+                <p className="truncate text-[11px] tracking-[0.08em] text-[#677396] sm:text-[12px]">
                   {brandIdentity.tagline}
                 </p>
               </div>
@@ -66,7 +66,7 @@ export default async function WorldPage() {
                   {item.label}
                 </Link>
               ))}
-              <div className="flex items-center gap-2 rounded-full border border-[#dce5ff] bg-white/78 p-1.5">
+              <div className="flex w-full flex-wrap items-center gap-2 rounded-[22px] border border-[#dce5ff] bg-white/78 p-1.5 sm:w-auto sm:rounded-full">
                 {isLoggedIn ? (
                   <form action="/api/auth/logout" method="POST">
                     <button
@@ -79,14 +79,14 @@ export default async function WorldPage() {
                 ) : (
                   <Link
                     href="/login"
-                    className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    className="flex-1 rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-center text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-none"
                   >
                     手机号登录
                   </Link>
                 )}
                 <Link
                   href="/workshop?mode=coding"
-                  className="rounded-full bg-[#625cff] px-5 py-2.5 text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                  className="flex-1 rounded-full bg-[#625cff] px-5 py-2.5 text-center text-[14px] font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4] sm:flex-none"
                 >
                   进入工坊
                 </Link>
@@ -96,10 +96,10 @@ export default async function WorldPage() {
 
           <section className="grid items-center gap-8 py-12 lg:grid-cols-[0.86fr_1.14fr] xl:gap-12">
             <div>
-              <h1 className="mt-7 text-[44px] font-black leading-[1.08] tracking-normal text-[#151f3d] sm:text-[58px] xl:text-[66px]">
+              <h1 className="mt-6 text-[34px] font-black leading-[1.08] tracking-normal text-[#151f3d] sm:mt-7 sm:text-[58px] xl:text-[66px]">
                 <span className="home-gradient-text block">科普资讯</span>
               </h1>
-              <p className="mt-7 max-w-[42ch] text-[17px] leading-9 text-[#5e6b8c]">
+              <p className="mt-5 max-w-[42ch] text-[15px] leading-7 text-[#5e6b8c] sm:mt-7 sm:text-[17px] sm:leading-9">
                 这里为孩子和家长整理有趣、清楚、适合一起阅读的科学内容，也记录课程活动和孩子成长中的闪光时刻。
               </p>
             </div>
@@ -143,13 +143,13 @@ export default async function WorldPage() {
                 <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
                   精选资讯
                 </div>
-                <h2 className="mt-5 text-[36px] font-black leading-[1.16] tracking-normal text-[#17213f] sm:text-[50px]">
+                <h2 className="mt-5 text-[30px] font-black leading-[1.16] tracking-normal text-[#17213f] sm:text-[50px]">
                   最新科普与活动
                 </h2>
               </div>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-4">
+            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
               {featuredNews.map((item) => (
                 <Link
                   key={item.title}
@@ -159,7 +159,7 @@ export default async function WorldPage() {
                   <div className="inline-flex rounded-full border border-[#dfe7ff] bg-white/80 px-3 py-1.5 text-[12px] font-black text-[#627ee6]">
                     {getInfoCategoryTitle(item.category)}
                   </div>
-                  <h3 className="mt-5 text-[24px] font-black leading-[1.2] tracking-normal text-[#17213f]">
+                  <h3 className="mt-5 text-[22px] font-black leading-[1.2] tracking-normal text-[#17213f] sm:text-[24px]">
                     {item.title}
                   </h3>
                   <p className="mt-4 text-[14px] leading-7 text-[#647092]">

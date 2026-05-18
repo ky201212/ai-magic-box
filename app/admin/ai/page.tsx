@@ -12,6 +12,7 @@ import {
   getAiSecretSecuritySummary,
   listAiSecretAuditLogs,
   listAiSecretStatuses,
+  getStoredAiSecrets,
 } from "@/lib/ai-secrets";
 
 export default async function AdminAiPage() {
@@ -20,10 +21,12 @@ export default async function AdminAiPage() {
     listAiModeConfigs().catch(() => []),
     listAiModelPresets().catch(() => []),
   ]);
+  const storedSecrets = await getStoredAiSecrets().catch(() => []);
   const envNames = Array.from(
     new Set([
       ...configs.map((item) => item.api_key_env),
       ...presets.map((item) => item.api_key_env),
+      ...storedSecrets.map((item) => item.envName),
     ]),
   ).filter((item) => item.trim().length > 0);
   const secretStatuses: AiSecretStatusRecord[] = await listAiSecretStatuses(

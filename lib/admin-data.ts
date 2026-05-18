@@ -37,6 +37,7 @@ export type CommunityReviewSettingRecord = {
   aiModerationInstruction: string;
   blockedKeywords: string[];
   lockManualApproveAfterAiReject: boolean;
+  dailyPostLimit: number;
 };
 
 export type AiModeConfigRecord = {
@@ -106,7 +107,7 @@ export type AdminCommunityPostRecord = {
   user_phone: string | null;
   user_nickname: string | null;
   user_display_name: string | null;
-  moderation_status: "pending" | "approved" | "rejected";
+  moderation_status: "draft" | "pending" | "approved" | "rejected";
   moderation_reason: string | null;
   moderation_stage: "rule" | "ai" | "fallback" | "manual";
   moderation_detail: Record<string, unknown>;
@@ -262,6 +263,7 @@ export async function getCommunityReviewSetting() {
         "违法",
       ],
       lockManualApproveAfterAiReject: true,
+      dailyPostLimit: 0,
     },
   );
 }
@@ -468,7 +470,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 export async function listAdminCommunityPosts(input?: {
   includePreviewCode?: boolean;
   limit?: number;
-  moderationStatus?: "pending" | "approved" | "rejected";
+  moderationStatus?: "draft" | "pending" | "approved" | "rejected";
 }): Promise<AdminCommunityPostRecord[]> {
   const records = await listCommunityAdminRecords(input);
   return records as AdminCommunityPostRecord[];
@@ -491,7 +493,7 @@ export async function updateCommunityPostReview(
     title: string;
     prompt: string;
     preview_image_url: string;
-    moderation_status: "pending" | "approved" | "rejected";
+    moderation_status: "draft" | "pending" | "approved" | "rejected";
     moderation_reason: string | null;
     moderation_stage: "rule" | "ai" | "fallback" | "manual";
     is_featured: boolean;
@@ -507,7 +509,7 @@ export async function updateCommunityPostReview(
     .single<{
       id: string;
       moderation_detail: Record<string, unknown>;
-      moderation_status: "pending" | "approved" | "rejected";
+      moderation_status: "draft" | "pending" | "approved" | "rejected";
     }>();
 
   let existingPost = primaryExistingPostResult.data;
@@ -520,7 +522,7 @@ export async function updateCommunityPostReview(
       .eq("id", postId)
       .single<{
         id: string;
-        moderation_status: "pending" | "approved" | "rejected";
+        moderation_status: "draft" | "pending" | "approved" | "rejected";
       }>();
 
     existingPost = fallbackExistingPostResult.data
@@ -596,7 +598,7 @@ export async function updateCommunityPostReview(
             title: string;
             prompt: string;
             preview_image_url: string;
-            moderation_status: "pending" | "approved" | "rejected";
+            moderation_status: "draft" | "pending" | "approved" | "rejected";
             moderation_reason: string | null;
             moderation_stage: "rule" | "ai" | "fallback" | "manual";
             is_featured: boolean;
@@ -715,7 +717,7 @@ type AdminUserBaseRow = Omit<
 
 type AdminUserPostRow = {
   user_id: string;
-  moderation_status: "pending" | "approved" | "rejected";
+  moderation_status: "draft" | "pending" | "approved" | "rejected";
   created_at: string;
 };
 

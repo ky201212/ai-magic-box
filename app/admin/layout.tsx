@@ -113,7 +113,7 @@ export default async function AdminLayout({
 
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#f8fbff_0%,#f6f8fc_45%,#f8fafc_100%)] text-slate-800">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] gap-6 px-5 py-5 xl:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] gap-4 px-4 py-4 sm:px-5 sm:py-5 xl:gap-6 xl:px-8">
         <div className="hidden xl:block">
           <AdminSidebar
             brand={brand}

@@ -98,7 +98,7 @@ export default async function BrandPage() {
       <div className="relative overflow-hidden">
         <BrandBackground />
 
-        <div className="relative mx-auto flex min-h-screen w-full max-w-[1920px] flex-col px-6 py-6 sm:px-8 lg:px-10 xl:px-12 2xl:px-16">
+        <div className="relative mx-auto flex min-h-screen w-full max-w-[1920px] flex-col px-4 py-5 sm:px-6 sm:py-6 lg:px-10 xl:px-12 2xl:px-16">
           <header className="relative z-20 rounded-[28px] border border-white/80 bg-white/72 px-6 py-5 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
               <Link href="/" className="flex items-center gap-4">
@@ -149,13 +149,13 @@ export default async function BrandPage() {
               <div className="relative grid gap-10 xl:grid-cols-[0.82fr_1.18fr] xl:items-center">
                 <div className="max-w-[660px] pt-2">
                   <SectionLabel label="品牌主张" />
-                  <h1 className="mt-8 text-[42px] font-black leading-[1.08] tracking-normal text-[#121a35] sm:text-[46px] xl:text-[56px] 2xl:text-[70px]">
+                  <h1 className="mt-8 text-[34px] font-black leading-[1.08] tracking-normal text-[#121a35] sm:text-[46px] xl:text-[56px] 2xl:text-[70px]">
                     <span className="block">不是工具站</span>
-                    <span className="home-gradient-text mt-3 block whitespace-nowrap">
+                    <span className="home-gradient-text mt-3 block">
                       是儿童创造宇宙
                     </span>
                   </h1>
-                  <p className="mt-7 max-w-[560px] text-[18px] leading-[2] text-[#657193]">
+                  <p className="mt-7 max-w-[560px] text-[16px] leading-8 text-[#657193] sm:text-[18px] sm:leading-[2]">
                     小红车魔法工坊要做的不是把 AI 功能摆给孩子，而是把技术变成他们愿意进入的角色、任务、故事和作品现场。
                   </p>
 
@@ -295,7 +295,7 @@ export default async function BrandPage() {
               <div className="grid gap-10 xl:grid-cols-[0.72fr_1.28fr] xl:items-center">
                 <div>
                   <SectionLabel label="我们的成长理念" />
-                  <h2 className="mt-8 max-w-[12ch] text-[38px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
+                  <h2 className="mt-8 max-w-[12ch] text-[32px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
                     孩子为中心，创造为驱动
                   </h2>
                   <p className="mt-6 max-w-[32ch] text-[17px] leading-8 text-[#647092]">
@@ -329,7 +329,7 @@ export default async function BrandPage() {
               <div className="grid gap-10 xl:grid-cols-[0.82fr_1.18fr] xl:items-center">
                 <div>
                   <SectionLabel label="我们相信" />
-                  <h2 className="mt-8 text-[38px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
+                  <h2 className="mt-8 text-[32px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
                     <span className="block">每个孩子心中都有</span>
                     <span className="block">一个改变世界的想法</span>
                   </h2>
@@ -360,7 +360,7 @@ export default async function BrandPage() {
                     <p className="text-[13px] font-black tracking-[0.14em] text-[#7782a4]">
                       OUR BELIEF
                     </p>
-                    <p className="mt-6 max-w-[18ch] text-[42px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[50px]">
+                    <p className="mt-6 max-w-[18ch] text-[32px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[50px]">
                       好奇心被认真对待，创造力才会长出来
                     </p>
                     <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -391,7 +391,7 @@ export default async function BrandPage() {
               <div className="grid gap-10 xl:grid-cols-[0.75fr_1.25fr] xl:items-center">
                 <div>
                   <SectionLabel label="我们的目标" />
-                  <h2 className="mt-8 max-w-[12ch] text-[38px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
+                  <h2 className="mt-8 max-w-[12ch] text-[32px] font-black leading-[1.18] tracking-normal text-[#17213f] sm:text-[52px]">
                     让每个孩子成为未来的创造者
                   </h2>
                   <p className="mt-6 max-w-[32ch] text-[17px] leading-8 text-[#647092]">

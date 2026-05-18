@@ -357,6 +357,7 @@ export async function upsertSubscriptionPlan(input: {
 export async function deleteSubscriptionPlan(planId: string) {
   const supabase = getSupabaseAdmin();
   const normalizedPlanId = planId.trim();
+  const today = toDateOnly(new Date());
 
   if (!normalizedPlanId) {
     throw new Error("缺少要删除的套餐 ID。");
@@ -376,50 +377,88 @@ export async function deleteSubscriptionPlan(planId: string) {
     throw new Error("没有找到这个套餐。");
   }
 
+  const { error: syncSubscriptionError } = await supabase
+    .from("user_subscriptions")
+    .update({
+      status: "expired",
+    } as never)
+    .eq("plan_id", normalizedPlanId)
+    .eq("status", "active")
+    .lt("end_date", today);
+
+  if (syncSubscriptionError) {
+    throw asPaymentInfrastructureError(syncSubscriptionError);
+  }
+
   const [
-    { count: subscriptionCount, error: subscriptionError },
-    { count: pendingOrderCount, error: pendingOrderError },
-    { count: activationCodeCount, error: activationCodeError },
+    { count: activeSubscriptionCount, error: activeSubscriptionError },
+    { data: staleSubscriptions, error: staleSubscriptionsError },
+    { data: activationCodes, error: activationCodesError },
   ] = await Promise.all([
     supabase
       .from("user_subscriptions")
       .select("id", { count: "exact", head: true })
-      .eq("plan_id", normalizedPlanId),
+      .eq("plan_id", normalizedPlanId)
+      .eq("status", "active")
+      .gte("end_date", today),
     supabase
-      .from("payment_orders")
-      .select("order_id", { count: "exact", head: true })
-      .eq("order_type", "subscription")
-      .eq("status", "pending")
-      .filter("detail->>planId", "eq", normalizedPlanId),
+      .from("user_subscriptions")
+      .select("id")
+      .eq("plan_id", normalizedPlanId)
+      .neq("status", "active")
+      .returns<Array<Pick<UserSubscription, "id">>>(),
     supabase
       .from("activation_codes")
-      .select("id", { count: "exact", head: true })
+      .select("id, status")
       .eq("type", "subscription")
-      .eq("value", normalizedPlanId),
+      .eq("value", normalizedPlanId)
+      .returns<Array<Pick<ActivationCodeRecord, "id" | "status">>>(),
   ]);
 
-  if (subscriptionError) {
-    throw asPaymentInfrastructureError(subscriptionError);
+  if (activeSubscriptionError) {
+    throw asPaymentInfrastructureError(activeSubscriptionError);
   }
 
-  if (pendingOrderError) {
-    throw asPaymentInfrastructureError(pendingOrderError);
+  if (staleSubscriptionsError) {
+    throw asPaymentInfrastructureError(staleSubscriptionsError);
   }
 
-  if (activationCodeError) {
-    throw asPaymentInfrastructureError(activationCodeError);
+  if (activationCodesError) {
+    throw asPaymentInfrastructureError(activationCodesError);
   }
 
-  if ((subscriptionCount ?? 0) > 0) {
-    throw new Error("这个套餐已经有关联订阅记录，暂时不能删除。");
+  if ((activeSubscriptionCount ?? 0) > 0) {
+    throw new Error("这个套餐还有正在生效的订阅，暂时不能删除。");
   }
 
-  if ((pendingOrderCount ?? 0) > 0) {
-    throw new Error("这个套餐还有待支付订单，暂时不能删除。");
+  await cancelPendingOrdersForPlan(normalizedPlanId);
+
+  const staleSubscriptionIds = (staleSubscriptions ?? []).map((item) => item.id);
+
+  if (staleSubscriptionIds.length) {
+    const { error: removeSubscriptionsError } = await supabase
+      .from("user_subscriptions")
+      .delete()
+      .in("id", staleSubscriptionIds);
+
+    if (removeSubscriptionsError) {
+      throw asPaymentInfrastructureError(removeSubscriptionsError);
+    }
   }
 
-  if ((activationCodeCount ?? 0) > 0) {
-    throw new Error("这个套餐已经生成过订阅激活码，暂时不能删除。");
+  const removableActivationCodeIds = (activationCodes ?? [])
+    .filter((item) => item.status !== "used")
+    .map((item) => item.id);
+
+  if (removableActivationCodeIds.length) {
+    const { error: removeActivationCodesError } = await supabase
+      .from("activation_codes")
+      .delete()
+      .in("id", removableActivationCodeIds);
+
+    if (removeActivationCodesError) {
+      throw asPaymentInfrastructureError(removeActivationCodesError);
+    }
   }
 
   const { error: deleteError } = await supabase
@@ -428,10 +467,88 @@ export async function deleteSubscriptionPlan(planId: string) {
     .eq("id", normalizedPlanId);
 
   if (deleteError) {
+    if ("code" in deleteError && deleteError.code === "23503") {
+      throw new Error("这个套餐还有历史生效记录没有清理完成，暂时不能删除。");
+    }
+
     throw asPaymentInfrastructureError(deleteError);
   }
 
   return plan;
+}
+
+async function listPendingOrderIds(input: {
+  userId?: string;
+  orderType?: OrderType;
+  planId?: string;
+}) {
+  const supabase = getSupabaseAdmin();
+  let query = supabase
+    .from("payment_orders")
+    .select("order_id")
+    .eq("status", "pending");
+
+  if (input.userId) {
+    query = query.eq("user_id", input.userId);
+  }
+
+  if (input.orderType) {
+    query = query.eq("order_type", input.orderType);
+  }
+
+  if (input.planId) {
+    query = query.filter("detail->>planId", "eq", input.planId);
+  }
+
+  const { data, error } = await query.returns<Array<Pick<PaymentOrder, "order_id">>>();
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return (data ?? []).map((item) => item.order_id);
+}
+
+async function cancelPendingOrdersByIds(orderIds: string[]) {
+  if (!orderIds.length) {
+    return 0;
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("payment_orders")
+    .update({
+      status: "cancelled",
+    } as never)
+    .in("order_id", orderIds)
+    .eq("status", "pending");
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return orderIds.length;
+}
+
+async function cancelPendingOrdersForUser(input: {
+  userId: string;
+  orderType: OrderType;
+}) {
+  const orderIds = await listPendingOrderIds({
+    userId: input.userId,
+    orderType: input.orderType,
+  });
+
+  return cancelPendingOrdersByIds(orderIds);
+}
+
+async function cancelPendingOrdersForPlan(planId: string) {
+  const orderIds = await listPendingOrderIds({
+    orderType: "subscription",
+    planId,
+  });
+
+  return cancelPendingOrdersByIds(orderIds);
 }
 
 async function insertPaymentOrder(input: {
@@ -474,6 +591,11 @@ export async function createCoinPurchaseOrder(input: {
   const yuan = Math.ceil(coins / rate.coin_per_yuan);
   const amount = yuan * 100;
 
+  await cancelPendingOrdersForUser({
+    userId: input.userId,
+    orderType: "coin_purchase",
+  });
+
   const order = await insertPaymentOrder({
     userId: input.userId,
     orderType: "coin_purchase",
@@ -512,6 +634,11 @@ export async function createSubscriptionOrder(input: {
   if (planError) {
     throw asPaymentInfrastructureError(planError);
   }
+
+  await cancelPendingOrdersForUser({
+    userId: input.userId,
+    orderType: "subscription",
+  });
 
   const order = await insertPaymentOrder({
     userId: input.userId,
@@ -591,6 +718,65 @@ export async function completeMockPayment(orderId: string, userId: string) {
   const paidOrder = await markOrderPaid(order.order_id, userId, payload);
   await fulfillPaidOrder(paidOrder);
   return paidOrder;
+}
+
+export async function cancelPaymentOrder(orderId: string, userId: string) {
+  const supabase = getSupabaseAdmin();
+  const normalizedOrderId = orderId.trim();
+
+  if (!normalizedOrderId) {
+    throw new Error("缺少订单号。");
+  }
+
+  const { data: currentOrder, error: currentOrderError } = await supabase
+    .from("payment_orders")
+    .select(
+      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
+    )
+    .eq("order_id", normalizedOrderId)
+    .eq("user_id", userId)
+    .maybeSingle<PaymentOrder>();
+
+  if (currentOrderError) {
+    throw asPaymentInfrastructureError(currentOrderError);
+  }
+
+  if (!currentOrder) {
+    throw new Error("没有找到这个订单。");
+  }
+
+  if (currentOrder.status !== "pending") {
+    return currentOrder;
+  }
+
+  const { data: cancelledOrder, error: cancelError } = await supabase
+    .from("payment_orders")
+    .update({
+      status: "cancelled",
+    } as never)
+    .eq("order_id", normalizedOrderId)
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .select(
+      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
+    )
+    .maybeSingle<PaymentOrder>();
+
+  if (cancelError) {
+    throw asPaymentInfrastructureError(cancelError);
+  }
+
+  if (cancelledOrder) {
+    return cancelledOrder;
+  }
+
+  const latestOrder = await getPaymentOrderById(normalizedOrderId);
+
+  if (!latestOrder || latestOrder.user_id !== userId) {
+    throw new Error("订单状态更新失败，请稍后再试。");
+  }
+
+  return latestOrder;
 }
 
 export async function handlePaymentNotification(method: PaymentMethod, request: Request) {

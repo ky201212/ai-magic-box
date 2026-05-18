@@ -27,6 +27,7 @@ export default async function AdminReviewPage() {
         "违法",
       ],
       lockManualApproveAfterAiReject: true,
+      dailyPostLimit: 0,
     })),
   ]);
 

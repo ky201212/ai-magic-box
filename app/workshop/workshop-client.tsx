@@ -123,6 +123,19 @@ type WorkshopDraftSnapshot = {
   generatedImageUrl: string;
 };
 
+type CommunityReusePayload = {
+  post: {
+    id: string;
+    mode: "coding" | "writing" | "painting";
+    title: string;
+    description: string | null;
+    prompt: string;
+    preview_image_url: string;
+    preview_code: string;
+    moderation_status: "draft" | "pending" | "approved" | "rejected";
+  };
+};
+
 type CodeGuideRow = {
   markerId: number;
   lineNumber: number;
@@ -351,6 +364,66 @@ function createInitialShareCrop(imageWidth: number, imageHeight: number) {
         };
 
   return normalizeShareCrop(crop);
+}
+
+function wrapCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+  options?: {
+    shouldEllipsize?: boolean;
+  },
+) {
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+
+  if (!normalizedText) {
+    return [""];
+  }
+
+  const tokens = Array.from(normalizedText);
+  const lines: string[] = [];
+  let currentLine = "";
+
+  tokens.forEach((token) => {
+    const nextLine = `${currentLine}${token}`;
+
+    if (!currentLine || context.measureText(nextLine).width <= maxWidth) {
+      currentLine = nextLine;
+      return;
+    }
+
+    lines.push(currentLine);
+    currentLine = token;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+
+  const clippedLines = lines.slice(0, maxLines);
+
+  if (!options?.shouldEllipsize) {
+    return clippedLines;
+  }
+
+  const ellipsis = "...";
+  let lastLine = clippedLines[maxLines - 1] ?? "";
+
+  while (
+    lastLine &&
+    context.measureText(`${lastLine}${ellipsis}`).width > maxWidth
+  ) {
+    lastLine = lastLine.slice(0, -1);
+  }
+
+  clippedLines[maxLines - 1] = `${lastLine}${ellipsis}`;
+
+  return clippedLines;
 }
 
 function loadImageElement(src: string) {
@@ -1345,6 +1418,8 @@ function WorkshopContent() {
   const shareCropFrameRef = useRef<HTMLDivElement | null>(null);
   const shareCropDragRef = useRef<ShareCropDragState | null>(null);
   const hasRestoredDraftRef = useRef(false);
+  const hasAppliedCommunityReuseRef = useRef(false);
+  const [isDraftRestoreReady, setIsDraftRestoreReady] = useState(false);
   const [promptText, setPromptText] = useState("");
   const [writingPrompt, setWritingPrompt] = useState("");
   const [writingResult, setWritingResult] = useState("");
@@ -1477,6 +1552,7 @@ function WorkshopContent() {
         window.console.error("创作草稿恢复失败");
       } finally {
         hasRestoredDraftRef.current = true;
+        setIsDraftRestoreReady(true);
       }
     }, 0);
 
@@ -1484,6 +1560,70 @@ function WorkshopContent() {
       window.clearTimeout(timeoutId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isDraftRestoreReady || hasAppliedCommunityReuseRef.current) {
+      return;
+    }
+
+    const fromCommunityPostId = searchParams.get("fromCommunity");
+
+    if (!fromCommunityPostId) {
+      return;
+    }
+
+    hasAppliedCommunityReuseRef.current = true;
+
+    const applyCommunityReuse = async () => {
+      try {
+        const response = await fetch(`/api/community/posts/${fromCommunityPostId}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as CommunityReusePayload & {
+          error?: string;
+        };
+
+        if (!response.ok || !payload.post) {
+          throw new Error(payload.error ?? "社区作品读取失败。");
+        }
+
+        const sourcePost = payload.post;
+
+        if (sourcePost.mode === "writing") {
+          setWritingPrompt(sourcePost.prompt);
+          setWritingResult(sourcePost.preview_code);
+          setDrawingPrompt("");
+          setGeneratedImageUrl("");
+          setPromptText("");
+          setGeneratedCode(defaultPreviewHtml);
+        } else if (sourcePost.mode === "painting") {
+          setDrawingPrompt(sourcePost.prompt);
+          setGeneratedImageUrl(sourcePost.preview_image_url);
+          setPromptText("");
+          setGeneratedCode(defaultPreviewHtml);
+          setWritingPrompt("");
+          setWritingResult("");
+        } else {
+          setPromptText(sourcePost.prompt);
+          setGeneratedCode(
+            sourcePost.preview_code.trim() ? sourcePost.preview_code : defaultPreviewHtml,
+          );
+          setWritingPrompt("");
+          setWritingResult("");
+          setDrawingPrompt("");
+          setGeneratedImageUrl("");
+        }
+
+        setShareMessage(`已载入《${sourcePost.title}》，现在可以继续修改和复用。`);
+      } catch (error) {
+        setShareMessage(
+          error instanceof Error ? error.message : "社区作品复用失败，请稍后再试。",
+        );
+      }
+    };
+
+    void applyCommunityReuse();
+  }, [isDraftRestoreReady, searchParams]);
 
   useEffect(() => {
     if (!isShareCropDragging) {
@@ -1945,7 +2085,11 @@ function WorkshopContent() {
 
   const capturePreviewImage = async (mode: ShareableMode) => {
     if (mode === "writing") {
-      return WRITING_SHARE_PLACEHOLDER_IMAGE_URL;
+      return createWritingShareCoverImage({
+        title: buildShareTitle(),
+        prompt: getSharePrompt("writing"),
+        result: writingResult.trim(),
+      });
     }
 
     if (mode === "painting") {
@@ -2296,7 +2440,7 @@ function WorkshopContent() {
         moderation?: {
           approved?: boolean;
           reason?: string;
-          suggestedStatus?: "approved" | "pending" | "rejected";
+          suggestedStatus?: "draft" | "approved" | "pending" | "rejected";
         };
       };
 
@@ -2320,6 +2464,17 @@ function WorkshopContent() {
 
       setIsShareConfirmOpen(false);
       setShareMessage(data.message ?? "");
+
+      if (data.moderation?.suggestedStatus === "draft") {
+        setShareFeedback({
+          type: "pending",
+          title: "作品已保存到个人主页",
+          message:
+            data.message ??
+            "今天的发布次数已经用完，这份作品已经保存在你的个人主页，之后还能继续复用或再发布。",
+        });
+        return;
+      }
 
       if (data.moderation?.suggestedStatus === "pending") {
         setShareFeedback({
@@ -2538,9 +2693,9 @@ function WorkshopContent() {
         <div className="absolute bottom-[-60px] right-[12%] h-96 w-96 rounded-full bg-[#cfe0ff]/35 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1700px] px-4 py-4 lg:px-6 lg:py-5">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1700px] px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5">
         <section className="flex min-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/80 px-5 py-5 lg:px-7">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
             <div className="flex min-w-0 items-center gap-4">
               <Image
                 src={brand.logoUrl}
@@ -2605,7 +2760,7 @@ function WorkshopContent() {
               </button>
 
               {activeHeaderPanel && (
-                <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-[320px] rounded-[24px] border border-white/80 bg-white/96 p-4 shadow-[0_22px_50px_rgba(148,163,184,0.14)] backdrop-blur-xl">
+                <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-[min(320px,calc(100vw-32px))] rounded-[24px] border border-white/80 bg-white/96 p-4 shadow-[0_22px_50px_rgba(148,163,184,0.14)] backdrop-blur-xl">
                   {activeHeaderPanel === "help" ? (
                     <div>
                       <p className="text-sm font-black text-slate-700">帮助中心</p>
@@ -2742,7 +2897,7 @@ function WorkshopContent() {
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[320px_420px_minmax(0,1fr)] lg:p-5">
+          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 lg:grid-cols-[320px_420px_minmax(0,1fr)] lg:p-5">
             <aside className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.96))] p-4 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
@@ -3398,7 +3553,7 @@ function WorkshopContent() {
                                 正在整理页面结构
                               </div>
 
-                              <p className="mt-5 min-h-[64px] max-w-[320px] text-lg font-black leading-8 text-slate-600">
+                              <p className="mt-5 min-h-[64px] max-w-[320px] text-base font-black leading-7 text-slate-600 sm:text-lg sm:leading-8">
                                 {loadingMessages[loadingMessageIndex]}
                               </p>
                             </div>
@@ -3641,14 +3796,14 @@ function WorkshopContent() {
       </div>
 
       {isShareConfirmOpen && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#7d8eb0]/18 px-6 backdrop-blur-md">
-          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[36px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-6 shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#7d8eb0]/18 px-3 py-3 backdrop-blur-md sm:px-6">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-4 shadow-[0_28px_80px_rgba(148,163,184,0.24)] sm:rounded-[36px] sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-bold tracking-[0.16em] text-[#8aa0ca]">
                   分享确认
                 </p>
-                <h3 className="mt-2 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[32px] font-black tracking-[-0.05em] text-slate-700">
+                <h3 className="mt-2 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[26px] font-black tracking-[-0.05em] text-slate-700 sm:text-[32px]">
                   把这份作品送进成长社区
                 </h3>
                 <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500">
@@ -3834,8 +3989,8 @@ function WorkshopContent() {
       )}
 
       {shareFeedback && (
-        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-[#7d8eb0]/20 px-6 backdrop-blur-md">
-          <div className="w-full max-w-xl rounded-[36px] bg-white p-8 text-center shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-[#7d8eb0]/20 px-4 backdrop-blur-md sm:px-6">
+          <div className="w-full max-w-xl rounded-[28px] bg-white p-5 text-center shadow-[0_28px_80px_rgba(148,163,184,0.24)] sm:rounded-[36px] sm:p-8">
             <div
               className={`mx-auto grid h-20 w-20 place-items-center rounded-[28px] text-3xl font-black shadow-[0_16px_36px_rgba(148,163,184,0.12)] ${
                 shareFeedback.type === "success"
@@ -3851,7 +4006,7 @@ function WorkshopContent() {
                   ? "审"
                   : "改"}
             </div>
-            <h3 className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[34px] font-black tracking-[-0.05em] text-slate-700">
+            <h3 className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[28px] font-black tracking-[-0.05em] text-slate-700 sm:text-[34px]">
               {shareFeedback.title}
             </h3>
             <p className="mt-4 text-[15px] leading-8 text-slate-500">
@@ -3898,12 +4053,12 @@ function WorkshopContent() {
       )}
 
       {loginPromptMessage && (
-        <div className="absolute inset-0 z-[82] flex items-center justify-center bg-[#7d8eb0]/22 px-6 backdrop-blur-md">
-          <div className="w-full max-w-lg rounded-[34px] bg-white p-8 text-center shadow-[0_28px_80px_rgba(148,163,184,0.24)]">
+        <div className="absolute inset-0 z-[82] flex items-center justify-center bg-[#7d8eb0]/22 px-4 backdrop-blur-md sm:px-6">
+          <div className="w-full max-w-lg rounded-[28px] bg-white p-5 text-center shadow-[0_28px_80px_rgba(148,163,184,0.24)] sm:rounded-[34px] sm:p-8">
             <div className="mx-auto grid h-20 w-20 place-items-center rounded-[28px] bg-[linear-gradient(135deg,#eef4ff,#f7f1ff)] text-3xl font-black text-[#6b7fe8] shadow-[0_16px_36px_rgba(148,163,184,0.12)]">
               登
             </div>
-            <h3 className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[32px] font-black tracking-[-0.05em] text-slate-700">
+            <h3 className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[26px] font-black tracking-[-0.05em] text-slate-700 sm:text-[32px]">
               需要重新确认登录
             </h3>
             <p className="mt-4 text-[15px] leading-8 text-slate-500">
@@ -3930,14 +4085,14 @@ function WorkshopContent() {
       )}
 
       {isCodeGuideOpen && (
-        <div className="absolute inset-0 z-[85] flex items-center justify-center bg-[#7d8eb0]/22 px-4 py-6 backdrop-blur-md">
-          <div className="flex h-full max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[34px] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,249,255,0.98))] shadow-[0_28px_80px_rgba(148,163,184,0.26)]">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#e6eeff] px-6 py-5">
+        <div className="absolute inset-0 z-[85] flex items-center justify-center bg-[#7d8eb0]/22 px-3 py-3 backdrop-blur-md sm:px-4 sm:py-6">
+          <div className="flex h-full max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,249,255,0.98))] shadow-[0_28px_80px_rgba(148,163,184,0.26)] sm:rounded-[34px]">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#e6eeff] px-4 py-4 sm:px-6 sm:py-5">
               <div>
                 <p className="text-sm font-bold tracking-[0.16em] text-[#8aa0ca]">
                   小程序拆解课
                 </p>
-                <h3 className="mt-2 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[30px] font-black text-slate-700">
+                <h3 className="mt-2 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-[24px] font-black text-slate-700 sm:text-[30px]">
                   先认功能积木，再认识背后的代码
                 </h3>
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-500">
@@ -3953,7 +4108,7 @@ function WorkshopContent() {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
               <div className="grid gap-5 xl:grid-cols-[460px_minmax(0,1fr)]">
                 <section className="min-h-0 rounded-[28px] border border-[#f3d6e7] bg-[linear-gradient(180deg,#fff8fc_0%,#f9fbff_100%)] p-4">
                   <div className="mb-4 flex items-center justify-between gap-3">

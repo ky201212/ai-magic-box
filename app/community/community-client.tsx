@@ -122,6 +122,11 @@ function authorInitial(name: string) {
   return name.trim().slice(0, 1) || "创";
 }
 
+function getReuseHref(post: CommunityPost, isLoggedIn: boolean) {
+  const target = `/workshop?mode=${post.mode}&fromCommunity=${post.id}`;
+  return isLoggedIn ? target : `/login?redirect=${encodeURIComponent(target)}`;
+}
+
 function SectionTitle({
   title,
   action,
@@ -131,7 +136,9 @@ function SectionTitle({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <h3 className="text-[26px] font-black tracking-[-0.04em] text-[#17213f]">{title}</h3>
+      <h3 className="text-[22px] font-black tracking-[-0.04em] text-[#17213f] sm:text-[26px]">
+        {title}
+      </h3>
       {action}
     </div>
   );
@@ -270,9 +277,9 @@ export function CommunityClient({
 
   return (
     <section className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1fr)_356px]">
-      <div className="space-y-7">
+      <div className="min-w-0 space-y-7">
         <section className="overflow-hidden rounded-[36px] border border-white/80 bg-[linear-gradient(135deg,#ffffff_0%,#f8f3ff_42%,#eef3ff_100%)] shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
-          <div className="relative min-h-[560px] px-7 py-7 sm:px-9 xl:min-h-[590px] xl:px-10 xl:py-8">
+          <div className="relative min-h-[420px] px-5 py-5 sm:min-h-[560px] sm:px-7 sm:py-7 xl:min-h-[590px] xl:px-10 xl:py-8">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_30%,rgba(255,255,255,0.96),rgba(255,255,255,0.78)_28%,rgba(255,255,255,0)_56%),radial-gradient(circle_at_64%_28%,rgba(161,126,255,0.18),rgba(161,126,255,0)_28%),radial-gradient(circle_at_82%_18%,rgba(255,175,210,0.28),rgba(255,175,210,0)_18%),linear-gradient(135deg,rgba(255,255,255,0.9)_0%,rgba(246,241,255,0.56)_44%,rgba(236,243,255,0.68)_100%)]" />
             <div className="pointer-events-none absolute bottom-[-28%] right-[-10%] h-[82%] w-[62%] rounded-full bg-[#8c73ff]/14 blur-[100px]" />
             <div className="pointer-events-none absolute right-[8%] top-[8%] h-[26px] w-[26px] rounded-full bg-[#ffb366]/55 blur-[2px]" />
@@ -282,16 +289,16 @@ export function CommunityClient({
             <img
               src="/community-assets/hero-kid-robot-clean.png"
               alt="社区主视觉"
-              className="pointer-events-none absolute bottom-0 right-[-4%] z-10 h-[90%] max-w-none object-contain drop-shadow-[0_42px_52px_rgba(89,84,188,0.22)] sm:right-[-2%] xl:h-[94%]"
+              className="pointer-events-none absolute bottom-0 right-[-4%] z-10 hidden h-[90%] max-w-none object-contain drop-shadow-[0_42px_52px_rgba(89,84,188,0.22)] sm:block sm:right-[-2%] xl:h-[94%]"
             />
 
-            <div className="relative z-20 flex min-h-[500px] items-start pt-24 xl:min-h-[540px] xl:pt-28">
+            <div className="relative z-20 flex min-h-[360px] items-start pt-4 sm:min-h-[500px] sm:pt-24 xl:min-h-[540px] xl:pt-28">
               <div className="max-w-[500px]">
-                <h1 className="text-[48px] font-black leading-[0.95] tracking-[-0.06em] text-[#182140] sm:text-[60px]">
+                <h1 className="text-[34px] font-black leading-[1] tracking-[-0.06em] text-[#182140] sm:text-[48px] xl:text-[60px]">
                   每一个作品
                   <span className="home-gradient-text mt-2 block">都值得被看见</span>
                 </h1>
-                <p className="mt-6 max-w-[30ch] text-[15px] leading-8 text-[#697493]">
+                <p className="mt-5 max-w-[30ch] text-[14px] leading-7 text-[#697493] sm:mt-6 sm:text-[15px] sm:leading-8">
                   孩子们的每一次创作，都是让世界看到的光芒。在这里，分享想法和作品，收获灵感与鼓励，和更多小创作者一起成长。
                 </p>
 
@@ -471,8 +478,16 @@ export function CommunityClient({
                           <p className="truncate text-sm font-black text-[#3f4b6f]">{name}</p>
                           <p className="text-xs text-[#8a95b5]">{formatDate(post.created_at)}</p>
                         </div>
-                        <div className="shrink-0 text-xs font-black text-[#6c7597]">
-                          ♡ {post.like_count}
+                        <div className="flex shrink-0 items-center gap-2">
+                          <div className="text-xs font-black text-[#6c7597]">
+                            ♡ {post.like_count}
+                          </div>
+                          <Link
+                            href={getReuseHref(post, isLoggedIn)}
+                            className="rounded-full border border-[#dce5ff] bg-white px-3 py-1.5 text-[11px] font-black text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                          >
+                            复用
+                          </Link>
                         </div>
                       </div>
                     </div>
@@ -617,7 +632,7 @@ export function CommunityClient({
 
       </div>
 
-      <aside className="space-y-6">
+      <aside className="min-w-0 space-y-6">
         <section className="overflow-hidden rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,#fbf7ff_0%,#f3edff_48%,#efeaff_100%)] p-6 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
           <h3 className="max-w-[12ch] text-[32px] font-black leading-[1.02] tracking-[-0.05em] text-[#182140]">
             社区创作规则

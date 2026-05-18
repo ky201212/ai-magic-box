@@ -35,7 +35,7 @@ export default async function InfoDetailPage({
   const paragraphs = renderParagraphs(post.body);
 
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-5 py-10 text-[#18213f] sm:px-8 lg:px-12">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#18213f] sm:px-6 sm:py-10 lg:px-12">
       <div className="mx-auto max-w-[980px]">
         <article className="overflow-hidden rounded-[34px] border border-white/80 bg-white/82 shadow-[0_30px_90px_rgba(92,116,189,0.14)] backdrop-blur-2xl">
           <div className="border-b border-[#edf1ff] px-7 py-8 sm:px-10">
@@ -54,11 +54,11 @@ export default async function InfoDetailPage({
               </Link>
             </div>
 
-            <h1 className="mt-6 text-[34px] font-black leading-[1.18] text-[#17213f] sm:text-[46px]">
+            <h1 className="mt-6 text-[28px] font-black leading-[1.18] text-[#17213f] sm:text-[46px]">
               {post.title}
             </h1>
             {post.subtitle ? (
-              <p className="mt-4 text-[18px] font-bold leading-9 text-[#516089]">
+              <p className="mt-4 text-[16px] font-bold leading-8 text-[#516089] sm:text-[18px] sm:leading-9">
                 {post.subtitle}
               </p>
             ) : null}
@@ -96,7 +96,7 @@ export default async function InfoDetailPage({
               </div>
             ) : null}
 
-            <div className="mt-8 space-y-5 text-[16px] leading-9 text-[#3f4d75]">
+            <div className="mt-8 space-y-5 text-[15px] leading-8 text-[#3f4d75] sm:text-[16px] sm:leading-9">
               {paragraphs.length ? (
                 paragraphs.map((paragraph, index) => (
                   <p key={`${post.id}-${index}`}>{paragraph}</p>

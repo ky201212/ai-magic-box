@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  countTodayPublishedAttemptsByUser,
   createCommunityPost,
   getCommunityPostById,
   updateCommunityPostModeration,
@@ -23,6 +24,11 @@ type QueueShareInput = {
 type QueueCommunityShareResult =
   | {
       post: CommunityPostRow;
+      immediateStatus: "draft";
+      message: string;
+    }
+  | {
+      post: CommunityPostRow;
       immediateStatus: "rejected";
       message: string;
     }
@@ -35,6 +41,42 @@ type QueueCommunityShareResult =
 export async function queueCommunityShare(
   input: QueueShareInput,
 ): Promise<QueueCommunityShareResult> {
+  const reviewSetting = await getCommunityReviewSetting().catch(() => null);
+  const dailyPostLimit = Math.max(0, Math.floor(reviewSetting?.dailyPostLimit ?? 0));
+
+  if (dailyPostLimit > 0) {
+    const todayAttempts = await countTodayPublishedAttemptsByUser(input.userId);
+
+    if (todayAttempts >= dailyPostLimit) {
+      const post = await createCommunityPost({
+        userId: input.userId,
+        title: input.title,
+        description: input.description,
+        prompt: input.prompt,
+        previewImageUrl: input.previewImageUrl,
+        previewCode: input.previewCode,
+        mode: input.mode,
+        moderationStatus: "draft",
+        moderationReason: `今天最多只能发布 ${dailyPostLimit} 次，这份作品已经先帮你保存到个人主页。`,
+        moderationDetail: {
+          policy: {
+            dailyPostLimit,
+          },
+          community_meta: {
+            saveSource: "daily-limit",
+            savedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      return {
+        post,
+        immediateStatus: "draft",
+        message: `今天的发布次数已经用完了，这份作品已保存到你的个人主页，之后还能继续复用或再发布。`,
+      };
+    }
+  }
+
   const ruleResult = moderateCommunityPostByRules({
     title: input.title,
     prompt: [input.prompt, input.description].filter(Boolean).join("\n"),
@@ -153,6 +195,7 @@ export async function finalizeCommunityShareReview(postId: string) {
         aiApprovalMode: reviewSetting?.aiApprovalMode ?? "manual_review",
         lockManualApproveAfterAiReject:
           reviewSetting?.lockManualApproveAfterAiReject ?? true,
+        dailyPostLimit: reviewSetting?.dailyPostLimit ?? 0,
       },
     },
     moderationStage: finalStage,

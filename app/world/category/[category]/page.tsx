@@ -28,7 +28,7 @@ export default async function WorldCategoryPage({
   const categoryPosts = posts.filter((post) => post.category === category);
 
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-5 py-10 text-[#18213f] sm:px-8 lg:px-12">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#18213f] sm:px-6 sm:py-10 lg:px-12">
       <div className="mx-auto max-w-[1120px]">
         <div className="rounded-[30px] border border-white/80 bg-white/78 p-8 shadow-[0_24px_70px_rgba(92,116,189,0.12)] backdrop-blur-2xl">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -36,7 +36,7 @@ export default async function WorldCategoryPage({
               <p className="text-sm font-black tracking-[0.16em] text-[#7b86a8]">
                 CONTENT CATEGORY
               </p>
-              <h1 className="mt-3 text-[36px] font-black text-[#17213f] sm:text-[44px]">
+              <h1 className="mt-3 text-[30px] font-black text-[#17213f] sm:text-[44px]">
                 {getInfoCategoryTitle(category)}
               </h1>
             </div>
@@ -76,7 +76,7 @@ export default async function WorldCategoryPage({
                 <div className="inline-flex rounded-full border border-[#dfe7ff] bg-white px-3 py-1.5 text-[12px] font-black text-[#627ee6]">
                   {getInfoCategoryTitle(post.category)}
                 </div>
-                <h2 className="mt-4 text-[28px] font-black leading-[1.2] text-[#17213f]">
+                <h2 className="mt-4 text-[24px] font-black leading-[1.2] text-[#17213f] sm:text-[28px]">
                   {post.title}
                 </h2>
                 {post.subtitle ? (

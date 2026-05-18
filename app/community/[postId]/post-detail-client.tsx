@@ -20,7 +20,10 @@ type CommunityPostDetail = {
   is_featured: boolean;
   manual_sort_order: number;
   moderation_reason: string | null;
+  moderation_status: "draft" | "pending" | "approved" | "rejected";
   viewer_has_liked: boolean;
+  can_delete: boolean;
+  can_edit_in_workshop: boolean;
   users: {
     id: string;
     phone: string;
@@ -79,6 +82,22 @@ function getWorkshopHref(post: CommunityPostDetail) {
   return `/workshop?mode=${post.mode}&fromCommunity=${post.id}`;
 }
 
+function getModerationStatusLabel(status: CommunityPostDetail["moderation_status"]) {
+  if (status === "draft") {
+    return "已保存未发布";
+  }
+
+  if (status === "approved") {
+    return "已发布";
+  }
+
+  if (status === "rejected") {
+    return "未通过";
+  }
+
+  return "审核中";
+}
+
 function WritingShowcase({
   title,
   content,
@@ -91,7 +110,7 @@ function WritingShowcase({
   onCopy: () => void;
 }) {
   return (
-    <div className="relative flex aspect-[1.42/1] min-h-[360px] overflow-hidden rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,247,219,0.72),rgba(255,251,238,0.94))] shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
+    <div className="relative flex aspect-[1.12/1] min-h-[300px] overflow-hidden rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,247,219,0.72),rgba(255,251,238,0.94))] shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl sm:aspect-[1.42/1] sm:min-h-[360px] sm:rounded-[34px]">
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),transparent_58%,rgba(251,191,36,0.08))]" />
       <div className="absolute left-8 top-8 hidden h-40 w-40 rounded-full border border-white/45 lg:block" />
       <div className="absolute bottom-8 right-8 hidden h-48 w-48 rounded-full border border-white/40 lg:block" />
@@ -107,7 +126,7 @@ function WritingShowcase({
                 <div className="inline-flex rounded-full bg-[#fff1c9] px-4 py-2 text-sm font-bold text-amber-700">
                   AI写作展示
                 </div>
-                <h3 className="mt-3 line-clamp-2 text-[24px] font-black leading-tight tracking-[-0.04em] text-[#17213f] sm:text-[32px]">
+                <h3 className="mt-3 line-clamp-2 text-[22px] font-black leading-tight tracking-[-0.04em] text-[#17213f] sm:text-[32px]">
                   {title}
                 </h3>
               </div>
@@ -153,6 +172,8 @@ export function CommunityDetailClient({
   const [isSharing, setIsSharing] = useState(false);
   const [shareMessage, setShareMessage] = useState("");
   const [contentCopyMessage, setContentCopyMessage] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isPublicPost = post?.moderation_status === "approved";
 
   useEffect(() => {
     let mounted = true;
@@ -207,6 +228,11 @@ export function CommunityDetailClient({
       return;
     }
 
+    if (!isPublicPost) {
+      window.alert("这份作品还没有正式发布，暂时不能点赞。");
+      return;
+    }
+
     if (!isLoggedIn) {
       window.location.href = `/login?redirect=/community/${post.id}`;
       return;
@@ -248,6 +274,11 @@ export function CommunityDetailClient({
 
   const handleShare = async () => {
     if (!post || isSharing) {
+      return;
+    }
+
+    if (!isPublicPost) {
+      setShareMessage("这份作品还没有正式发布，暂时不能分享。");
       return;
     }
 
@@ -342,7 +373,7 @@ export function CommunityDetailClient({
 
   return (
     <section className="mt-7 grid gap-8 xl:grid-cols-[minmax(0,1.15fr)_420px]">
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6">
         {post.mode === "writing" ? (
           <WritingShowcase
             title={post.title}
@@ -360,12 +391,15 @@ export function CommunityDetailClient({
           </div>
         )}
 
-        <div className="rounded-[34px] border border-white/80 bg-white/82 p-7 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
+        <div className="rounded-[28px] border border-white/80 bg-white/82 p-5 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl sm:rounded-[34px] sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-full border border-[#dfe7ff] bg-[#f8f9ff] px-3 py-1 text-xs font-semibold text-[#627ee6]">
                   {post.category}
+                </span>
+                <span className="rounded-full border border-[#e6ebff] bg-white px-3 py-1 text-xs font-semibold text-[#6d7899]">
+                  {getModerationStatusLabel(post.moderation_status)}
                 </span>
                 {post.is_featured && (
                   <span className="rounded-full bg-[#625cff] px-3 py-1 text-xs font-semibold text-white">
@@ -373,7 +407,7 @@ export function CommunityDetailClient({
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-[42px] font-black leading-[1.04] tracking-[-0.06em] text-[#17213f]">
+              <h2 className="mt-4 text-[30px] font-black leading-[1.08] tracking-[-0.06em] text-[#17213f] sm:text-[42px]">
                 {post.title}
               </h2>
               <p className="mt-4 text-sm text-[#8a95b5]">
@@ -386,7 +420,7 @@ export function CommunityDetailClient({
               )}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-3">
               <div className="rounded-[22px] border border-[#edf1ff] bg-[#f8f9ff] px-4 py-4 text-center">
                 <p className="text-xs text-[#8a95b5]">点赞</p>
                 <p className="mt-2 text-2xl font-black text-[#17213f]">{post.like_count}</p>
@@ -406,7 +440,7 @@ export function CommunityDetailClient({
             <button
               type="button"
               onClick={() => void handleLike()}
-              disabled={isLiking}
+              disabled={isLiking || !isPublicPost}
               className={`rounded-[22px] px-5 py-4 text-left transition ${
                 post.viewer_has_liked
                   ? "bg-[linear-gradient(135deg,#efeaff,#f8f9ff)] text-[#5f55db] shadow-[inset_0_0_0_1px_rgba(123,105,255,0.18)]"
@@ -424,7 +458,7 @@ export function CommunityDetailClient({
             <button
               type="button"
               onClick={() => void handleShare()}
-              disabled={isSharing}
+              disabled={isSharing || !isPublicPost}
               className="rounded-[22px] border border-[#e3e8ff] bg-white px-5 py-4 text-left text-[#3f4b6f] transition hover:border-[#cad2ff]"
             >
               <p className="text-lg font-black">复制分享链接</p>
@@ -434,6 +468,56 @@ export function CommunityDetailClient({
             </button>
           </div>
 
+          {post.can_delete && (
+            <div className="mt-4">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    `确定删除《${post.title}》吗？删除后会同步从成长社区移除，点赞和互动记录也会一起删除。`,
+                  );
+
+                  if (!confirmed) {
+                    return;
+                  }
+
+                  setIsDeleting(true);
+
+                  try {
+                    const response = await fetch(`/api/community/posts/${post.id}`, {
+                      method: "DELETE",
+                    });
+                    const data = (await response.json()) as {
+                      error?: string;
+                    };
+
+                    if (!response.ok) {
+                      throw new Error(data.error ?? "删除作品失败。");
+                    }
+
+                    window.location.href = "/profile";
+                  } catch (requestError) {
+                    window.alert(
+                      requestError instanceof Error
+                        ? requestError.message
+                        : "删除作品失败。",
+                    );
+                    setIsDeleting(false);
+                  }
+                }}
+                className="rounded-[22px] border border-[#ffd2de] bg-white px-5 py-4 text-left text-[#c45a7e] transition hover:border-[#ffb1c6] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <p className="text-lg font-black">
+                  {isDeleting ? "正在删除作品" : "删除这份作品"}
+                </p>
+                <p className="mt-2 text-sm leading-7 text-[#9a6b7a]">
+                  删除后会同步从社区移除，个人主页里的这条记录也会一起消失。
+                </p>
+              </button>
+            </div>
+          )}
+
           {shareMessage && (
             <div className="mt-4 rounded-[18px] border border-[#dfe7ff] bg-[#f8f9ff] px-4 py-3 text-sm leading-7 text-[#637092]">
               {shareMessage}
@@ -442,7 +526,7 @@ export function CommunityDetailClient({
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <section className="rounded-[34px] border border-white/80 bg-white/82 p-7 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+          <section className="min-w-0 rounded-[28px] border border-white/80 bg-white/82 p-5 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl sm:rounded-[34px] sm:p-7">
             <p className="text-sm font-semibold tracking-[0.14em] text-[#8a95b5]">
               创作提示词
             </p>
@@ -451,7 +535,7 @@ export function CommunityDetailClient({
             </p>
           </section>
 
-          <section className="rounded-[34px] border border-white/80 bg-white/82 p-7 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl">
+          <section className="min-w-0 rounded-[28px] border border-white/80 bg-white/82 p-5 shadow-[0_18px_54px_rgba(91,111,185,0.12)] backdrop-blur-2xl sm:rounded-[34px] sm:p-7">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold tracking-[0.14em] text-[#8a95b5]">
@@ -484,7 +568,7 @@ export function CommunityDetailClient({
         </div>
       </div>
 
-      <aside className="space-y-6">
+      <aside className="min-w-0 space-y-6">
         <section className="rounded-[34px] border border-white/80 bg-white/82 p-6 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
           <p className="text-sm font-semibold tracking-[0.14em] text-[#8a95b5]">
             这份作品可以做什么
@@ -494,7 +578,7 @@ export function CommunityDetailClient({
               href={getWorkshopHref(post)}
               className="rounded-[22px] bg-[#625cff] px-5 py-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
             >
-              回到工坊继续灵感延展
+              复用这个项目到工坊
             </Link>
             <Link
               href="/community"

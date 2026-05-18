@@ -12,7 +12,7 @@ export type UserProfile = {
   bio: string | null;
 };
 
-export type CommunityPostStatus = "pending" | "approved" | "rejected";
+export type CommunityPostStatus = "draft" | "pending" | "approved" | "rejected";
 export type CommunityPostMode = "coding" | "writing" | "painting";
 
 export type UserCommunityPost = {
@@ -90,6 +90,9 @@ export type CommunityPostDetail = ApprovedCommunityPost & {
   preview_code: string;
   moderation_reason: string | null;
   viewer_has_liked: boolean;
+  moderation_status: CommunityPostStatus;
+  can_delete: boolean;
+  can_edit_in_workshop: boolean;
 };
 
 export type CommunityActivityLog = {
@@ -260,6 +263,12 @@ function normalizePostMode(value: unknown): CommunityPostMode | null {
     : null;
 }
 
+function normalizePostStatus(value: unknown): CommunityPostStatus {
+  return value === "draft" || value === "pending" || value === "approved" || value === "rejected"
+    ? value
+    : "pending";
+}
+
 function getCategoryForPostMode(mode: CommunityPostMode): CommunityCategory {
   if (mode === "writing") {
     return "故事写作";
@@ -280,10 +289,78 @@ function getPostMeta(detail?: Record<string, unknown>) {
   return normalizePostMeta(detail?.community_meta);
 }
 
-async function getModerationDetailFallback(postId: string) {
-  return getSiteSettingValue<Record<string, unknown>>(
-    getModerationDetailFallbackKey(postId),
-    {},
+async function loadModerationDetailFallbacks(postIds: string[]) {
+  if (!postIds.length) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  const keys = postIds.map((postId) => getModerationDetailFallbackKey(postId));
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("site_settings")
+    .select("setting_key, value")
+    .in("setting_key", keys)
+    .returns<Array<{ setting_key: string; value: Record<string, unknown> }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  const detailsByPostId = new Map<string, Record<string, unknown>>();
+
+  for (const row of data ?? []) {
+    const postId = row.setting_key.replace("community.moderation-detail.", "");
+    if (postId) {
+      detailsByPostId.set(postId, row.value ?? {});
+    }
+  }
+
+  return detailsByPostId;
+}
+
+function attachFallbackModerationDetail<T extends { id: string; moderation_detail?: Record<string, unknown> }>(
+  post: T,
+  fallbackDetailsByPostId: Map<string, Record<string, unknown>>,
+) {
+  if (post.moderation_detail && Object.keys(post.moderation_detail).length) {
+    return post;
+  }
+
+  const fallbackDetail = fallbackDetailsByPostId.get(post.id);
+
+  if (!fallbackDetail || !Object.keys(fallbackDetail).length) {
+    return post;
+  }
+
+  return {
+    ...post,
+    moderation_detail: fallbackDetail,
+  };
+}
+
+function needsFallbackModerationDetail(post: {
+  moderation_detail?: Record<string, unknown>;
+}) {
+  return !post.moderation_detail || !Object.keys(post.moderation_detail).length;
+}
+
+async function hydratePostsWithFallbackModerationDetail<
+  T extends { id: string; moderation_detail?: Record<string, unknown> },
+>(posts: T[]) {
+  const postIdsNeedingFallback = posts
+    .filter((post) => needsFallbackModerationDetail(post))
+    .map((post) => post.id);
+
+  if (!postIdsNeedingFallback.length) {
+    return posts;
+  }
+
+  const fallbackDetailsByPostId = await loadModerationDetailFallbacks(
+    postIdsNeedingFallback,
+  );
+
+  return posts.map((post) =>
+    attachFallbackModerationDetail(post, fallbackDetailsByPostId),
   );
 }
 
@@ -440,6 +517,12 @@ function resolveManualCreatorRank(post: { moderation_detail?: Record<string, unk
 function resolveCreatorStar(post: { moderation_detail?: Record<string, unknown> }) {
   const meta = getPostMeta(post.moderation_detail);
   return Boolean(meta.isCreatorStar);
+}
+
+function startOfToday() {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now.toISOString();
 }
 
 async function loadCommunityUsers(userIds: string[]) {
@@ -675,6 +758,38 @@ export async function createCommunityPost(input: CommunityPostInsert) {
   return fallbackResult.data as CommunityPostRow;
 }
 
+export async function countUserCommunityPostsSince(
+  userId: string,
+  sinceIso: string,
+  statuses: CommunityPostStatus[],
+) {
+  if (!statuses.length) {
+    return 0;
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const { count, error } = await supabaseAdmin
+    .from("community_posts")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", sinceIso)
+    .in("moderation_status", statuses);
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
+}
+
+export async function countTodayPublishedAttemptsByUser(userId: string) {
+  return countUserCommunityPostsSince(userId, startOfToday(), [
+    "pending",
+    "approved",
+    "rejected",
+  ]);
+}
+
 export async function getCommunityPostById(postId: string) {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -687,15 +802,9 @@ export async function getCommunityPostById(postId: string) {
     throw error;
   }
 
-  if (data && !data.moderation_detail) {
-    const fallbackModerationDetail = await getModerationDetailFallback(postId);
-
-    if (Object.keys(fallbackModerationDetail).length) {
-      return {
-        ...data,
-        moderation_detail: fallbackModerationDetail,
-      };
-    }
+  if (data && needsFallbackModerationDetail(data)) {
+    const [postWithFallbackDetail] = await hydratePostsWithFallbackModerationDetail([data]);
+    return postWithFallbackDetail;
   }
 
   return data;
@@ -800,6 +909,7 @@ export async function listApprovedCommunityPosts(
   options?: CommunityListOptions,
 ): Promise<ApprovedCommunityPost[]> {
   const supabaseAdmin = getSupabaseAdmin();
+  const shouldLoadFallbackDetail = true;
   const primaryResult = await supabaseAdmin
     .from("community_posts")
     .select(
@@ -869,10 +979,14 @@ export async function listApprovedCommunityPosts(
     return [];
   }
 
-  const userIds = [...new Set(posts.map((post) => post.user_id))];
+  const postsWithFallbackDetail = shouldLoadFallbackDetail
+    ? await hydratePostsWithFallbackModerationDetail(posts)
+    : posts;
+
+  const userIds = [...new Set(postsWithFallbackDetail.map((post) => post.user_id))];
   const { usersById, profilesById } = await loadCommunityUsers(userIds);
 
-  let enriched = posts.map((post) => ({
+  let enriched = postsWithFallbackDetail.map((post) => ({
     id: post.id,
     user_id: post.user_id,
     mode: resolvePostMode(post),
@@ -927,6 +1041,7 @@ export async function listUserCommunityPosts(
   userId: string,
 ): Promise<UserCommunityPost[]> {
   const supabaseAdmin = getSupabaseAdmin();
+  const shouldLoadFallbackDetail = true;
   const primaryResult = await supabaseAdmin
     .from("community_posts")
     .select(
@@ -993,8 +1108,14 @@ export async function listUserCommunityPosts(
     throw error;
   }
 
-  return (data ?? []).map((post) => ({
+  const posts = data ?? [];
+  const postsWithFallbackDetail = shouldLoadFallbackDetail
+    ? await hydratePostsWithFallbackModerationDetail(posts)
+    : posts;
+
+  return postsWithFallbackDetail.map((post) => ({
     ...post,
+    moderation_status: normalizePostStatus(post.moderation_status),
     mode: resolvePostMode(post),
     description: resolveDescription(post),
     view_count: resolveViewCount(post),
@@ -1003,13 +1124,25 @@ export async function listUserCommunityPosts(
   }));
 }
 
-export async function getApprovedCommunityPostDetail(
+export async function getCommunityPostDetailForViewer(
   postId: string,
   viewerUserId?: string | null,
+  options?: {
+    includeOwnerDrafts?: boolean;
+  },
 ): Promise<CommunityPostDetail | null> {
   const post = await getCommunityPostById(postId);
 
-  if (!post || post.moderation_status !== "approved") {
+  if (!post) {
+    return null;
+  }
+
+  const isOwner = Boolean(viewerUserId && post.user_id === viewerUserId);
+  const canView =
+    post.moderation_status === "approved" ||
+    (options?.includeOwnerDrafts && isOwner);
+
+  if (!canView) {
     return null;
   }
 
@@ -1039,7 +1172,19 @@ export async function getApprovedCommunityPostDetail(
     user_profiles: profilesById.get(post.user_id) ?? null,
     moderation_reason: post.moderation_reason ?? null,
     viewer_has_liked: viewerUserId ? likeUserIds.includes(viewerUserId) : false,
+    moderation_status: normalizePostStatus(post.moderation_status),
+    can_delete: isOwner,
+    can_edit_in_workshop: true,
   };
+}
+
+export async function getApprovedCommunityPostDetail(
+  postId: string,
+  viewerUserId?: string | null,
+): Promise<CommunityPostDetail | null> {
+  return getCommunityPostDetailForViewer(postId, viewerUserId, {
+    includeOwnerDrafts: false,
+  });
 }
 
 export async function toggleCommunityPostLike(postId: string, userId: string) {
@@ -1376,6 +1521,20 @@ export async function deleteCommunityPostPermanently(postId: string) {
   };
 }
 
+export async function deleteCommunityPostByAuthor(postId: string, userId: string) {
+  const post = await getCommunityPostById(postId);
+
+  if (!post) {
+    throw new Error("没有找到要删除的作品。");
+  }
+
+  if (post.user_id !== userId) {
+    throw new Error("你没有删除这份作品的权限。");
+  }
+
+  return deleteCommunityPostPermanently(postId);
+}
+
 export async function getCommunityOverview() {
   const posts = await listApprovedCommunityPosts();
   const creatorsMap = new Map<string, CommunityCreatorSummary>();
@@ -1481,6 +1640,7 @@ export async function listCommunityAdminRecords(input?: {
   moderationStatus?: CommunityPostStatus;
 }) {
   const supabaseAdmin = getSupabaseAdmin();
+  const shouldLoadFallbackDetail = true;
   const selectFields = [
     "id",
     "user_id",
@@ -1611,10 +1771,14 @@ export async function listCommunityAdminRecords(input?: {
     return [];
   }
 
-  const userIds = [...new Set(posts.map((post) => post.user_id))];
+  const postsWithFallbackDetail = shouldLoadFallbackDetail
+    ? await hydratePostsWithFallbackModerationDetail(posts)
+    : posts;
+
+  const userIds = [...new Set(postsWithFallbackDetail.map((post) => post.user_id))];
   const { usersById, profilesById } = await loadCommunityUsers(userIds);
 
-  return posts.map((post) => ({
+  return postsWithFallbackDetail.map((post) => ({
     id: post.id,
     user_id: post.user_id,
     mode: resolvePostMode(post),
