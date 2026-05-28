@@ -1587,7 +1587,6 @@ function WorkshopContent() {
   const [writingResult, setWritingResult] = useState("");
   const [drawingPrompt, setDrawingPrompt] = useState("");
   const [selectedCompositionGrade, setSelectedCompositionGrade] = useState("三年级");
-  const [selectedCompositionSemester, setSelectedCompositionSemester] = useState<"上学期" | "下学期">("上学期");
   const [speechText, setSpeechText] = useState("");
   const [speechVoice, setSpeechVoice] = useState<(typeof speechVoiceOptions)[number]["id"]>("alex");
   const [speechSpeed, setSpeechSpeed] = useState(1);
@@ -1677,8 +1676,7 @@ function WorkshopContent() {
   const selectedCompositionGroup =
     compositionTopicBank.find((item) => item.grade === selectedCompositionGrade) ??
     compositionTopicBank[2];
-  const selectedCompositionTopics =
-    selectedCompositionGroup.semesters[selectedCompositionSemester];
+  const compositionTopicsBySemester = selectedCompositionGroup.semesters;
   const activeShareMode: ShareableMode | null =
     isCodingMode || isWritingMode || isPaintingMode
       ? (activeMode as ShareableMode)
@@ -2291,9 +2289,12 @@ function WorkshopContent() {
     setWritingPrompt(prompt);
   };
 
-  const handleCompositionTopicClick = (topic: string) => {
+  const handleCompositionTopicClick = (
+    topic: string,
+    semester: "上学期" | "下学期",
+  ) => {
     setWritingPrompt(
-      `请按小学${selectedCompositionGrade}${selectedCompositionSemester}常见课内作文要求，帮我写一篇《${topic}》。要求：结构完整，有开头、经过和结尾；语言适合${selectedCompositionGrade}学生；内容具体，有细节描写和真情实感；不要写得太像模板；字数控制在适合这个年级的范围内。`,
+      `请按小学${selectedCompositionGrade}${semester}常见课内作文要求，帮我写一篇《${topic}》。要求：结构完整，有开头、经过和结尾；语言适合${selectedCompositionGrade}学生；内容具体，有细节描写和真情实感；不要写得太像模板；字数控制在适合这个年级的范围内。`,
     );
   };
 
@@ -3683,7 +3684,7 @@ function WorkshopContent() {
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 xl:grid-cols-[280px_minmax(420px,0.9fr)_minmax(720px,1.65fr)] xl:p-5 2xl:grid-cols-[300px_minmax(460px,0.92fr)_minmax(840px,1.9fr)]">
+          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 xl:grid-cols-[320px_minmax(500px,1.02fr)_minmax(760px,1.68fr)] xl:p-5 2xl:grid-cols-[350px_minmax(560px,1.06fr)_minmax(900px,1.86fr)]">
             <aside className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.96))] p-4 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
@@ -3701,7 +3702,7 @@ function WorkshopContent() {
                       key={tab.id}
                       type="button"
                       onClick={() => handleModeChange(tab.id)}
-                      className={`flex w-full items-center gap-4 rounded-[24px] border px-4 py-4 text-left transition ${
+                      className={`flex w-full items-center gap-4 rounded-[24px] border px-5 py-4 text-left transition ${
                         isActive
                           ? "border-[#7aa6ff] bg-white shadow-[0_18px_36px_rgba(125,211,252,0.14)]"
                           : "border-white/80 bg-white/70 shadow-[0_10px_24px_rgba(148,163,184,0.08)] hover:bg-white"
@@ -3719,10 +3720,10 @@ function WorkshopContent() {
                         />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[15px] font-black text-slate-700">
+                        <p className="text-[15px] font-black text-slate-700">
                           {tab.label}
                         </p>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">
+                        <p className="mt-1 text-[13px] leading-6 text-slate-400">
                           {tab.subtitle}
                         </p>
                       </div>
@@ -3740,20 +3741,22 @@ function WorkshopContent() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+              <div className="mt-4 rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="grid h-12 w-12 place-items-center rounded-[16px] bg-gradient-to-br from-[#efe4ff] to-[#dcecff] text-sm font-black text-[#6f6ad8]">
                       今日
                     </div>
                     <div>
-                      <p className="text-sm font-black text-[#4165c7]">
+                      <p className="whitespace-nowrap text-sm font-black text-[#4165c7]">
                         今日学习小目标
                       </p>
-                      <p className="mt-1 text-sm text-slate-500">{dailyGoalDescription}</p>
+                      <p className="mt-1 whitespace-nowrap text-sm text-slate-500">
+                        {dailyGoalDescription}
+                      </p>
                     </div>
                   </div>
-                  <p className="text-sm font-black text-[#5f84d8]">
+                  <p className="whitespace-nowrap text-sm font-black text-[#5f84d8]">
                     {cappedCompletedGoalCount}/{dailyGoalTarget}
                   </p>
                 </div>
@@ -3766,7 +3769,7 @@ function WorkshopContent() {
               </div>
             </aside>
 
-            <section className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,255,0.98))] p-5 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
+            <section className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,255,0.98))] p-6 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
                   创作区
@@ -3790,7 +3793,7 @@ function WorkshopContent() {
                       </div>
                     </div>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/90 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="rounded-[22px] border border-white/80 bg-white/90 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">主题灵感</p>
                       <div className="mt-4 grid grid-cols-2 gap-3">
                         {codingScenes.map((scene, index) => {
@@ -3811,7 +3814,7 @@ function WorkshopContent() {
                               <p className="text-sm font-black text-slate-700">
                                 {scene.title}
                               </p>
-                              <p className="mt-2 text-xs leading-6 text-slate-500">
+                              <p className="mt-2 pr-1 text-[12px] leading-6 text-slate-500">
                                 {scene.description}
                               </p>
                             </button>
@@ -3820,7 +3823,7 @@ function WorkshopContent() {
                       </div>
                     </div>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/90 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-white/80 bg-white/90 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <label
@@ -3839,7 +3842,7 @@ function WorkshopContent() {
                       <div className="relative">
                         <textarea
                           id="prompt"
-                          rows={11}
+                          rows={13}
                           value={promptText}
                           onChange={(event) => setPromptText(event.target.value)}
                           placeholder="输入你的想法或问题，告诉 AI 你想要什么..."
@@ -3872,7 +3875,7 @@ function WorkshopContent() {
                       </div>
                     </div>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/90 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-white/80 bg-white/90 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-[18px] bg-[#f7fbff] px-4 py-4">
@@ -3911,38 +3914,10 @@ function WorkshopContent() {
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      {writingCapsules.map((item, index) => {
-                        const capsuleClasses = [
-                          "from-[#fff7e3] to-[#fff0cb]",
-                          "from-[#fff2f1] to-[#ffe7ec]",
-                          "from-[#eefaf5] to-[#e2f4ed]",
-                        ];
-
-                        return (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => handleWritingCapsuleClick(item.prompt)}
-                            className={`w-full rounded-[20px] bg-gradient-to-br ${capsuleClasses[index]} px-4 py-4 text-left shadow-[0_10px_24px_rgba(217,119,6,0.08)] transition hover:-translate-y-0.5`}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-sm font-black text-amber-900">
-                                {item.label}
-                              </p>
-                              <span className="rounded-full bg-white/70 px-3 py-1 text-[11px] font-bold text-amber-600">
-                                {item.note}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,250,233,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
+                    <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,250,233,0.98))] p-5 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
                       <p className="text-[15px] font-black text-amber-900">课内作文题库</p>
                       <p className="mt-1 text-xs leading-6 text-amber-600/80">
-                        常见教材作文主题，点题目自动填入写作需求。
+                        常见教材作文主题和常用写作任务都放在这里，切换年级后，上下学期内容会同时显示。
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {compositionTopicBank.map((group) => (
@@ -3960,37 +3935,72 @@ function WorkshopContent() {
                           </button>
                         ))}
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        {(["上学期", "下学期"] as const).map((semester) => (
-                          <button
-                            key={semester}
-                            type="button"
-                            onClick={() => setSelectedCompositionSemester(semester)}
-                            className={`rounded-[16px] px-3 py-2 text-xs font-black transition ${
-                              selectedCompositionSemester === semester
-                                ? "bg-[#fff0c8] text-amber-900"
-                                : "bg-white text-amber-600"
-                            }`}
-                          >
-                            {semester}
-                          </button>
-                        ))}
+                      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                        <div className="space-y-3">
+                          <div className="rounded-[18px] bg-[#fff4d8] px-4 py-3 text-sm font-black text-amber-900">
+                            上学期
+                          </div>
+                          <div className="grid gap-2">
+                            {compositionTopicsBySemester["上学期"].map((topic) => (
+                              <button
+                                key={`top-${topic}`}
+                                type="button"
+                                onClick={() => handleCompositionTopicClick(topic, "上学期")}
+                                className="rounded-[16px] border border-[#f7e8b7] bg-white px-3 py-2 text-left text-xs font-bold leading-5 text-amber-900 transition hover:-translate-y-0.5 hover:bg-[#fff8e9]"
+                              >
+                                {topic}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="rounded-[18px] bg-[#fff4d8] px-4 py-3 text-sm font-black text-amber-900">
+                            下学期
+                          </div>
+                          <div className="grid gap-2">
+                            {compositionTopicsBySemester["下学期"].map((topic) => (
+                              <button
+                                key={`bottom-${topic}`}
+                                type="button"
+                                onClick={() => handleCompositionTopicClick(topic, "下学期")}
+                                className="rounded-[16px] border border-[#f7e8b7] bg-white px-3 py-2 text-left text-xs font-bold leading-5 text-amber-900 transition hover:-translate-y-0.5 hover:bg-[#fff8e9]"
+                              >
+                                {topic}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-3 grid gap-2">
-                        {selectedCompositionTopics.map((topic) => (
-                          <button
-                            key={topic}
-                            type="button"
-                            onClick={() => handleCompositionTopicClick(topic)}
-                            className="rounded-[16px] border border-[#f7e8b7] bg-white px-3 py-2 text-left text-xs font-bold leading-5 text-amber-900 transition hover:-translate-y-0.5 hover:bg-[#fff8e9]"
-                          >
-                            {topic}
-                          </button>
-                        ))}
+
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                        {writingCapsules.map((item, index) => {
+                          const capsuleClasses = [
+                            "from-[#fff7e3] to-[#fff0cb]",
+                            "from-[#fff2f1] to-[#ffe7ec]",
+                            "from-[#eefaf5] to-[#e2f4ed]",
+                          ];
+
+                          return (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => handleWritingCapsuleClick(item.prompt)}
+                              className={`rounded-[18px] bg-gradient-to-br ${capsuleClasses[index]} px-4 py-4 text-left shadow-[0_10px_24px_rgba(217,119,6,0.08)] transition hover:-translate-y-0.5`}
+                            >
+                              <p className="text-sm font-black text-amber-900">
+                                {item.label}
+                              </p>
+                              <p className="mt-2 text-[11px] font-bold text-amber-600">
+                                {item.note}
+                              </p>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-5 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                         <label
                           htmlFor="writing-prompt"
@@ -4002,7 +4012,7 @@ function WorkshopContent() {
                       </div>
                       <textarea
                         id="writing-prompt"
-                        rows={12}
+                        rows={13}
                         value={writingPrompt}
                         onChange={(event) => setWritingPrompt(event.target.value)}
                         placeholder="输入你的主题和想法..."
@@ -4020,7 +4030,7 @@ function WorkshopContent() {
                       {isWritingLoading ? "正在创作" : "开始创作"}
                     </button>
 
-                    <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-5 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
                       <p className="text-[15px] font-black text-amber-900">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-[18px] bg-[#fff8e9] px-4 py-4">
@@ -4048,7 +4058,7 @@ function WorkshopContent() {
                   </div>
                 ) : isPaintingMode ? (
                   <div className="space-y-4">
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <div className="flex items-start gap-3">
                         <div>
                           <p className="text-[15px] font-black text-slate-700">绘画创作台</p>
@@ -4095,7 +4105,7 @@ function WorkshopContent() {
                       </div>
                       <textarea
                         id="drawing-prompt"
-                        rows={12}
+                        rows={13}
                         value={drawingPrompt}
                         onChange={(event) => setDrawingPrompt(event.target.value)}
                         placeholder="输入你的绘画描述..."
@@ -4154,7 +4164,7 @@ function WorkshopContent() {
                       {isDrawing ? "正在作画" : "开始作画"}
                     </button>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-[18px] bg-[#fff7fb] px-4 py-4">
@@ -4182,7 +4192,7 @@ function WorkshopContent() {
                   </div>
                 ) : isSpeechMode ? (
                   <div className="space-y-4">
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <div className="flex items-start gap-3">
                         <div>
                           <p className="text-[15px] font-black text-slate-700">语音合成台</p>
@@ -4221,7 +4231,7 @@ function WorkshopContent() {
                       </div>
                       <textarea
                         id="speech-text"
-                        rows={9}
+                        rows={11}
                         value={speechText}
                         onChange={(event) => setSpeechText(event.target.value)}
                         placeholder="输入要合成为语音的文字..."
@@ -4287,7 +4297,7 @@ function WorkshopContent() {
                       {isSpeechGenerating ? "正在合成语音" : "生成语音"}
                     </button>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-[18px] bg-[#f5f3ff] px-4 py-4">
@@ -4315,7 +4325,7 @@ function WorkshopContent() {
                   </div>
                 ) : isVideoMode ? (
                   <div className="space-y-4">
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <div className="flex items-start gap-3">
                         <div>
                           <p className="text-[15px] font-black text-slate-700">视频故事台</p>
@@ -4383,7 +4393,7 @@ function WorkshopContent() {
                       </div>
                       <textarea
                         id="video-prompt"
-                        rows={12}
+                        rows={13}
                         value={videoPrompt}
                         onChange={(event) => setVideoPrompt(event.target.value)}
                         placeholder="先选模板，或直接输入想生成的视频内容..."
@@ -4401,7 +4411,7 @@ function WorkshopContent() {
                       {isVideoGenerating ? "正在生成视频" : "开始生成视频"}
                     </button>
 
-                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                    <div className="mt-5 rounded-[22px] border border-white/80 bg-white/92 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-[18px] bg-[#eefcff] px-4 py-4">
