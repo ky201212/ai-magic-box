@@ -68,6 +68,7 @@ export type AiModelPresetRecord = {
   description: string;
   badge: string;
   image_size?: string;
+  supportsImageEditing?: boolean;
 };
 
 export type AiSecretStatusRecord = {
@@ -391,6 +392,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         image_size: "1024x1024",
         creditEnabled: true,
         creditCost: 5,
+        supportsImageEditing: false,
       },
     },
     {
@@ -439,7 +441,27 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
       model: "FunAudioLLM/SenseVoiceSmall",
       system_prompt: "请将儿童语音内容准确识别为简体中文文本。",
       is_enabled: true,
-      extra_payload: {},
+      extra_payload: {
+        creditEnabled: false,
+        creditCost: 0,
+      },
+    },
+    {
+      mode_key: "promptOptimize",
+      mode_name: "提示词优化",
+      provider: "mimo",
+      endpoint_url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+      api_key_env: "AI_API_KEY",
+      model: "mimo-v2.5-pro",
+      system_prompt:
+        "你是一位提示词润色助手。请把用户输入改写成更清晰、具体、结构化、更容易被 AI 正确理解的中文提示词。保留原本意图，不要编造不存在的需求，不要输出解释，只返回优化后的最终提示词正文。",
+      is_enabled: true,
+      extra_payload: {
+        creditEnabled: false,
+        creditCost: 0,
+        reasoningEffort: "low",
+        maxCompletionTokens: 600,
+      },
     },
   ];
 
@@ -480,6 +502,7 @@ export async function saveAiModelPresets(input: {
     description: preset.description.trim(),
     badge: preset.badge.trim(),
     image_size: preset.image_size?.trim() || undefined,
+    supportsImageEditing: preset.supportsImageEditing === true,
   }));
 
   await upsertSiteSettings([

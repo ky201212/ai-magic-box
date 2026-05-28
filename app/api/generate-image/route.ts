@@ -20,6 +20,11 @@ type SiliconFlowImageResponse = {
   };
 };
 
+type GenerateImageRequestBody = {
+  prompt?: string;
+  referenceImages?: string[];
+};
+
 function mapUpstreamStatusToGatewayStatus(status: number) {
   if (status === 401 || status === 403) {
     return 502;
@@ -66,6 +71,7 @@ function buildImageRequestBody(
   model: string,
   prompt: string,
   imageSize: string,
+  referenceImages: string[],
 ) {
   if (shouldUseOpenAiImagePayload(endpointUrl, model)) {
     return {
@@ -73,6 +79,9 @@ function buildImageRequestBody(
       prompt,
       size: imageSize,
       n: 1,
+      ...(referenceImages[0] ? { image: referenceImages[0] } : {}),
+      ...(referenceImages[1] ? { image2: referenceImages[1] } : {}),
+      ...(referenceImages[2] ? { image3: referenceImages[2] } : {}),
     };
   }
 
@@ -80,6 +89,9 @@ function buildImageRequestBody(
     model,
     prompt,
     image_size: imageSize,
+    ...(referenceImages[0] ? { image: referenceImages[0] } : {}),
+    ...(referenceImages[1] ? { image2: referenceImages[1] } : {}),
+    ...(referenceImages[2] ? { image3: referenceImages[2] } : {}),
   };
 }
 
@@ -145,7 +157,8 @@ function buildImageErrorMessage(rawText: string, model: string, endpointUrl: str
 
 export async function POST(request: Request) {
   try {
-    const { prompt } = (await request.json()) as { prompt?: string };
+    const { prompt, referenceImages } =
+      (await request.json()) as GenerateImageRequestBody;
 
     if (!prompt?.trim()) {
       return NextResponse.json(
@@ -156,6 +169,18 @@ export async function POST(request: Request) {
 
     const aiConfig = await resolveAiModeConfig("painting");
     const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
+    const supportsImageEditing =
+      aiConfig.extraPayload.supportsImageEditing === true;
+    const normalizedReferenceImages = Array.isArray(referenceImages)
+      ? referenceImages
+          .filter(
+            (item): item is string =>
+              typeof item === "string" &&
+              item.trim().length > 0 &&
+              /^data:image\/|^https?:\/\//i.test(item.trim()),
+          )
+          .slice(0, 3)
+      : [];
     const imageSize =
       typeof aiConfig.extraPayload.image_size === "string"
         ? aiConfig.extraPayload.image_size
@@ -178,6 +203,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
         { status: 500 },
+      );
+    }
+
+    if (normalizedReferenceImages.length > 0 && !supportsImageEditing) {
+      return NextResponse.json(
+        { error: "当前绘画模型未开启图像编辑能力，请只使用文生图，或去后台勾选支持图像编辑。" },
+        { status: 400 },
       );
     }
 
@@ -223,6 +255,7 @@ export async function POST(request: Request) {
           aiConfig.model,
           prompt,
           imageSize,
+          normalizedReferenceImages,
         ),
       ),
     });

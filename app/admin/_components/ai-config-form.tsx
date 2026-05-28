@@ -33,6 +33,7 @@ const MODE_OPTIONS = [
   { key: "video", label: "AI视频" },
   { key: "speech", label: "AI语音" },
   { key: "transcribe", label: "语音识别" },
+  { key: "promptOptimize", label: "提示词优化" },
 ] as const;
 
 const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
@@ -135,6 +136,33 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     description: "当前站点已适配的 AI 绘画模板，返回图片地址可直接展示。",
     badge: "绘画专用",
     image_size: "1024x1024",
+    supportsImageEditing: false,
+  },
+  {
+    id: "qwen-image-edit",
+    mode_key: "painting",
+    label: "Qwen Image Edit",
+    provider: "SiliconFlow",
+    endpoint_url: "https://api.siliconflow.cn/v1/images/generations",
+    api_key_env: "SILICONFLOW_API_KEY",
+    model: "Qwen/Qwen-Image-Edit",
+    description: "适合参考图编辑、图生图和细节改图的 Qwen 图像编辑模型。",
+    badge: "图像编辑",
+    image_size: "1024x1024",
+    supportsImageEditing: true,
+  },
+  {
+    id: "qwen-image-edit-2509",
+    mode_key: "painting",
+    label: "Qwen Image Edit 2509",
+    provider: "SiliconFlow",
+    endpoint_url: "https://api.siliconflow.cn/v1/images/generations",
+    api_key_env: "SILICONFLOW_API_KEY",
+    model: "Qwen/Qwen-Image-Edit-2509",
+    description: "Qwen 图像编辑系列的新版本模板，适合上传参考图后做高质量改图。",
+    badge: "图像编辑",
+    image_size: "1024x1024",
+    supportsImageEditing: true,
   },
   {
     id: "siliconflow-wan22-t2v",
@@ -169,6 +197,28 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     model: "FunAudioLLM/SenseVoiceSmall",
     description: "当前站点已适配的语音识别模板，适合语音转文字。",
     badge: "识别专用",
+  },
+  {
+    id: "mimo-prompt-optimize",
+    mode_key: "promptOptimize",
+    label: "Mimo 提示词优化",
+    provider: "小米 Mimo",
+    endpoint_url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    api_key_env: "AI_API_KEY",
+    model: "mimo-v2.5-pro",
+    description: "用于把用户原始描述优化成更适合 AI 理解的提示词。",
+    badge: "优化专用",
+  },
+  {
+    id: "qlcode-gpt-5.5-prompt-optimize",
+    mode_key: "promptOptimize",
+    label: "GPT-5.5 提示词优化",
+    provider: "OpenAI",
+    endpoint_url: "https://api.qlcodeapi.com/v1",
+    api_key_env: "AI_API_KEY",
+    model: "gpt-5.5",
+    description: "适合提示词润色、结构化改写和表达增强。",
+    badge: "高阶优化",
   },
 ];
 
@@ -215,6 +265,7 @@ function normalizePresets(initialPresets: AiModelPresetRecord[]) {
     return initialPresets.map((preset) => ({
       ...preset,
       image_size: preset.image_size?.trim() || undefined,
+      supportsImageEditing: preset.supportsImageEditing === true,
     }));
   }
 
@@ -232,6 +283,7 @@ function normalizePresetForSave(preset: AiModelPresetRecord): AiModelPresetRecor
     description: preset.description.trim(),
     badge: preset.badge.trim() || "新模板",
     image_size: preset.image_size?.trim() || undefined,
+    supportsImageEditing: preset.supportsImageEditing === true,
   };
 }
 
@@ -434,6 +486,11 @@ export function AiConfigForm({
           extra_payload: {
             ...config.extra_payload,
             aiPresetId: preset.id,
+            ...(preset.mode_key === "painting"
+              ? {
+                  supportsImageEditing: preset.supportsImageEditing === true,
+                }
+              : {}),
             ...(preset.image_size
               ? {
                   image_size:
@@ -499,6 +556,23 @@ export function AiConfigForm({
                 extra_payload: {
                   ...config.extra_payload,
                   image_size: value,
+                },
+              }
+            : config,
+        ),
+      );
+    }
+
+    if (field === "supportsImageEditing") {
+      setConfigs((current) =>
+        current.map((config) =>
+          config.mode_key === targetPresetMode &&
+          config.extra_payload.aiPresetId === presetId
+            ? {
+                ...config,
+                extra_payload: {
+                  ...config.extra_payload,
+                  supportsImageEditing: value === "true",
                 },
               }
             : config,
@@ -1453,6 +1527,30 @@ export function AiConfigForm({
                     </div>
                   </div>
 
+                  {config.mode_key === "painting" ? (
+                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                      <label className="flex items-center gap-3 rounded-[22px] bg-slate-50 px-4 py-4 text-sm font-bold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={config.extra_payload.supportsImageEditing === true}
+                          onChange={(event) =>
+                            handleExtraPayloadChange(
+                              config.mode_key,
+                              "supportsImageEditing",
+                              event.target.checked,
+                            )
+                          }
+                          className="h-4 w-4"
+                        />
+                        这个绘画模型支持图像编辑
+                      </label>
+
+                      <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-500">
+                        勾选后，用户端 AI 绘画会出现“上传参考图”入口，可以进行图生图或局部参考编辑；不勾选时，只允许文生图。
+                      </div>
+                    </div>
+                  ) : null}
+
                   <label className="mt-5 block text-sm font-bold text-slate-600">
                     系统提示词
                     <textarea
@@ -1700,6 +1798,23 @@ export function AiConfigForm({
                                     }
                                     className="mt-2 h-12 w-full rounded-[16px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
                                   />
+                                </label>
+                              )}
+                              {preset.mode_key === "painting" && (
+                                <label className="flex items-center gap-3 rounded-[16px] border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-600 xl:col-span-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={preset.supportsImageEditing === true}
+                                    onChange={(event) =>
+                                      handlePresetFieldChange(
+                                        preset.id,
+                                        "supportsImageEditing",
+                                        String(event.target.checked),
+                                      )
+                                    }
+                                    className="h-4 w-4"
+                                  />
+                                  这个模板支持图像编辑
                                 </label>
                               )}
                               <label className="block text-sm font-bold text-slate-600 xl:col-span-2">

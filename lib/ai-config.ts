@@ -22,7 +22,7 @@ const modeFallbacks: Record<
     apiKeyEnv: "AI_API_KEY",
     model: "mimo-v2.5-pro",
     systemPrompt:
-        "你是一个充满童心的少儿编程导师和前端魔法师。请根据用户输入的魔法咒语，生成一个可以在浏览器直接运行的单文件 HTML 代码。里面必须包含必要的 CSS，并通过 CDN 引入 Tailwind CSS，还要包含 JavaScript 交互。界面风格要可爱、充满童趣，宽度必须 100% 适配手机屏幕。核心要求：生成的页面内容如果较长，必须允许用户垂直滑动浏览。绝对禁止在 body 或 html 标签上使用 overflow: hidden 或固定 100vh 高度从而阻断用户滚动。重要要求：只返回纯 HTML 代码，绝对不要包含任何 Markdown 格式符号，也不要任何解释性文字。",
+        "你是一个充满童心的少儿编程导师和前端魔法师。请根据用户输入的魔法咒语，生成一个可以在浏览器直接运行的单文件 HTML 代码。里面必须包含必要的 CSS，并通过 CDN 引入 Tailwind CSS，还要包含 JavaScript 交互。界面风格要可爱、充满童趣，宽度必须 100% 适配手机屏幕。核心要求：生成的页面内容如果较长，必须允许用户垂直滑动浏览。绝对禁止在 body 或 html 标签上使用 overflow: hidden 或固定 100vh 高度从而阻断用户滚动。额外强制要求：生成的页面必须把当前预览视口完整铺满，html、body、根容器都要使用 width:100% 和 min-height:100vh，主界面必须撑满整个可见区域；禁止再额外绘制一个居中的“手机外框”、“设备边框”、“小屏幕容器”或固定宽度的小卡片来包裹主要内容；禁止使用 max-width 把整个作品限制成中间一小块；默认让主要内容贴合整个预览区域展示。重要要求：只返回纯 HTML 代码，绝对不要包含任何 Markdown 格式符号，也不要任何解释性文字。",
     isEnabled: true,
     extraPayload: {
       reasoningEffort: "none",
@@ -53,6 +53,7 @@ const modeFallbacks: Record<
       image_size: "1024x1024",
       creditEnabled: true,
       creditCost: 5,
+      supportsImageEditing: false,
     },
   },
   video: {
@@ -93,6 +94,20 @@ const modeFallbacks: Record<
     systemPrompt: "请将儿童语音内容准确识别为简体中文文本。",
     isEnabled: true,
     extraPayload: {},
+  },
+  promptOptimize: {
+    endpointUrl:
+      process.env.AI_API_URL ??
+      "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    apiKeyEnv: "AI_API_KEY",
+    model: "mimo-v2.5-pro",
+    systemPrompt:
+      "你是一位提示词润色助手。请把用户输入改写成更清晰、具体、结构化、更容易被 AI 正确理解的中文提示词。保留原本意图，不要编造不存在的需求，不要输出解释，只返回优化后的最终提示词正文。",
+    isEnabled: true,
+    extraPayload: {
+      reasoningEffort: "low",
+      maxCompletionTokens: 600,
+    },
   },
 };
 
@@ -194,7 +209,14 @@ function resolveSpeechEndpoint(endpointUrl: string) {
 }
 
 export async function resolveAiModeConfig(
-  modeKey: "coding" | "writing" | "painting" | "video" | "speech" | "transcribe",
+  modeKey:
+    | "coding"
+    | "writing"
+    | "painting"
+    | "video"
+    | "speech"
+    | "transcribe"
+    | "promptOptimize",
 ): Promise<ResolvedAiModeConfig> {
   const fallback = modeFallbacks[modeKey];
 

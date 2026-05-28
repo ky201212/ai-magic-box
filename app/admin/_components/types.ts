@@ -42,6 +42,7 @@ export type AiModelPresetRecord = {
   description: string;
   badge: string;
   image_size?: string;
+  supportsImageEditing?: boolean;
 };
 
 export type AiSecretStatusRecord = {

@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type PointerEvent,
 } from "react";
 
@@ -207,6 +208,18 @@ const modeTabs = [
 
 type ModeId = (typeof modeTabs)[number]["id"];
 type ShareableMode = Extract<ModeId, "coding" | "writing" | "painting">;
+type PromptTarget = "coding" | "writing" | "painting" | "speech" | "video";
+
+type AiCapabilitiesMap = Partial<
+  Record<
+    "coding" | "writing" | "painting" | "video" | "speech" | "transcribe" | "promptOptimize",
+    {
+      isEnabled: boolean;
+      modeName: string;
+      extraPayload: Record<string, unknown>;
+    }
+  >
+>;
 
 type ShareCropSelection = {
   left: number;
@@ -1583,6 +1596,7 @@ function WorkshopContent() {
   const [videoSpeedMode, setVideoSpeedMode] = useState<"fast" | "quality">("fast");
   const [videoTaskIdInput, setVideoTaskIdInput] = useState("");
   const [isVideoTaskLookupOpen, setIsVideoTaskLookupOpen] = useState(false);
+  const [aiCapabilities, setAiCapabilities] = useState<AiCapabilitiesMap>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1590,12 +1604,17 @@ function WorkshopContent() {
   const [isVideoGenerating, setIsVideoGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingTarget, setRecordingTarget] = useState<PromptTarget>("coding");
+  const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
+  const [optimizingTarget, setOptimizingTarget] = useState<PromptTarget>("coding");
   const [voiceError, setVoiceError] = useState("");
+  const [optimizeError, setOptimizeError] = useState("");
   const [writingError, setWritingError] = useState("");
   const [generatedCode, setGeneratedCode] = useState(defaultPreviewHtml);
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
   const [generatedSpeechUrl, setGeneratedSpeechUrl] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
+  const [drawingReferenceImages, setDrawingReferenceImages] = useState<string[]>([]);
   const [drawingError, setDrawingError] = useState("");
   const [speechError, setSpeechError] = useState("");
   const [videoError, setVideoError] = useState("");
@@ -1650,6 +1669,11 @@ function WorkshopContent() {
   const isPaintingMode = activeMode === "painting";
   const isSpeechMode = activeMode === "music";
   const isVideoMode = activeMode === "video";
+  const transcribeEnabled = aiCapabilities.transcribe?.isEnabled !== false;
+  const promptOptimizeEnabled =
+    aiCapabilities.promptOptimize?.isEnabled !== false;
+  const paintingSupportsImageEditing =
+    aiCapabilities.painting?.extraPayload?.supportsImageEditing === true;
   const selectedCompositionGroup =
     compositionTopicBank.find((item) => item.grade === selectedCompositionGrade) ??
     compositionTopicBank[2];
@@ -1710,6 +1734,58 @@ function WorkshopContent() {
     setLoginPromptMessage(message);
   };
 
+  const getPromptValueByTarget = (target: PromptTarget) => {
+    if (target === "coding") {
+      return promptText;
+    }
+
+    if (target === "writing") {
+      return writingPrompt;
+    }
+
+    if (target === "painting") {
+      return drawingPrompt;
+    }
+
+    if (target === "speech") {
+      return speechText;
+    }
+
+    return videoPrompt;
+  };
+
+  const setPromptValueByTarget = (target: PromptTarget, value: string) => {
+    if (target === "coding") {
+      setPromptText(value);
+      return;
+    }
+
+    if (target === "writing") {
+      setWritingPrompt(value);
+      return;
+    }
+
+    if (target === "painting") {
+      setDrawingPrompt(value);
+      return;
+    }
+
+    if (target === "speech") {
+      setSpeechText(value);
+      return;
+    }
+
+    setVideoPrompt(value);
+  };
+
+  const appendPromptValueByTarget = (target: PromptTarget, value: string) => {
+    const currentValue = getPromptValueByTarget(target).trim();
+    setPromptValueByTarget(
+      target,
+      currentValue ? `${currentValue}\n${value}` : value,
+    );
+  };
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       try {
@@ -1739,6 +1815,38 @@ function WorkshopContent() {
 
     return () => {
       window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAiCapabilities = async () => {
+      try {
+        const response = await fetch("/api/ai-capabilities", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as {
+          capabilities?: AiCapabilitiesMap;
+        };
+
+        if (!cancelled && data.capabilities) {
+          setAiCapabilities(data.capabilities);
+        }
+      } catch {
+        window.console.warn("AI 能力配置读取失败");
+      }
+    };
+
+    void loadAiCapabilities();
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -2444,7 +2552,7 @@ function WorkshopContent() {
     setIsShareCropDragging(true);
   };
 
-  const transcribeAudio = async (audioBlob: Blob) => {
+  const transcribeAudio = async (audioBlob: Blob, target: PromptTarget) => {
     const formData = new FormData();
     formData.append("file", audioBlob, "audio.webm");
 
@@ -2466,15 +2574,15 @@ function WorkshopContent() {
     }
 
     const recognizedText = data.text;
-
-    setPromptText((currentText) =>
-      currentText.trim()
-        ? `${currentText}\n${recognizedText}`
-        : recognizedText,
-    );
+    appendPromptValueByTarget(target, recognizedText);
   };
 
-  const handleVoiceMagic = async () => {
+  const handleVoiceMagic = async (target: PromptTarget) => {
+    if (!transcribeEnabled) {
+      setVoiceError("当前站点暂未开启语音识别功能。");
+      return;
+    }
+
     if (isTranscribing) {
       return;
     }
@@ -2488,6 +2596,8 @@ function WorkshopContent() {
 
     try {
       setVoiceError("");
+      setOptimizeError("");
+      setRecordingTarget(target);
       recordedChunksRef.current = [];
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -2524,7 +2634,7 @@ function WorkshopContent() {
         }
 
         try {
-          await transcribeAudio(audioBlob);
+          await transcribeAudio(audioBlob, target);
         } catch (error) {
           setVoiceError(
             error instanceof Error
@@ -2547,6 +2657,166 @@ function WorkshopContent() {
       mediaStreamRef.current = null;
     }
   };
+
+  const handleOptimizePrompt = async (target: PromptTarget) => {
+    if (!promptOptimizeEnabled) {
+      setOptimizeError("当前站点暂未开启提示词优化功能。");
+      return;
+    }
+
+    const sourceText = getPromptValueByTarget(target).trim();
+
+    if (!sourceText) {
+      setOptimizeError("请先输入一点内容，再来优化提示词。");
+      return;
+    }
+
+    setIsOptimizingPrompt(true);
+    setOptimizingTarget(target);
+    setOptimizeError("");
+    setVoiceError("");
+
+    try {
+      const response = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: sourceText,
+        }),
+      });
+      const data = (await response.json()) as {
+        optimizedPrompt?: string;
+        error?: string;
+        remainingCredits?: number;
+      };
+
+      if (response.status === 401) {
+        showLoginPrompt(
+          "登录状态需要重新确认，这次提示词优化还没有完成。你刚刚写的内容已经保留。",
+        );
+        return;
+      }
+
+      if (typeof data.remainingCredits === "number") {
+        setMagicCredits(data.remainingCredits);
+      }
+
+      if (!response.ok || !data.optimizedPrompt) {
+        setOptimizeError(data.error ?? "提示词优化失败，请稍后再试。");
+        return;
+      }
+
+      setPromptValueByTarget(target, data.optimizedPrompt);
+    } catch {
+      setOptimizeError("提示词优化失败，请稍后再试。");
+    } finally {
+      setIsOptimizingPrompt(false);
+    }
+  };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error("图片读取失败"));
+      };
+      reader.onerror = () => reject(new Error("图片读取失败"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleDrawingReferenceUpload = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(event.target.files ?? []).slice(0, 3);
+
+    if (!files.length) {
+      return;
+    }
+
+    try {
+      const images = await Promise.all(files.map(fileToDataUrl));
+      setDrawingReferenceImages(images);
+      setDrawingError("");
+    } catch {
+      setDrawingError("参考图读取失败，请换一张图片再试。");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const renderPromptAssistTools = (target: PromptTarget) => (
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        onClick={() => handleVoiceMagic(target)}
+        disabled={isTranscribing || !transcribeEnabled}
+        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold shadow-[0_10px_24px_rgba(148,163,184,0.12)] transition ${
+          isRecording && recordingTarget === target
+            ? "animate-pulse bg-[#ffd7df] text-[#bf4d74]"
+            : isTranscribing && recordingTarget === target
+              ? "bg-[#fff2cf] text-[#b67e18]"
+              : "bg-gradient-to-r from-[#eef3ff] via-[#fff0f5] to-[#fff7d8] text-slate-600 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+        }`}
+      >
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-white/80 text-[12px]">
+          {isRecording && recordingTarget === target
+            ? "停"
+            : isTranscribing && recordingTarget === target
+              ? "识"
+              : "录"}
+        </span>
+        {isRecording && recordingTarget === target
+          ? "停止并识别"
+          : isTranscribing && recordingTarget === target
+            ? "正在识别"
+            : "语音转文字"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleOptimizePrompt(target)}
+        disabled={isOptimizingPrompt || !promptOptimizeEnabled}
+        className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-[0_10px_24px_rgba(148,163,184,0.12)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-[#f4f7ff] text-[12px] text-[#6c79df]">
+          优
+        </span>
+        {isOptimizingPrompt && optimizingTarget === target
+          ? "正在优化"
+          : "优化提示词"}
+      </button>
+    </div>
+  );
+
+  const renderPromptAssistFeedback = (target: PromptTarget) => (
+    <>
+      {((isRecording && recordingTarget === target) ||
+        (isTranscribing && recordingTarget === target)) && (
+        <div className="mt-3 rounded-[18px] bg-white/92 px-4 py-3 text-xs font-bold text-[#cf6f8b] shadow-[0_8px_20px_rgba(148,163,184,0.12)]">
+          {isRecording ? "正在聆听" : "正在转成文字"}
+        </div>
+      )}
+
+      {voiceError && recordingTarget === target && (
+        <div className="mt-3 rounded-[18px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
+          {voiceError}
+        </div>
+      )}
+
+      {optimizeError && optimizingTarget === target && (
+        <div className="mt-3 rounded-[18px] bg-[#fff8e8] px-4 py-3 text-sm font-bold text-[#c5871f]">
+          {optimizeError}
+        </div>
+      )}
+    </>
+  );
 
   const handleGenerate = async () => {
     if (!promptText.trim()) {
@@ -2878,6 +3148,10 @@ function WorkshopContent() {
       return;
     }
 
+    if (!paintingSupportsImageEditing && drawingReferenceImages.length) {
+      setDrawingReferenceImages([]);
+    }
+
     setGeneratedImageUrl("");
     setDrawingError("");
     setShareMessage("");
@@ -2893,6 +3167,7 @@ function WorkshopContent() {
         },
         body: JSON.stringify({
           prompt: drawingPrompt,
+          referenceImages: drawingReferenceImages,
         }),
       });
 
@@ -3204,8 +3479,8 @@ function WorkshopContent() {
         <div className="absolute bottom-[-60px] right-[12%] h-96 w-96 rounded-full bg-[#cfe0ff]/35 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1700px] px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5">
-        <section className="flex min-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
+      <div className="relative flex min-h-screen w-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4 lg:py-4">
+        <section className="flex min-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
             <div className="flex min-w-0 items-center gap-4">
               <Image
@@ -3408,7 +3683,7 @@ function WorkshopContent() {
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 lg:grid-cols-[320px_420px_minmax(0,1fr)] lg:p-5">
+          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 xl:grid-cols-[280px_minmax(420px,0.9fr)_minmax(720px,1.65fr)] xl:p-5 2xl:grid-cols-[300px_minmax(460px,0.92fr)_minmax(840px,1.9fr)]">
             <aside className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.96))] p-4 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
@@ -3558,27 +3833,7 @@ function WorkshopContent() {
                             把内容、互动方式和语气写清楚。
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={handleVoiceMagic}
-                          disabled={isTranscribing}
-                          className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold shadow-[0_10px_24px_rgba(148,163,184,0.12)] transition ${
-                            isRecording
-                              ? "animate-pulse bg-[#ffd7df] text-[#bf4d74]"
-                              : isTranscribing
-                                ? "bg-[#fff2cf] text-[#b67e18]"
-                                : "bg-gradient-to-r from-[#eef3ff] via-[#fff0f5] to-[#fff7d8] text-slate-600 hover:-translate-y-0.5"
-                          }`}
-                        >
-                          <span className="grid h-6 w-6 place-items-center rounded-full bg-white/80 text-[12px]">
-                            {isRecording ? "停" : isTranscribing ? "识" : "录"}
-                          </span>
-                          {isRecording
-                            ? "停止并识别"
-                            : isTranscribing
-                              ? "正在识别"
-                              : "语音施法"}
-                        </button>
+                        {renderPromptAssistTools("coding")}
                       </div>
 
                       <div className="relative">
@@ -3590,18 +3845,9 @@ function WorkshopContent() {
                           placeholder="输入你的想法或问题，告诉 AI 你想要什么..."
                           className="w-full resize-none rounded-[22px] border border-[#d7e6ff] bg-[#fbfdff] px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(219,234,254,0.55)]"
                         />
-                        {(isRecording || isTranscribing) && (
-                          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-white/92 px-3 py-1 text-xs font-bold text-[#cf6f8b] shadow-[0_8px_20px_rgba(148,163,184,0.12)]">
-                            {isRecording ? "正在聆听" : "正在转成文字"}
-                          </div>
-                        )}
                       </div>
 
-                      {voiceError && (
-                        <div className="mt-3 rounded-[18px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
-                          {voiceError}
-                        </div>
-                      )}
+                      {renderPromptAssistFeedback("coding")}
 
                       <div className="mt-4 flex gap-3">
                         <button
@@ -3745,12 +3991,15 @@ function WorkshopContent() {
                     </div>
 
                     <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
-                      <label
-                        htmlFor="writing-prompt"
-                        className="mb-3 block text-[15px] font-black text-amber-900"
-                      >
-                        写作需求
-                      </label>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <label
+                          htmlFor="writing-prompt"
+                          className="block text-[15px] font-black text-amber-900"
+                        >
+                          写作需求
+                        </label>
+                        {renderPromptAssistTools("writing")}
+                      </div>
                       <textarea
                         id="writing-prompt"
                         rows={12}
@@ -3759,6 +4008,7 @@ function WorkshopContent() {
                         placeholder="输入你的主题和想法..."
                         className="w-full resize-none rounded-[22px] border border-[#f3df99] bg-white px-5 py-5 text-base leading-8 text-amber-900 outline-none transition placeholder:text-amber-500/70 focus:shadow-[0_0_0_4px_rgba(253,230,138,0.35)]"
                       />
+                      {renderPromptAssistFeedback("writing")}
                     </div>
 
                     <button
@@ -3834,10 +4084,15 @@ function WorkshopContent() {
                     </div>
 
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
-                      <p className="text-[15px] font-black text-slate-700">绘画描述</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-400">
-                        可以写清场景、角色、颜色、光线和风格。
-                      </p>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[15px] font-black text-slate-700">绘画描述</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">
+                            可以写清场景、角色、颜色、光线和风格。
+                          </p>
+                        </div>
+                        {renderPromptAssistTools("painting")}
+                      </div>
                       <textarea
                         id="drawing-prompt"
                         rows={12}
@@ -3846,6 +4101,48 @@ function WorkshopContent() {
                         placeholder="输入你的绘画描述..."
                         className="mt-4 w-full resize-none rounded-[22px] border border-[#f3d5e6] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(251,207,232,0.35)]"
                       />
+                      {paintingSupportsImageEditing ? (
+                        <div className="mt-4 space-y-3">
+                          <label className="inline-flex cursor-pointer items-center gap-3 rounded-full bg-[#fff7fb] px-4 py-2 text-sm font-bold text-[#bf4d74] shadow-[0_8px_20px_rgba(244,114,182,0.08)]">
+                            <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-[12px]">
+                              图
+                            </span>
+                            上传参考图
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={handleDrawingReferenceUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          {drawingReferenceImages.length ? (
+                            <div className="grid grid-cols-3 gap-3">
+                              {drawingReferenceImages.map((image, index) => (
+                                <div
+                                  key={`${image.slice(0, 24)}-${index}`}
+                                  className="overflow-hidden rounded-[18px] border border-[#f8d9e8] bg-[#fff9fc]"
+                                >
+                                  <img
+                                    src={image}
+                                    alt={`参考图 ${index + 1}`}
+                                    className="h-24 w-full object-cover"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="rounded-[18px] bg-[#fff9fc] px-4 py-3 text-sm text-slate-500">
+                              当前模型支持图像编辑。上传参考图后，系统会结合你的文字描述一起作画。
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-[18px] bg-[#f8fbff] px-4 py-3 text-sm text-slate-500">
+                          当前绘画模型未开启图像编辑，只支持文生图。
+                        </div>
+                      )}
+                      {renderPromptAssistFeedback("painting")}
                     </div>
 
                     <button
@@ -3913,10 +4210,15 @@ function WorkshopContent() {
                     </div>
 
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
-                      <p className="text-[15px] font-black text-slate-700">朗读文字</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-400">
-                        可以粘贴作文、演讲稿、故事或英语短句。
-                      </p>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[15px] font-black text-slate-700">朗读文字</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">
+                            可以粘贴作文、演讲稿、故事或英语短句。
+                          </p>
+                        </div>
+                        {renderPromptAssistTools("speech")}
+                      </div>
                       <textarea
                         id="speech-text"
                         rows={9}
@@ -3925,6 +4227,7 @@ function WorkshopContent() {
                         placeholder="输入要合成为语音的文字..."
                         className="mt-4 w-full resize-none rounded-[22px] border border-[#ddd6fe] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(221,214,254,0.45)]"
                       />
+                      {renderPromptAssistFeedback("speech")}
                     </div>
 
                     <div className="rounded-[22px] border border-[#ddd6fe] bg-white/92 p-4 shadow-[0_10px_24px_rgba(147,51,234,0.08)]">
@@ -4048,10 +4351,15 @@ function WorkshopContent() {
                     </div>
 
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
-                      <p className="text-[15px] font-black text-slate-700">视频提示词</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-400">
-                        可以直接粘贴作文、演讲稿、故事或知识点。
-                      </p>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[15px] font-black text-slate-700">视频提示词</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">
+                            可以直接粘贴作文、演讲稿、故事或知识点。
+                          </p>
+                        </div>
+                        {renderPromptAssistTools("video")}
+                      </div>
                       <div className="mt-4 grid grid-cols-2 gap-2">
                         {videoSpeedModes.map((mode) => (
                           <button
@@ -4081,6 +4389,7 @@ function WorkshopContent() {
                         placeholder="先选模板，或直接输入想生成的视频内容..."
                         className="mt-4 w-full resize-none rounded-[22px] border border-[#cae6f7] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(191,219,254,0.35)]"
                       />
+                      {renderPromptAssistFeedback("video")}
                     </div>
 
                     <button
@@ -4220,7 +4529,7 @@ function WorkshopContent() {
                 <div className="absolute bottom-0 left-[18%] h-60 w-60 rounded-full bg-[#fff0c9]/35 blur-3xl" />
               </div>
 
-              <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 border-b border-white/80 px-6 py-5 lg:px-8">
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 border-b border-white/80 px-5 py-4 lg:px-7 lg:py-5 2xl:px-8">
                 <div>
                   <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
                     {isCodingMode
@@ -4412,7 +4721,7 @@ function WorkshopContent() {
 
               {isCodingMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="px-6 pt-3 lg:px-8">
+                  <div className="px-5 pt-3 lg:px-7 2xl:px-8">
                     {hasGeneratedCode && !isLoading && (
                       <div className="flex flex-wrap items-center gap-3">
                         <button
@@ -4440,13 +4749,13 @@ function WorkshopContent() {
                       </div>
                     )}
                   </div>
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 overflow-hidden rounded-[24px] border border-[#dbe7ff] bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5),0_18px_40px_rgba(148,163,184,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(248,251,255,0.96),rgba(238,245,255,0.92))]" />
-                      <div className="relative flex min-h-0 w-full flex-1 flex-col p-3 lg:p-4">
+                      <div className="relative flex min-h-0 w-full flex-1 flex-col p-3 lg:p-4 2xl:p-5">
                         <div
                           ref={previewShellRef}
-                          className="relative flex min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#dce8ff] bg-white"
+                          className="relative flex min-h-[74vh] flex-1 overflow-hidden rounded-[20px] border border-[#dce8ff] bg-white 2xl:min-h-[78vh]"
                         >
                           {isLoading ? (
                             <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-b from-[#fff3d2] via-[#fff7fb] to-[#edf6ff] px-6 text-center">
@@ -4482,13 +4791,13 @@ function WorkshopContent() {
                 </div>
               ) : isWritingMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#f3df99] bg-[linear-gradient(180deg,rgba(255,247,219,0.66),rgba(255,251,238,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(245,158,11,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.14),transparent_58%,rgba(251,191,36,0.08))]" />
                       <div className="absolute left-8 top-8 hidden h-40 w-40 rounded-full border border-white/45 lg:block" />
                       <div className="absolute right-8 bottom-8 hidden h-48 w-48 rounded-full border border-white/40 lg:block" />
 
-                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5">
+                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5 2xl:p-6">
                         <div
                           className="flex h-full min-h-0 w-full rounded-[26px] bg-gradient-to-br from-[#fffdf4] via-[#fff9eb] to-[#fff1cf] p-4 shadow-[0_20px_50px_rgba(245,158,11,0.10)]"
                         >
@@ -4565,13 +4874,13 @@ function WorkshopContent() {
                 </div>
               ) : isPaintingMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#f5c5d7] bg-[linear-gradient(180deg,rgba(244,248,255,0.7),rgba(255,246,250,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(251,191,188,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),transparent_58%,rgba(125,211,252,0.08))]" />
                       <div className="absolute left-8 bottom-10 hidden h-44 w-44 rounded-full border border-white/40 lg:block" />
                       <div className="absolute right-8 top-8 hidden h-52 w-52 rounded-full border border-white/38 lg:block" />
 
-                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5">
+                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5 2xl:p-6">
                         <div
                           className="flex h-full min-h-0 w-full rounded-[26px] bg-gradient-to-br from-white via-[#fff5fa] to-[#eef7ff] p-4 shadow-[0_20px_50px_rgba(125,211,252,0.12)]"
                         >
@@ -4637,7 +4946,7 @@ function WorkshopContent() {
                 </div>
               ) : isSpeechMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#ddd6fe] bg-[linear-gradient(180deg,rgba(245,243,255,0.72),rgba(255,247,251,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(147,51,234,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),transparent_58%,rgba(216,180,254,0.08))]" />
                       <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5">
@@ -4717,7 +5026,7 @@ function WorkshopContent() {
                 </div>
               ) : isVideoMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#bfe4f4] bg-[linear-gradient(180deg,rgba(236,254,255,0.72),rgba(239,246,255,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(56,189,248,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),transparent_58%,rgba(56,189,248,0.08))]" />
                       <div className="absolute left-8 bottom-10 hidden h-44 w-44 rounded-full border border-white/40 lg:block" />
@@ -4789,7 +5098,7 @@ function WorkshopContent() {
                 </div>
               ) : (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                  <div className="flex min-h-0 flex-1 px-5 pb-5 pt-3 lg:px-7 lg:pb-6 2xl:px-8">
                     <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-white/80 bg-[linear-gradient(180deg,rgba(238,244,255,0.66),rgba(250,247,255,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(148,163,184,0.08)]">
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),transparent_58%,rgba(147,197,253,0.08))]" />
                       <div className="absolute left-8 top-8 hidden h-44 w-44 rounded-full border border-white/42 lg:block" />

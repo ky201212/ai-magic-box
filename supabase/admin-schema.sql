@@ -231,7 +231,7 @@ values
     'Kwai-Kolors/Kolors',
     '请根据用户输入的中文绘画描述，生成适合儿童教育展示的图像。',
     true,
-    '{"image_size":"1024x1024","creditEnabled":true,"creditCost":5}'::jsonb
+    '{"image_size":"1024x1024","creditEnabled":true,"creditCost":5,"supportsImageEditing":false}'::jsonb
   ),
   (
     'video',
@@ -265,5 +265,16 @@ values
     '请将儿童语音内容准确识别为简体中文文本。',
     true,
     '{"creditEnabled":false,"creditCost":0}'::jsonb
+  ),
+  (
+    'promptOptimize',
+    '提示词优化',
+    'mimo',
+    'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+    'AI_API_KEY',
+    'mimo-v2.5-pro',
+    '你是一位提示词润色助手。请把用户输入改写成更清晰、具体、结构化、更容易被 AI 正确理解的中文提示词。保留原本意图，不要编造不存在的需求，不要输出解释，只返回优化后的最终提示词正文。',
+    true,
+    '{"creditEnabled":false,"creditCost":0,"reasoningEffort":"low","maxCompletionTokens":600}'::jsonb
   )
 on conflict (mode_key) do nothing;
