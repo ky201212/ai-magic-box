@@ -3469,7 +3469,7 @@ function WorkshopContent() {
       : `再完成 ${dailyGoalTarget - cappedCompletedGoalCount} 个创意作品就达标`;
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#edf4ff] text-slate-700">
+    <main className="workshop-root relative min-h-screen overflow-hidden bg-[#edf4ff] text-slate-700">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.96),rgba(238,244,255,0.94)_34%,rgba(231,239,255,0.96)_62%,rgba(244,247,255,1)_100%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(140deg,rgba(180,208,255,0.22),transparent_26%,rgba(255,217,229,0.18)_58%,rgba(255,238,190,0.18)_84%,transparent)]" />
@@ -3480,10 +3480,11 @@ function WorkshopContent() {
         <div className="absolute bottom-[-60px] right-[12%] h-96 w-96 rounded-full bg-[#cfe0ff]/35 blur-3xl" />
       </div>
 
-      <div className="relative flex min-h-screen w-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4 lg:py-4">
-        <section className="flex min-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
-            <div className="flex min-w-0 items-center gap-4">
+      <div className="workshop-shell relative flex min-h-screen w-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4 lg:py-4">
+        <div className="workshop-mobile-stage w-full">
+          <section className="workshop-canvas flex min-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
+          <header className="workshop-header flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
+            <div className="workshop-header-brand flex min-w-0 items-center gap-4">
               <Image
                 src={brand.logoUrl}
                 alt={brand.siteName}
@@ -3492,7 +3493,7 @@ function WorkshopContent() {
                 className="rounded-[18px] shadow-[0_12px_28px_rgba(248,113,113,0.14)]"
                 unoptimized
               />
-              <div className="min-w-0">
+              <div className="workshop-header-brand-copy min-w-0">
                 <h1 className="truncate text-[18px] font-black text-slate-800 lg:text-[20px]">
                   {brand.siteName}
                 </h1>
@@ -3502,7 +3503,7 @@ function WorkshopContent() {
               </div>
             </div>
 
-            <div className="relative flex flex-wrap items-center gap-3">
+            <div className="workshop-header-actions relative flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={() => handleHeaderAction("credits")}
@@ -3684,15 +3685,15 @@ function WorkshopContent() {
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 gap-4 p-3 sm:p-4 xl:grid-cols-[320px_minmax(500px,1.02fr)_minmax(760px,1.68fr)] xl:p-5 2xl:grid-cols-[350px_minmax(560px,1.06fr)_minmax(900px,1.86fr)]">
-            <aside className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.96))] p-4 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
+          <div className="workshop-layout-grid grid min-h-0 flex-1 gap-4 p-3 sm:p-4 xl:grid-cols-[320px_minmax(500px,1.02fr)_minmax(760px,1.68fr)] xl:p-5 2xl:grid-cols-[350px_minmax(560px,1.06fr)_minmax(900px,1.86fr)]">
+            <aside className="workshop-sidebar flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.96))] p-4 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
                   模式选择
                 </p>
               </div>
 
-              <div className="mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
+              <div className="workshop-mode-list mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
                 {modeTabs.map((tab) => {
                   const isActive = activeMode === tab.id;
                   const visual = modeVisuals[tab.id];
@@ -3702,7 +3703,7 @@ function WorkshopContent() {
                       key={tab.id}
                       type="button"
                       onClick={() => handleModeChange(tab.id)}
-                      className={`flex w-full items-center gap-4 rounded-[24px] border px-5 py-4 text-left transition ${
+                      className={`workshop-mode-card flex w-full items-center gap-4 rounded-[24px] border px-5 py-4 text-left transition ${
                         isActive
                           ? "border-[#7aa6ff] bg-white shadow-[0_18px_36px_rgba(125,211,252,0.14)]"
                           : "border-white/80 bg-white/70 shadow-[0_10px_24px_rgba(148,163,184,0.08)] hover:bg-white"
@@ -3719,11 +3720,11 @@ function WorkshopContent() {
                           className="h-7 w-7 object-contain"
                         />
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[15px] font-black text-slate-700">
+                      <div className="workshop-mode-copy min-w-0 flex-1">
+                        <p className="workshop-mode-title text-[15px] font-black text-slate-700">
                           {tab.label}
                         </p>
-                        <p className="mt-1 text-[13px] leading-6 text-slate-400">
+                        <p className="workshop-mode-subtitle mt-1 text-[13px] leading-6 text-slate-400">
                           {tab.subtitle}
                         </p>
                       </div>
@@ -3741,7 +3742,7 @@ function WorkshopContent() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+              <div className="workshop-daily-goal mt-4 rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="grid h-12 w-12 place-items-center rounded-[16px] bg-gradient-to-br from-[#efe4ff] to-[#dcecff] text-sm font-black text-[#6f6ad8]">
@@ -3769,7 +3770,7 @@ function WorkshopContent() {
               </div>
             </aside>
 
-            <section className="flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,255,0.98))] p-6 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
+            <section className="workshop-editor flex min-h-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,255,0.98))] p-6 shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div>
                 <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
                   创作区
@@ -4532,14 +4533,14 @@ function WorkshopContent() {
               </div>
             </section>
 
-            <section className="relative flex min-h-0 min-w-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(247,250,255,0.98))] shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
+            <section className="workshop-preview-panel relative flex min-h-0 min-w-0 flex-col rounded-[28px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(247,250,255,0.98))] shadow-[0_18px_50px_rgba(148,163,184,0.1)]">
               <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.94),rgba(237,244,255,0.92)_54%,rgba(230,239,255,0.98)_100%)]" />
                 <div className="absolute right-0 top-10 h-72 w-72 rounded-full bg-[#dfe8ff]/55 blur-3xl" />
                 <div className="absolute bottom-0 left-[18%] h-60 w-60 rounded-full bg-[#fff0c9]/35 blur-3xl" />
               </div>
 
-              <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 border-b border-white/80 px-5 py-4 lg:px-7 lg:py-5 2xl:px-8">
+              <div className="workshop-preview-header relative z-10 flex flex-wrap items-center justify-between gap-4 border-b border-white/80 px-5 py-4 lg:px-7 lg:py-5 2xl:px-8">
                 <div>
                   <p className="text-[13px] font-black tracking-[0.08em] text-[#4165c7]">
                     {isCodingMode
@@ -4569,7 +4570,7 @@ function WorkshopContent() {
                   </h2>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="workshop-preview-actions flex flex-wrap items-center gap-3">
                   {isCodingMode ? (
                     <div className="flex flex-wrap items-center gap-3">
                       <button
@@ -4765,7 +4766,7 @@ function WorkshopContent() {
                       <div className="relative flex min-h-0 w-full flex-1 flex-col p-3 lg:p-4 2xl:p-5">
                         <div
                           ref={previewShellRef}
-                          className="relative flex min-h-[74vh] flex-1 overflow-hidden rounded-[20px] border border-[#dce8ff] bg-white 2xl:min-h-[78vh]"
+                          className="workshop-preview-shell relative flex min-h-[74vh] flex-1 overflow-hidden rounded-[20px] border border-[#dce8ff] bg-white 2xl:min-h-[78vh]"
                         >
                           {isLoading ? (
                             <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-b from-[#fff3d2] via-[#fff7fb] to-[#edf6ff] px-6 text-center">
@@ -5172,7 +5173,8 @@ function WorkshopContent() {
               )}
             </section>
           </div>
-        </section>
+          </section>
+        </div>
       </div>
 
       {isShareConfirmOpen && (

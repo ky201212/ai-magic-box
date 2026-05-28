@@ -296,3 +296,110 @@ li {
     100% 100%;
   animation: homeCardShine 8s ease-in-out infinite;
 }
+
+@media (max-width: 1100px) and (orientation: landscape) and (pointer: coarse) {
+  .workshop-root {
+    overflow: hidden;
+  }
+
+  .workshop-shell {
+    min-height: 100vh;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 10px;
+  }
+
+  .workshop-mobile-stage {
+    --workshop-landscape-width: 1648;
+    --workshop-landscape-height: 960;
+    --workshop-landscape-scale: min(
+      calc((100vw - 20px) / (var(--workshop-landscape-width) * 1px)),
+      calc((100vh - 20px) / (var(--workshop-landscape-height) * 1px))
+    );
+    position: relative;
+    width: calc(var(--workshop-landscape-width) * var(--workshop-landscape-scale) * 1px);
+    height: calc(var(--workshop-landscape-height) * var(--workshop-landscape-scale) * 1px);
+    max-width: 100%;
+    max-height: calc(100vh - 20px);
+    margin: 0 auto;
+    overflow: hidden;
+  }
+
+  .workshop-canvas {
+    width: calc(var(--workshop-landscape-width) * 1px);
+    min-width: calc(var(--workshop-landscape-width) * 1px);
+    min-height: calc(var(--workshop-landscape-height) * 1px);
+    height: calc(var(--workshop-landscape-height) * 1px);
+    zoom: var(--workshop-landscape-scale);
+    transform-origin: top center;
+  }
+
+  .workshop-header {
+    flex-wrap: nowrap;
+    gap: 16px;
+    padding: 20px 28px;
+  }
+
+  .workshop-header-brand {
+    min-width: 320px;
+  }
+
+  .workshop-header-brand-copy {
+    min-width: 0;
+  }
+
+  .workshop-header-actions {
+    flex-wrap: nowrap;
+    gap: 12px;
+    margin-left: auto;
+  }
+
+  .workshop-layout-grid {
+    grid-template-columns: 320px minmax(500px, 1.02fr) minmax(760px, 1.68fr);
+    padding: 20px;
+  }
+
+  .workshop-sidebar,
+  .workshop-editor,
+  .workshop-preview-panel {
+    min-height: 0;
+  }
+
+  .workshop-mode-list {
+    overflow-y: auto;
+  }
+
+  .workshop-mode-card {
+    min-height: 92px;
+  }
+
+  .workshop-mode-copy {
+    min-width: 0;
+  }
+
+  .workshop-mode-title,
+  .workshop-mode-subtitle,
+  .workshop-daily-goal p,
+  .workshop-preview-actions button,
+  .workshop-header-actions button,
+  .workshop-header-actions p {
+    overflow-wrap: normal;
+    word-break: keep-all;
+    white-space: nowrap;
+  }
+
+  .workshop-preview-header {
+    flex-wrap: nowrap;
+    gap: 16px;
+  }
+
+  .workshop-preview-actions {
+    flex-wrap: nowrap;
+    gap: 12px;
+    margin-left: auto;
+  }
+
+  .workshop-preview-shell {
+    min-height: 74vh;
+  }
+}
