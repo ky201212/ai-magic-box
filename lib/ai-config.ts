@@ -64,6 +64,8 @@ const modeFallbacks: Record<
     isEnabled: true,
     extraPayload: {
       image_size: "1280x720",
+      fastModel: "Wan-AI/Wan2.1-T2V-14B-720P-Turbo",
+      qualityModel: "Wan-AI/Wan2.2-T2V-A14B",
       creditEnabled: false,
       creditCost: 0,
       pollIntervalMs: 5000,

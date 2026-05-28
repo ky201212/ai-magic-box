@@ -1545,6 +1545,8 @@ function WorkshopContent() {
   const [selectedCompositionGrade, setSelectedCompositionGrade] = useState("三年级");
   const [selectedCompositionSemester, setSelectedCompositionSemester] = useState<"上学期" | "下学期">("上学期");
   const [videoPrompt, setVideoPrompt] = useState("");
+  const [videoSpeedMode, setVideoSpeedMode] = useState<"fast" | "quality">("fast");
+  const [videoTaskIdInput, setVideoTaskIdInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -2145,6 +2147,75 @@ function WorkshopContent() {
     const existingPrompt = videoPrompt.trim();
 
     setVideoPrompt(`${template}${existingPrompt ? `\n${existingPrompt}` : "\n"}`);
+  };
+
+  const videoSpeedModes = [
+    {
+      key: "fast",
+      label: "快速预览",
+      note: "优先更快出片",
+    },
+    {
+      key: "quality",
+      label: "高清精制",
+      note: "画质更好但更久",
+    },
+  ] as const;
+
+  const checkExistingVideoTask = async (requestId: string) => {
+    const trimmedRequestId = requestId.trim();
+
+    if (!trimmedRequestId) {
+      window.alert("请先输入任务号。");
+      return;
+    }
+
+    setGeneratedVideoUrl("");
+    setVideoError("");
+    setVideoTaskMessage("正在查询视频任务，请稍等。");
+    setIsVideoGenerating(true);
+
+    try {
+      const response = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requestId: trimmedRequestId }),
+      });
+      const { data, rawText } = await parseApiResponse<{
+        videoUrl?: string;
+        error?: string;
+        message?: string;
+        status?: string;
+      }>(response);
+
+      if (response.status === 202) {
+        setVideoError("这个任务还在生成中，请过一会儿再查询。任务号：" + trimmedRequestId);
+        return;
+      }
+
+      if (!response.ok || !data?.videoUrl) {
+        setVideoError(
+          toReadableApiError(
+            response,
+            "任务查询失败，请确认任务号是否正确。",
+            data?.error,
+            rawText,
+          ),
+        );
+        return;
+      }
+
+      setVideoTaskIdInput("");
+      setVideoError("");
+      setGeneratedVideoUrl(data.videoUrl);
+    } catch {
+      setVideoError("任务查询失败，请稍后再试。");
+    } finally {
+      setVideoTaskMessage("");
+      setIsVideoGenerating(false);
+    }
   };
 
   const handleModeChange = (mode: ModeId) => {
@@ -2841,6 +2912,7 @@ function WorkshopContent() {
       const requestVideoResult = async (body: {
         prompt?: string;
         requestId?: string;
+        speedMode?: "fast" | "quality";
       }) => {
         const response = await fetch("/api/generate-video", {
           method: "POST",
@@ -2863,7 +2935,10 @@ function WorkshopContent() {
           ...parsed,
         };
       };
-      let result = await requestVideoResult({ prompt: videoPrompt });
+      let result = await requestVideoResult({
+        prompt: videoPrompt,
+        speedMode: videoSpeedMode,
+      });
       let response = result.response;
       let data = result.data;
       let rawText = result.rawText;
@@ -2885,7 +2960,10 @@ function WorkshopContent() {
             break;
           }
 
-          result = await requestVideoResult({ requestId: pollingRequestId });
+          result = await requestVideoResult({
+            requestId: pollingRequestId,
+            speedMode: videoSpeedMode,
+          });
           response = result.response;
           data = result.data;
           rawText = result.rawText;
@@ -3704,6 +3782,27 @@ function WorkshopContent() {
                       <p className="mt-1 text-sm leading-6 text-slate-400">
                         可以直接粘贴作文、演讲稿、故事或知识点。
                       </p>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        {videoSpeedModes.map((mode) => (
+                          <button
+                            key={mode.key}
+                            type="button"
+                            onClick={() => setVideoSpeedMode(mode.key)}
+                            className={`rounded-[18px] px-3 py-3 text-left transition ${
+                              videoSpeedMode === mode.key
+                                ? "bg-[#ddf8ff] text-[#176b86] shadow-[0_8px_20px_rgba(56,189,248,0.12)]"
+                                : "bg-white text-slate-500 shadow-[0_8px_20px_rgba(148,163,184,0.08)]"
+                            }`}
+                          >
+                            <span className="block text-sm font-black">
+                              {mode.label}
+                            </span>
+                            <span className="mt-1 block text-[11px] font-bold opacity-80">
+                              {mode.note}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                       <textarea
                         id="video-prompt"
                         rows={12}
@@ -3722,6 +3821,29 @@ function WorkshopContent() {
                     >
                       {isVideoGenerating ? "正在生成视频" : "开始生成视频"}
                     </button>
+
+                    <div className="rounded-[22px] border border-[#cae6f7] bg-white/92 p-4 shadow-[0_10px_24px_rgba(56,189,248,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">取回已生成视频</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-400">
+                        如果页面提示任务号，把任务号粘到这里继续查询。
+                      </p>
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <input
+                          value={videoTaskIdInput}
+                          onChange={(event) => setVideoTaskIdInput(event.target.value)}
+                          placeholder="输入任务号"
+                          className="h-11 min-w-0 flex-1 rounded-[16px] border border-[#cae6f7] bg-white px-4 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => checkExistingVideoTask(videoTaskIdInput)}
+                          disabled={isVideoGenerating}
+                          className="h-11 rounded-[16px] bg-[#ddf8ff] px-4 text-sm font-black text-[#176b86] transition hover:bg-[#cdf3fb] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          查询结果
+                        </button>
+                      </div>
+                    </div>
 
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
@@ -4227,7 +4349,9 @@ function WorkshopContent() {
                                   正在整理镜头和画面
                                 </div>
                                 <p className="mt-5 max-w-md text-lg font-black leading-8 text-slate-600">
-                                  视频生成通常会比图片更久一点，我们正在等待完整成片返回。
+                                  {videoSpeedMode === "fast"
+                                    ? "正在用快速预览模式生成，视频仍然会比图片更久一点。"
+                                    : "高清精制模式会更慢，我们正在等待完整成片返回。"}
                                 </p>
                                 {videoTaskMessage ? (
                                   <p className="mt-3 max-w-md text-sm font-bold leading-7 text-[#178ca7]">

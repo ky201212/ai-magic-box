@@ -112,6 +112,25 @@ function buildVideoSubmitRequestBody(input: {
   };
 }
 
+function resolveVideoSubmitModel(input: {
+  requestedMode: string | undefined;
+  configuredModel: string;
+  extraPayload: Record<string, unknown>;
+}) {
+  const fastModel =
+    typeof input.extraPayload.fastModel === "string" &&
+    input.extraPayload.fastModel.trim()
+      ? input.extraPayload.fastModel.trim()
+      : "Wan-AI/Wan2.1-T2V-14B-720P-Turbo";
+  const qualityModel =
+    typeof input.extraPayload.qualityModel === "string" &&
+    input.extraPayload.qualityModel.trim()
+      ? input.extraPayload.qualityModel.trim()
+      : input.configuredModel;
+
+  return input.requestedMode === "quality" ? qualityModel : fastModel;
+}
+
 function extractRequestId(data: VideoSubmitResponse) {
   return (
     data.requestId?.trim() ||
@@ -284,13 +303,19 @@ async function fetchVideoTaskStatus(input: {
 
 export async function POST(request: Request) {
   try {
-    const { prompt, requestId: existingRequestId } = (await request.json()) as {
+    const { prompt, requestId: existingRequestId, speedMode } = (await request.json()) as {
       prompt?: string;
       requestId?: string;
+      speedMode?: string;
     };
 
     const aiConfig = await resolveAiModeConfig("video");
     const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
+    const submitModel = resolveVideoSubmitModel({
+      requestedMode: speedMode,
+      configuredModel: aiConfig.model,
+      extraPayload: aiConfig.extraPayload,
+    });
     const imageSize =
       typeof aiConfig.extraPayload.image_size === "string"
         ? aiConfig.extraPayload.image_size
@@ -328,7 +353,7 @@ export async function POST(request: Request) {
       return fetchVideoTaskStatus({
         apiKey,
         endpointUrl: aiConfig.endpointUrl,
-        model: aiConfig.model,
+        model: submitModel,
         requestId: existingRequestId.trim(),
       });
     }
@@ -377,7 +402,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify(
         buildVideoSubmitRequestBody({
-          model: aiConfig.model,
+          model: submitModel,
           prompt,
           imageSize,
         }),
@@ -399,7 +424,7 @@ export async function POST(request: Request) {
         {
           error: buildVideoErrorMessage(
             errorText,
-            aiConfig.model,
+            submitModel,
             aiConfig.endpointUrl,
             "视频提交接口",
           ),
@@ -438,7 +463,7 @@ export async function POST(request: Request) {
       const taskResponse = await fetchVideoTaskStatus({
         apiKey,
         endpointUrl: aiConfig.endpointUrl,
-        model: aiConfig.model,
+        model: submitModel,
         requestId,
       });
       const taskData = (await taskResponse.clone().json().catch(() => null)) as {
