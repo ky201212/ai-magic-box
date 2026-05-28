@@ -64,12 +64,26 @@ const modeFallbacks: Record<
     isEnabled: true,
     extraPayload: {
       image_size: "1280x720",
-      fastModel: "Wan-AI/Wan2.1-T2V-14B-720P-Turbo",
       qualityModel: "Wan-AI/Wan2.2-T2V-A14B",
       creditEnabled: false,
       creditCost: 0,
       pollIntervalMs: 5000,
       pollTimeoutMs: 180000,
+    },
+  },
+  speech: {
+    endpointUrl: "https://api.siliconflow.cn/v1/audio/speech",
+    apiKeyEnv: "SILICONFLOW_API_KEY",
+    model: "FunAudioLLM/CosyVoice2-0.5B",
+    systemPrompt: "请将用户输入的中文内容合成为适合儿童收听的自然语音。",
+    isEnabled: true,
+    extraPayload: {
+      responseFormat: "mp3",
+      voice: "alex",
+      speed: 1,
+      gain: 0,
+      creditEnabled: false,
+      creditCost: 0,
     },
   },
   transcribe: {
@@ -159,8 +173,28 @@ function resolveTranscribeEndpoint(endpointUrl: string) {
   return absoluteEndpoint;
 }
 
+function resolveSpeechEndpoint(endpointUrl: string) {
+  const fallbackEndpoint = modeFallbacks.speech.endpointUrl;
+  const absoluteEndpoint = ensureAbsoluteEndpoint(endpointUrl, fallbackEndpoint);
+  const normalizedEndpoint = absoluteEndpoint.toLowerCase();
+
+  if (normalizedEndpoint.endsWith("/audio/speech")) {
+    return absoluteEndpoint;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1")) {
+    return `${absoluteEndpoint}/audio/speech`;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1/")) {
+    return `${absoluteEndpoint}audio/speech`;
+  }
+
+  return absoluteEndpoint;
+}
+
 export async function resolveAiModeConfig(
-  modeKey: "coding" | "writing" | "painting" | "video" | "transcribe",
+  modeKey: "coding" | "writing" | "painting" | "video" | "speech" | "transcribe",
 ): Promise<ResolvedAiModeConfig> {
   const fallback = modeFallbacks[modeKey];
 
@@ -181,6 +215,8 @@ export async function resolveAiModeConfig(
           ? resolvePaintingEndpoint(dbConfig.endpoint_url)
           : modeKey === "video"
             ? resolveVideoSubmitEndpoint(dbConfig.endpoint_url)
+          : modeKey === "speech"
+            ? resolveSpeechEndpoint(dbConfig.endpoint_url)
           : modeKey === "transcribe"
             ? resolveTranscribeEndpoint(dbConfig.endpoint_url)
             : ensureAbsoluteEndpoint(dbConfig.endpoint_url, fallback.endpointUrl),

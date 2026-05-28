@@ -117,15 +117,15 @@ function resolveVideoSubmitModel(input: {
   configuredModel: string;
   extraPayload: Record<string, unknown>;
 }) {
-  const fastModel =
-    typeof input.extraPayload.fastModel === "string" &&
-    input.extraPayload.fastModel.trim()
-      ? input.extraPayload.fastModel.trim()
-      : "Wan-AI/Wan2.1-T2V-14B-720P-Turbo";
   const qualityModel =
     typeof input.extraPayload.qualityModel === "string" &&
     input.extraPayload.qualityModel.trim()
       ? input.extraPayload.qualityModel.trim()
+      : input.configuredModel;
+  const fastModel =
+    typeof input.extraPayload.fastModel === "string" &&
+    input.extraPayload.fastModel.trim()
+      ? input.extraPayload.fastModel.trim()
       : input.configuredModel;
 
   return input.requestedMode === "quality" ? qualityModel : fastModel;

@@ -245,6 +245,17 @@ values
     '{"image_size":"1280x720","creditEnabled":false,"creditCost":0,"pollIntervalMs":5000,"pollTimeoutMs":180000}'::jsonb
   ),
   (
+    'speech',
+    'AI语音',
+    'siliconflow',
+    'https://api.siliconflow.cn/v1/audio/speech',
+    'SILICONFLOW_API_KEY',
+    'FunAudioLLM/CosyVoice2-0.5B',
+    '请将用户输入的中文内容合成为适合儿童收听的自然语音。',
+    true,
+    '{"responseFormat":"mp3","voice":"alex","speed":1,"gain":0,"creditEnabled":false,"creditCost":0}'::jsonb
+  ),
+  (
     'transcribe',
     '语音识别',
     'siliconflow',

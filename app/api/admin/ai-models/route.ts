@@ -41,6 +41,10 @@ function resolveModelsEndpoint(endpointUrl: string) {
     return `${trimmedEndpoint.slice(0, -"/audio/transcriptions".length)}/models`;
   }
 
+  if (normalizedEndpoint.endsWith("/audio/speech")) {
+    return `${trimmedEndpoint.slice(0, -"/audio/speech".length)}/models?type=audio&sub_type=text-to-speech`;
+  }
+
   if (normalizedEndpoint.endsWith("/video/submit")) {
     return `${trimmedEndpoint.slice(0, -"/video/submit".length)}/models?type=video&sub_type=text-to-video`;
   }

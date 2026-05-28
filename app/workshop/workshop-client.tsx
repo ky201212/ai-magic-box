@@ -166,11 +166,41 @@ const videoCreationPresets = [
   },
 ] as const;
 
+const speechVoiceOptions = [
+  { id: "alex", label: "阳光男声", description: "清楚稳重，适合朗读作文" },
+  { id: "anna", label: "温柔女声", description: "亲切自然，适合讲故事" },
+  { id: "bella", label: "活泼女声", description: "明亮有精神，适合儿童内容" },
+  { id: "benjamin", label: "沉稳男声", description: "适合演讲稿和说明文" },
+  { id: "charles", label: "故事男声", description: "节奏感更强，适合绘本旁白" },
+  { id: "claire", label: "清亮女声", description: "适合诗歌和短文朗读" },
+  { id: "david", label: "自然男声", description: "适合知识讲解" },
+  { id: "diana", label: "柔和女声", description: "适合睡前故事和温柔朗读" },
+] as const;
+
+const speechTextPresets = [
+  {
+    label: "作文朗读",
+    text: "请把这里替换成孩子写好的作文。朗读时语气自然、有感情，停顿清楚。",
+  },
+  {
+    label: "演讲练习",
+    text: "大家好，我今天演讲的题目是：请把这里替换成演讲稿内容。",
+  },
+  {
+    label: "故事旁白",
+    text: "从前，有一个充满想象力的小朋友，开始了一段奇妙的冒险。",
+  },
+  {
+    label: "英语跟读",
+    text: "Hello everyone. Today I want to share a happy story with you.",
+  },
+] as const;
+
 const modeTabs = [
   { id: "coding", label: "AI编程", subtitle: "做出会互动的小程序" },
   { id: "writing", label: "AI写作", subtitle: "把念头写成完整文章" },
   { id: "painting", label: "AI绘画", subtitle: "把想象变成一张画" },
-  { id: "music", label: "AI音乐", subtitle: "创作旋律与节奏" },
+  { id: "music", label: "AI语音", subtitle: "把文字变成朗读音频" },
   { id: "video", label: "AI视频", subtitle: "生成故事短片" },
   { id: "modeling", label: "AI建模", subtitle: "搭建立体小世界" },
 ] as const;
@@ -230,9 +260,11 @@ type WorkshopDraftSnapshot = {
   writingPrompt: string;
   writingResult: string;
   drawingPrompt: string;
+  speechText: string;
   videoPrompt: string;
   generatedCode: string;
   generatedImageUrl: string;
+  generatedSpeechUrl: string;
   generatedVideoUrl: string;
 };
 
@@ -599,6 +631,7 @@ function parseWorkshopDraftSnapshot(rawDraft: string | null) {
       typeof draft.writingResult === "string" ? draft.writingResult : "",
     drawingPrompt:
       typeof draft.drawingPrompt === "string" ? draft.drawingPrompt : "",
+    speechText: typeof draft.speechText === "string" ? draft.speechText : "",
     videoPrompt: typeof draft.videoPrompt === "string" ? draft.videoPrompt : "",
     generatedCode:
       typeof draft.generatedCode === "string" && draft.generatedCode.trim()
@@ -607,6 +640,10 @@ function parseWorkshopDraftSnapshot(rawDraft: string | null) {
     generatedImageUrl:
       typeof draft.generatedImageUrl === "string"
         ? draft.generatedImageUrl
+        : "",
+    generatedSpeechUrl:
+      typeof draft.generatedSpeechUrl === "string"
+        ? draft.generatedSpeechUrl
         : "",
     generatedVideoUrl:
       typeof draft.generatedVideoUrl === "string"
@@ -1353,15 +1390,9 @@ const modeVisuals: Record<
 };
 
 const comingSoonConfig: Record<
-  Exclude<ModeId, "coding" | "painting" | "writing">,
+  Exclude<ModeId, "coding" | "painting" | "writing" | "music">,
   { title: string; description: string; badge: string }
 > = {
-  music: {
-    title: "音乐工坊正在接入",
-    description:
-      "未来这里会把一句灵感变成旋律、节奏和伴奏，让孩子像在玩乐器积木一样完成自己的主题曲。",
-    badge: "旋律引擎搭建中",
-  },
   video: {
     title: "视频工坊正在接入",
     description:
@@ -1544,12 +1575,18 @@ function WorkshopContent() {
   const [drawingPrompt, setDrawingPrompt] = useState("");
   const [selectedCompositionGrade, setSelectedCompositionGrade] = useState("三年级");
   const [selectedCompositionSemester, setSelectedCompositionSemester] = useState<"上学期" | "下学期">("上学期");
+  const [speechText, setSpeechText] = useState("");
+  const [speechVoice, setSpeechVoice] = useState<(typeof speechVoiceOptions)[number]["id"]>("alex");
+  const [speechSpeed, setSpeechSpeed] = useState(1);
+  const [speechGain, setSpeechGain] = useState(0);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [videoSpeedMode, setVideoSpeedMode] = useState<"fast" | "quality">("fast");
   const [videoTaskIdInput, setVideoTaskIdInput] = useState("");
+  const [isVideoTaskLookupOpen, setIsVideoTaskLookupOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isSpeechGenerating, setIsSpeechGenerating] = useState(false);
   const [isVideoGenerating, setIsVideoGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -1557,8 +1594,10 @@ function WorkshopContent() {
   const [writingError, setWritingError] = useState("");
   const [generatedCode, setGeneratedCode] = useState(defaultPreviewHtml);
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
+  const [generatedSpeechUrl, setGeneratedSpeechUrl] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
   const [drawingError, setDrawingError] = useState("");
+  const [speechError, setSpeechError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [videoTaskMessage, setVideoTaskMessage] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
@@ -1609,6 +1648,7 @@ function WorkshopContent() {
   const isCodingMode = activeMode === "coding";
   const isWritingMode = activeMode === "writing";
   const isPaintingMode = activeMode === "painting";
+  const isSpeechMode = activeMode === "music";
   const isVideoMode = activeMode === "video";
   const selectedCompositionGroup =
     compositionTopicBank.find((item) => item.grade === selectedCompositionGrade) ??
@@ -1651,9 +1691,11 @@ function WorkshopContent() {
       writingPrompt,
       writingResult,
       drawingPrompt,
+      speechText,
       videoPrompt,
       generatedCode,
       generatedImageUrl,
+      generatedSpeechUrl,
       generatedVideoUrl,
     };
 
@@ -1678,9 +1720,11 @@ function WorkshopContent() {
           setWritingPrompt(savedDraft.writingPrompt);
           setWritingResult(savedDraft.writingResult);
           setDrawingPrompt(savedDraft.drawingPrompt);
+          setSpeechText(savedDraft.speechText);
           setVideoPrompt(savedDraft.videoPrompt);
           setGeneratedCode(savedDraft.generatedCode);
           setGeneratedImageUrl(savedDraft.generatedImageUrl);
+          setGeneratedSpeechUrl(savedDraft.generatedSpeechUrl);
           setGeneratedVideoUrl(savedDraft.generatedVideoUrl);
         }
       } catch {
@@ -1731,6 +1775,8 @@ function WorkshopContent() {
           setWritingResult(sourcePost.preview_code);
           setDrawingPrompt("");
           setGeneratedImageUrl("");
+          setSpeechText("");
+          setGeneratedSpeechUrl("");
           setVideoPrompt("");
           setGeneratedVideoUrl("");
           setPromptText("");
@@ -1742,6 +1788,8 @@ function WorkshopContent() {
           setGeneratedCode(defaultPreviewHtml);
           setWritingPrompt("");
           setWritingResult("");
+          setSpeechText("");
+          setGeneratedSpeechUrl("");
           setVideoPrompt("");
           setGeneratedVideoUrl("");
         } else {
@@ -1753,6 +1801,8 @@ function WorkshopContent() {
           setWritingResult("");
           setDrawingPrompt("");
           setGeneratedImageUrl("");
+          setSpeechText("");
+          setGeneratedSpeechUrl("");
           setVideoPrompt("");
           setGeneratedVideoUrl("");
         }
@@ -2894,6 +2944,98 @@ function WorkshopContent() {
     }
   };
 
+  const handleGenerateSpeech = async () => {
+    if (!speechText.trim()) {
+      window.alert("请先输入要朗读的文字。");
+      return;
+    }
+
+    setGeneratedSpeechUrl("");
+    setSpeechError("");
+    setShareMessage("");
+    setShareFeedback(null);
+    setIsShareConfirmOpen(false);
+    setIsSpeechGenerating(true);
+
+    try {
+      const response = await fetch("/api/generate-speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: speechText,
+          voice: speechVoice,
+          speed: speechSpeed,
+          gain: speechGain,
+        }),
+      });
+
+      if (response.status === 401) {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+
+        if (isUpstreamCredentialError(data?.error)) {
+          setSpeechError(
+            data?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
+          );
+          return;
+        }
+
+        showLoginPrompt(
+          "登录状态断开了，这次语音还没有完成。当前内容已经保留，重新登录后可以继续。",
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          remainingCredits?: number;
+        } | null;
+
+        if (typeof data?.remainingCredits === "number") {
+          setMagicCredits(data.remainingCredits);
+        }
+
+        setSpeechError(data?.error ?? "这次语音没有生成成功，我们再试一次。");
+        return;
+      }
+
+      const remainingCreditsHeader = response.headers.get("X-Remaining-Credits");
+
+      if (remainingCreditsHeader) {
+        const parsedCredits = Number(remainingCreditsHeader);
+
+        if (Number.isFinite(parsedCredits)) {
+          setMagicCredits(parsedCredits);
+        }
+      }
+
+      const audioBlob = await response.blob();
+
+      if (!audioBlob.size) {
+        setSpeechError("语音接口没有返回可播放的音频。");
+        return;
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+      setSpeechError("");
+      setGeneratedSpeechUrl((previousUrl) => {
+        if (previousUrl.startsWith("blob:")) {
+          URL.revokeObjectURL(previousUrl);
+        }
+
+        return audioUrl;
+      });
+    } catch {
+      setSpeechError("刚刚和语音工坊失去了一下联系，请稍后再试试。");
+    } finally {
+      setIsSpeechGenerating(false);
+    }
+  };
+
   const handleGenerateVideo = async () => {
     if (!videoPrompt.trim()) {
       window.alert("请先写下这段视频想讲的故事和画面。");
@@ -3031,13 +3173,14 @@ function WorkshopContent() {
   };
 
   const activeComingSoon =
-    isCodingMode || isPaintingMode || isWritingMode || isVideoMode
+    isCodingMode || isPaintingMode || isWritingMode || isSpeechMode || isVideoMode
       ? null
       : comingSoonConfig[activeMode];
   const completedGoalCount =
     Number(Boolean(hasGeneratedCode)) +
     Number(Boolean(writingResult.trim())) +
-    Number(Boolean(generatedImageUrl.trim()));
+    Number(Boolean(generatedImageUrl.trim())) +
+    Number(Boolean(generatedSpeechUrl.trim()));
   const dailyGoalTarget = 2;
   const cappedCompletedGoalCount = Math.min(completedGoalCount, dailyGoalTarget);
   const dailyGoalProgressPercent = Math.min(
@@ -3740,6 +3883,133 @@ function WorkshopContent() {
                       </div>
                     </div>
                   </div>
+                ) : isSpeechMode ? (
+                  <div className="space-y-4">
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <div className="flex items-start gap-3">
+                        <div>
+                          <p className="text-[15px] font-black text-slate-700">语音合成台</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">
+                            把作文、演讲稿或故事变成可播放的朗读音频。
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[22px] border border-[#ddd6fe] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(250,247,255,0.98))] p-4 shadow-[0_10px_24px_rgba(147,51,234,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">快捷文本</p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {speechTextPresets.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setSpeechText(preset.text)}
+                            className="rounded-[18px] bg-white px-3 py-3 text-left text-sm font-black text-slate-700 shadow-[0_8px_20px_rgba(147,51,234,0.08)] transition hover:-translate-y-0.5 hover:bg-[#faf7ff]"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">朗读文字</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        可以粘贴作文、演讲稿、故事或英语短句。
+                      </p>
+                      <textarea
+                        id="speech-text"
+                        rows={9}
+                        value={speechText}
+                        onChange={(event) => setSpeechText(event.target.value)}
+                        placeholder="输入要合成为语音的文字..."
+                        className="mt-4 w-full resize-none rounded-[22px] border border-[#ddd6fe] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(221,214,254,0.45)]"
+                      />
+                    </div>
+
+                    <div className="rounded-[22px] border border-[#ddd6fe] bg-white/92 p-4 shadow-[0_10px_24px_rgba(147,51,234,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">声音设置</p>
+                      <label className="mt-4 block text-sm font-bold text-slate-600">
+                        音色
+                        <select
+                          value={speechVoice}
+                          onChange={(event) =>
+                            setSpeechVoice(
+                              event.target.value as (typeof speechVoiceOptions)[number]["id"],
+                            )
+                          }
+                          className="mt-2 h-12 w-full rounded-[18px] border border-[#ddd6fe] bg-white px-4 text-slate-700 outline-none"
+                        >
+                          {speechVoiceOptions.map((voice) => (
+                            <option key={voice.id} value={voice.id}>
+                              {voice.label} - {voice.description}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <label className="block text-sm font-bold text-slate-600">
+                          语速：{speechSpeed.toFixed(1)}
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2"
+                            step="0.1"
+                            value={speechSpeed}
+                            onChange={(event) => setSpeechSpeed(Number(event.target.value))}
+                            className="mt-3 w-full accent-[#8b5cf6]"
+                          />
+                        </label>
+                        <label className="block text-sm font-bold text-slate-600">
+                          音量增益：{speechGain.toFixed(1)} dB
+                          <input
+                            type="range"
+                            min="-10"
+                            max="10"
+                            step="0.5"
+                            value={speechGain}
+                            onChange={(event) => setSpeechGain(Number(event.target.value))}
+                            className="mt-3 w-full accent-[#8b5cf6]"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerateSpeech}
+                      disabled={isSpeechGenerating}
+                      className="inline-flex h-14 w-full items-center justify-center rounded-full bg-gradient-to-r from-[#d8d4ff] via-[#ede9fe] to-[#fce7f3] px-6 text-lg font-black text-[#5b4fb8] shadow-[0_16px_34px_rgba(147,51,234,0.16)] transition duration-200 hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isSpeechGenerating ? "正在合成语音" : "生成语音"}
+                    </button>
+
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">创作提示</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-[18px] bg-[#f5f3ff] px-4 py-4">
+                          <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
+                            当前状态
+                          </p>
+                          <p className="mt-2 text-sm font-black text-slate-700">
+                            {isSpeechGenerating
+                              ? "语音正在合成"
+                              : generatedSpeechUrl
+                                ? "语音已生成"
+                                : "等待开始合成"}
+                          </p>
+                        </div>
+                        <div className="rounded-[18px] bg-[#fff8fb] px-4 py-4">
+                          <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
+                            展示方式
+                          </p>
+                          <p className="mt-2 text-sm font-black text-slate-700">
+                            音频会在右侧播放器中播放
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : isVideoMode ? (
                   <div className="space-y-4">
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
@@ -3822,29 +4092,6 @@ function WorkshopContent() {
                       {isVideoGenerating ? "正在生成视频" : "开始生成视频"}
                     </button>
 
-                    <div className="rounded-[22px] border border-[#cae6f7] bg-white/92 p-4 shadow-[0_10px_24px_rgba(56,189,248,0.08)]">
-                      <p className="text-[15px] font-black text-slate-700">取回已生成视频</p>
-                      <p className="mt-1 text-xs leading-6 text-slate-400">
-                        如果页面提示任务号，把任务号粘到这里继续查询。
-                      </p>
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                        <input
-                          value={videoTaskIdInput}
-                          onChange={(event) => setVideoTaskIdInput(event.target.value)}
-                          placeholder="输入任务号"
-                          className="h-11 min-w-0 flex-1 rounded-[16px] border border-[#cae6f7] bg-white px-4 text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => checkExistingVideoTask(videoTaskIdInput)}
-                          disabled={isVideoGenerating}
-                          className="h-11 rounded-[16px] bg-[#ddf8ff] px-4 text-sm font-black text-[#176b86] transition hover:bg-[#cdf3fb] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          查询结果
-                        </button>
-                      </div>
-                    </div>
-
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">创作提示</p>
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -3869,6 +4116,44 @@ function WorkshopContent() {
                           </p>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="rounded-[22px] border border-[#cae6f7] bg-white/92 shadow-[0_10px_24px_rgba(56,189,248,0.08)]">
+                      <button
+                        type="button"
+                        onClick={() => setIsVideoTaskLookupOpen((current) => !current)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                      >
+                        <span className="text-[15px] font-black text-slate-700">
+                          取回已生成视频
+                        </span>
+                        <span className="rounded-full bg-[#ddf8ff] px-3 py-1 text-xs font-black text-[#176b86]">
+                          {isVideoTaskLookupOpen ? "收起" : "展开"}
+                        </span>
+                      </button>
+                      {isVideoTaskLookupOpen ? (
+                        <div className="border-t border-[#d9f1fb] px-4 pb-4 pt-3">
+                          <p className="text-xs leading-6 text-slate-400">
+                            如果页面提示任务号，把任务号粘到这里继续查询。
+                          </p>
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <input
+                              value={videoTaskIdInput}
+                              onChange={(event) => setVideoTaskIdInput(event.target.value)}
+                              placeholder="输入任务号"
+                              className="h-11 min-w-0 flex-1 rounded-[16px] border border-[#cae6f7] bg-white px-4 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => checkExistingVideoTask(videoTaskIdInput)}
+                              disabled={isVideoGenerating}
+                              className="h-11 rounded-[16px] bg-[#ddf8ff] px-4 text-sm font-black text-[#176b86] transition hover:bg-[#cdf3fb] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              查询结果
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -3944,6 +4229,8 @@ function WorkshopContent() {
                         ? "展示区"
                         : isPaintingMode
                           ? "画板区"
+                          : isSpeechMode
+                            ? "听音区"
                           : isVideoMode
                             ? "放映区"
                           : "预览区"}
@@ -3955,6 +4242,8 @@ function WorkshopContent() {
                         ? "灵感信纸"
                         : isPaintingMode
                           ? "梦幻画板"
+                          : isSpeechMode
+                            ? "朗读播放器"
                           : isVideoMode
                             ? "光影舞台"
                           : activeTab.label}
@@ -4065,6 +4354,27 @@ function WorkshopContent() {
                           {isSharing ? "正在分享" : "分享到社区"}
                         </button>
                       )}
+                    </div>
+                  ) : isSpeechMode ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGeneratedSpeechUrl("");
+                          setSpeechError("");
+                        }}
+                        className="inline-flex h-11 items-center justify-center rounded-full border border-[#ddd6fe] bg-white px-6 text-base font-black text-[#6d5bcf] shadow-[0_10px_22px_rgba(148,163,184,0.08)]"
+                      >
+                        清空音频
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGenerateSpeech}
+                        disabled={isSpeechGenerating}
+                        className="inline-flex h-11 items-center justify-center rounded-full bg-[linear-gradient(90deg,#d8d4ff_0%,#ede9fe_48%,#fce7f3_100%)] px-7 text-base font-black text-[#5b4fb8] shadow-[0_14px_28px_rgba(147,51,234,0.16)]"
+                      >
+                        {isSpeechGenerating ? "合成中" : "生成语音"}
+                      </button>
                     </div>
                   ) : isVideoMode ? (
                     <div className="flex flex-wrap items-center gap-3">
@@ -4315,6 +4625,86 @@ function WorkshopContent() {
                                 {drawingError && (
                                   <div className="mt-5 max-w-md rounded-[22px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
                                     {drawingError}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : isSpeechMode ? (
+                <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                    <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#ddd6fe] bg-[linear-gradient(180deg,rgba(245,243,255,0.72),rgba(255,247,251,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(147,51,234,0.08)]">
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),transparent_58%,rgba(216,180,254,0.08))]" />
+                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5">
+                        <div className="flex h-full min-h-0 w-full rounded-[26px] bg-gradient-to-br from-white via-[#faf7ff] to-[#fff7fb] p-4 shadow-[0_20px_50px_rgba(147,51,234,0.10)]">
+                          <div className="mx-auto flex h-full min-h-0 w-full items-center justify-center rounded-[22px] border-2 border-dashed border-[#ddd6fe] bg-white/78 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.9)]">
+                            {isSpeechGenerating ? (
+                              <div className="flex h-full min-h-0 w-full flex-col items-center justify-center text-center">
+                                <div className="relative flex h-28 w-28 items-center justify-center">
+                                  <div className="absolute inset-0 rounded-full border-4 border-dashed border-[#ddd6fe] animate-spin" />
+                                  <div className="absolute inset-3 rounded-full bg-white/82" />
+                                  <div className="relative grid h-12 w-12 place-items-center rounded-[18px] bg-gradient-to-br from-[#d8d4ff] to-[#fce7f3]">
+                                    <Image
+                                      src="/landing-assets/icon-music.png"
+                                      alt="语音图标"
+                                      width={28}
+                                      height={28}
+                                      className="h-7 w-7 object-contain"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="mt-6 rounded-full bg-white px-4 py-2 text-sm font-bold text-[#6d5bcf] shadow-[0_10px_24px_rgba(148,163,184,0.12)]">
+                                  正在合成朗读音频
+                                </div>
+                                <p className="mt-5 max-w-md text-lg font-black leading-8 text-slate-600">
+                                  正在把文字变成自然语音，请稍等一会儿。
+                                </p>
+                              </div>
+                            ) : generatedSpeechUrl ? (
+                              <div className="w-full max-w-xl rounded-[28px] border border-[#ddd6fe] bg-white px-6 py-7 text-center shadow-[0_22px_60px_rgba(147,51,234,0.12)]">
+                                <div className="mx-auto grid h-24 w-24 place-items-center rounded-[30px] bg-gradient-to-br from-[#d8d4ff] via-[#ede9fe] to-[#fce7f3]">
+                                  <Image
+                                    src="/landing-assets/icon-music.png"
+                                    alt="语音图标"
+                                    width={44}
+                                    height={44}
+                                    className="h-11 w-11 object-contain"
+                                  />
+                                </div>
+                                <p className="mt-5 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-3xl font-black text-slate-700">
+                                  语音已生成
+                                </p>
+                                <audio
+                                  src={generatedSpeechUrl}
+                                  controls
+                                  className="mt-6 w-full"
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex h-full min-h-0 w-full flex-col items-center justify-center text-center">
+                                <div className="grid h-28 w-28 place-items-center rounded-[30px] bg-gradient-to-br from-[#d8d4ff] via-[#ede9fe] to-[#fce7f3] shadow-[0_16px_36px_rgba(148,163,184,0.12)]">
+                                  <Image
+                                    src="/landing-assets/icon-music.png"
+                                    alt="语音图标"
+                                    width={44}
+                                    height={44}
+                                    className="h-11 w-11 object-contain"
+                                  />
+                                </div>
+                                <p className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-3xl font-black text-slate-700">
+                                  等待朗读
+                                </p>
+                                <p className="mt-3 max-w-md text-base leading-8 text-slate-500">
+                                  在左侧输入文字并选择音色，生成后这里会播放完整语音。
+                                </p>
+                                {speechError && (
+                                  <div className="mt-5 max-w-md rounded-[22px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
+                                    {speechError}
                                   </div>
                                 )}
                               </div>

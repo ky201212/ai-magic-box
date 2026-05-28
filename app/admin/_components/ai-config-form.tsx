@@ -31,6 +31,7 @@ const MODE_OPTIONS = [
   { key: "writing", label: "AI写作" },
   { key: "painting", label: "AI绘画" },
   { key: "video", label: "AI视频" },
+  { key: "speech", label: "AI语音" },
   { key: "transcribe", label: "语音识别" },
 ] as const;
 
@@ -146,6 +147,17 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     description: "适合文生视频场景的基础模板，提交任务后会自动轮询结果并返回视频地址。",
     badge: "视频专用",
     image_size: "1280x720",
+  },
+  {
+    id: "cosyvoice2-speech",
+    mode_key: "speech",
+    label: "CosyVoice2 语音合成",
+    provider: "SiliconFlow",
+    endpoint_url: "https://api.siliconflow.cn/v1/audio/speech",
+    api_key_env: "SILICONFLOW_API_KEY",
+    model: "FunAudioLLM/CosyVoice2-0.5B",
+    description: "适合把作文、演讲稿、故事变成可播放语音的模板。",
+    badge: "合成专用",
   },
   {
     id: "sensevoice-small",
