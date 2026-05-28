@@ -12,6 +12,8 @@ import {
   listActivationCodesByBatch,
   listAdminPaymentOrders,
   listSubscriptionPlans,
+  refundPaymentOrder,
+  syncPaymentOrderFromGateway,
   updateMagicCoinRate,
   upsertSubscriptionPlan,
 } from "@/lib/payments";
@@ -103,6 +105,15 @@ export async function POST(request: Request) {
       | {
           action: "delete_plan";
           planId: string;
+        }
+      | {
+          action: "sync_order";
+          orderId: string;
+        }
+      | {
+          action: "refund_order";
+          orderId: string;
+          reason?: string;
         };
 
     if (body.action === "update_rate") {
@@ -190,6 +201,56 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         plan,
+      });
+    }
+
+    if (body.action === "sync_order") {
+      const order = await syncPaymentOrderFromGateway(body.orderId);
+
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "payment_order_sync",
+        targetType: "payment_order",
+        targetId: order.order_id,
+        detail: {
+          status: order.status,
+          tradeNo: order.trade_no,
+          notifyStatus: order.notify_status,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        order,
+      });
+    }
+
+    if (body.action === "refund_order") {
+      const order = await refundPaymentOrder({
+        orderId: body.orderId,
+        reason: body.reason,
+      });
+
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "payment_order_refund",
+        targetType: "payment_order",
+        targetId: order.order_id,
+        detail: {
+          amount: order.amount,
+          paymentMethod: order.payment_method,
+          tradeNo: order.trade_no,
+          reason: body.reason ?? null,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        order,
       });
     }
 

@@ -1,11 +1,12 @@
 import "server-only";
 import crypto from "node:crypto";
-import { addCredits, ensureUserCredits } from "@/lib/credits";
+import { addCredits, deductCredits, ensureUserCredits } from "@/lib/credits";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   getPaymentGateway,
   type PaymentMethod,
   type PaymentNotifyPayload,
+  type PaymentQueryResult,
 } from "@/lib/payment-gateway";
 
 export type { PaymentMethod } from "@/lib/payment-gateway";
@@ -39,10 +40,29 @@ export type PaymentOrder = {
   status: "pending" | "paid" | "cancelled" | "refunded";
   payment_method: PaymentMethod;
   trade_no: string | null;
+  provider_name: string | null;
+  buyer_account: string | null;
+  buyer_id: string | null;
+  notify_status: string | null;
+  failure_reason: string | null;
   detail: Record<string, unknown>;
+  payment_request: Record<string, unknown>;
+  payment_response: Record<string, unknown>;
+  notify_payload: Record<string, unknown> | null;
+  refund_payload: Record<string, unknown> | null;
   paid_at: string | null;
+  refunded_at: string | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AdminPaymentOrder = PaymentOrder & {
+  user: {
+    id: string;
+    phone: string;
+    nickname: string | null;
+  } | null;
 };
 
 export type ActivationCodeBatch = {
@@ -234,6 +254,69 @@ function parseAmountToCents(input: unknown) {
   }
 
   return Math.round(normalized * 100);
+}
+
+function isPaidGatewayStatus(status: string | null | undefined) {
+  return status === "TRADE_SUCCESS" || status === "TRADE_FINISHED";
+}
+
+function createRefundRequestId(orderId: string) {
+  return `refund_${orderId.replaceAll("-", "").slice(0, 24)}_${Date.now()}`;
+}
+
+const PAYMENT_ORDER_SELECT = `
+  order_id,
+  user_id,
+  order_type,
+  amount,
+  status,
+  payment_method,
+  trade_no,
+  provider_name,
+  buyer_account,
+  buyer_id,
+  notify_status,
+  failure_reason,
+  detail,
+  payment_request,
+  payment_response,
+  notify_payload,
+  refund_payload,
+  paid_at,
+  refunded_at,
+  closed_at,
+  created_at,
+  updated_at
+`;
+
+async function enrichOrdersWithUsers<T extends PaymentOrder>(orders: T[]) {
+  if (!orders.length) {
+    return [] as Array<T & { user: AdminPaymentOrder["user"] }>;
+  }
+
+  const userIds = Array.from(new Set(orders.map((order) => order.user_id).filter(Boolean)));
+
+  if (!userIds.length) {
+    return orders.map((order) => ({ ...order, user: null }));
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("id, phone, nickname")
+    .in("id", userIds)
+    .returns<Array<{ id: string; phone: string; nickname: string | null }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  const userMap = new Map((users ?? []).map((user) => [user.id, user]));
+
+  return orders.map((order) => ({
+    ...order,
+    user: userMap.get(order.user_id) ?? null,
+  }));
 }
 
 export async function getMagicCoinRate() {
@@ -568,9 +651,7 @@ async function insertPaymentOrder(input: {
       payment_method: input.paymentMethod,
       detail: input.detail,
     } as never)
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .single<PaymentOrder>();
 
   if (error) {
@@ -612,7 +693,27 @@ export async function createCoinPurchaseOrder(input: {
     detail: order.detail,
   });
 
-  return { order, payment };
+  const paymentRequest = {
+    title: "魔法币充值",
+    orderType: order.order_type,
+    itemSummary: `${coins} 魔法币`,
+    amount: order.amount,
+    detail: order.detail,
+    ...(payment.requestPayload ?? {}),
+  };
+
+  const finalizedOrder = await updateOrderPaymentLifecycle(order.order_id, {
+    providerName: payment.provider ?? payment.channel,
+    paymentRequest,
+    paymentResponse: payment.responsePayload ?? {
+      paymentUrl: payment.paymentUrl,
+      qrText: payment.qrText,
+      expiresInSeconds: payment.expiresInSeconds,
+      channel: payment.channel,
+    },
+  });
+
+  return { order: finalizedOrder, payment };
 }
 
 export async function createSubscriptionOrder(input: {
@@ -658,7 +759,27 @@ export async function createSubscriptionOrder(input: {
     detail: order.detail,
   });
 
-  return { order, payment };
+  const paymentRequest = {
+    title: plan.name,
+    orderType: order.order_type,
+    itemSummary: `${plan.name} / ${plan.duration_days} 天 / 每日 ${plan.daily_coins} 币`,
+    amount: order.amount,
+    detail: order.detail,
+    ...(payment.requestPayload ?? {}),
+  };
+
+  const finalizedOrder = await updateOrderPaymentLifecycle(order.order_id, {
+    providerName: payment.provider ?? payment.channel,
+    paymentRequest,
+    paymentResponse: payment.responsePayload ?? {
+      paymentUrl: payment.paymentUrl,
+      qrText: payment.qrText,
+      expiresInSeconds: payment.expiresInSeconds,
+      channel: payment.channel,
+    },
+  });
+
+  return { order: finalizedOrder, payment };
 }
 
 async function markOrderPaid(orderId: string, userId: string, payload: PaymentNotifyPayload) {
@@ -668,14 +789,18 @@ async function markOrderPaid(orderId: string, userId: string, payload: PaymentNo
     .update({
       status: "paid",
       trade_no: payload.tradeNo,
+      provider_name: payload.provider ?? null,
+      buyer_account: payload.buyerAccount ?? null,
+      buyer_id: payload.buyerId ?? null,
+      notify_status: payload.status ?? "TRADE_SUCCESS",
+      notify_payload: payload.raw,
+      failure_reason: null,
       paid_at: payload.paidAt,
     } as never)
     .eq("order_id", orderId)
     .eq("user_id", userId)
     .eq("status", "pending")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .single<PaymentOrder>();
 
   if (error) {
@@ -685,13 +810,27 @@ async function markOrderPaid(orderId: string, userId: string, payload: PaymentNo
   return paidOrder;
 }
 
+async function markOrderPaidFromQuery(order: PaymentOrder, result: PaymentQueryResult) {
+  const paidOrder = await markOrderPaid(order.order_id, order.user_id, {
+    orderId: order.order_id,
+    tradeNo: result.tradeNo ?? order.trade_no ?? `alipay_${order.order_id}`,
+    paidAt: result.paidAt ?? new Date().toISOString(),
+    raw: result.raw,
+    provider: result.provider ?? order.provider_name ?? "alipay",
+    buyerAccount: result.buyerAccount ?? null,
+    buyerId: result.buyerId ?? null,
+    status: result.status,
+  });
+
+  await fulfillPaidOrder(paidOrder);
+  return paidOrder;
+}
+
 export async function completeMockPayment(orderId: string, userId: string) {
   const supabase = getSupabaseAdmin();
   const { data: order, error } = await supabase
     .from("payment_orders")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .eq("order_id", orderId)
     .eq("user_id", userId)
     .single<PaymentOrder>();
@@ -730,9 +869,7 @@ export async function cancelPaymentOrder(orderId: string, userId: string) {
 
   const { data: currentOrder, error: currentOrderError } = await supabase
     .from("payment_orders")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .eq("order_id", normalizedOrderId)
     .eq("user_id", userId)
     .maybeSingle<PaymentOrder>();
@@ -753,13 +890,14 @@ export async function cancelPaymentOrder(orderId: string, userId: string) {
     .from("payment_orders")
     .update({
       status: "cancelled",
+      notify_status: currentOrder.notify_status ?? "CANCELLED",
+      failure_reason: currentOrder.failure_reason ?? "用户取消或支付超时未完成",
+      closed_at: new Date().toISOString(),
     } as never)
     .eq("order_id", normalizedOrderId)
     .eq("user_id", userId)
     .eq("status", "pending")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .maybeSingle<PaymentOrder>();
 
   if (cancelError) {
@@ -812,6 +950,66 @@ export async function handlePaymentNotification(method: PaymentMethod, request: 
   return paidOrder;
 }
 
+export async function syncPaymentOrderFromGateway(orderId: string) {
+  const order = await getPaymentOrderById(orderId);
+
+  if (!order) {
+    throw new Error("没有找到这个订单。");
+  }
+
+  const gateway = getPaymentGateway(order.payment_method);
+
+  if (!gateway.queryPayment) {
+    throw new Error("当前支付方式不支持主动查单。");
+  }
+
+  const result = await gateway.queryPayment(order.order_id);
+
+  if (result.amount !== null && result.amount !== order.amount) {
+    await updateOrderPaymentLifecycle(order.order_id, {
+      notifyStatus: result.status,
+      failureReason: "支付宝查单金额与本地订单金额不一致",
+      notifyPayload: result.raw,
+    });
+    throw new Error("支付宝查单金额与本地订单金额不一致。");
+  }
+
+  if (order.status === "paid" || order.status === "refunded") {
+    return updateOrderPaymentLifecycle(order.order_id, {
+      providerName: result.provider ?? order.provider_name,
+      notifyStatus: result.status,
+      notifyPayload: result.raw,
+      buyerAccount: result.buyerAccount ?? order.buyer_account,
+      buyerId: result.buyerId ?? order.buyer_id,
+      tradeNo: result.tradeNo ?? order.trade_no,
+    });
+  }
+
+  if (order.status === "pending" && isPaidGatewayStatus(result.status)) {
+    return markOrderPaidFromQuery(order, result);
+  }
+
+  if (
+    order.status === "pending" &&
+    (result.status === "TRADE_CLOSED" || result.status === "TRADE_CANCELED")
+  ) {
+    return closePaymentOrder(order, {
+      notifyStatus: result.status,
+      failureReason: "支付宝查单显示交易已关闭",
+      notifyPayload: result.raw,
+    });
+  }
+
+  return updateOrderPaymentLifecycle(order.order_id, {
+    providerName: result.provider ?? order.provider_name,
+    notifyStatus: result.status,
+    notifyPayload: result.raw,
+    buyerAccount: result.buyerAccount ?? order.buyer_account,
+    buyerId: result.buyerId ?? order.buyer_id,
+    tradeNo: result.tradeNo ?? order.trade_no,
+  });
+}
+
 async function fulfillPaidOrder(order: PaymentOrder) {
   if (order.order_type === "coin_purchase") {
     const coins = Number(order.detail.coins ?? 0);
@@ -838,6 +1036,70 @@ async function fulfillPaidOrder(order: PaymentOrder) {
     source: "payment",
     referenceId: order.order_id,
   });
+}
+
+async function revokePaidOrderBenefit(order: PaymentOrder, reason: string) {
+  if (order.order_type === "coin_purchase") {
+    const coins = Number(order.detail.coins ?? 0);
+    const balanceAfter = await deductCredits(order.user_id, coins, {
+      reasonCode: "payment_refund_deduct",
+      reasonLabel: "支付退款扣回",
+      note: `订单 ${order.order_id} 已退款，扣回 ${coins} 个魔法币。${reason}`,
+    });
+
+    await createSignedCoinTransaction({
+      user_id: order.user_id,
+      amount: -Math.max(0, coins),
+      type: "refund",
+      reference_id: order.order_id,
+      balance_after: balanceAfter,
+    });
+    return;
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("user_subscriptions")
+    .update({
+      status: "cancelled",
+    } as never)
+    .eq("user_id", order.user_id)
+    .eq("reference_id", order.order_id)
+    .eq("source", "payment");
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+}
+
+async function closePaymentOrder(
+  order: PaymentOrder,
+  input: {
+    notifyStatus?: string | null;
+    failureReason: string;
+    notifyPayload?: Record<string, unknown>;
+  },
+) {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("payment_orders")
+    .update({
+      status: "cancelled",
+      notify_status: input.notifyStatus ?? order.notify_status,
+      failure_reason: input.failureReason,
+      notify_payload: input.notifyPayload ?? order.notify_payload,
+      closed_at: new Date().toISOString(),
+    } as never)
+    .eq("order_id", order.order_id)
+    .eq("status", "pending")
+    .select(PAYMENT_ORDER_SELECT)
+    .single<PaymentOrder>();
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return data;
 }
 
 async function createSignedCoinTransaction(
@@ -1013,9 +1275,7 @@ export async function listUserPaymentOrders(userId: string, limit = 20) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("payment_orders")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit)
@@ -1037,9 +1297,7 @@ export async function getPaymentOrderById(orderId: string) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("payment_orders")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .eq("order_id", orderId)
     .maybeSingle<PaymentOrder>();
 
@@ -1055,13 +1313,149 @@ export async function getPaymentOrderById(orderId: string) {
   return data;
 }
 
+async function updateOrderPaymentLifecycle(
+  orderId: string,
+  input: {
+    providerName?: string | null;
+    tradeNo?: string | null;
+    buyerAccount?: string | null;
+    buyerId?: string | null;
+    paymentRequest?: Record<string, unknown>;
+    paymentResponse?: Record<string, unknown>;
+    notifyPayload?: Record<string, unknown> | null;
+    refundPayload?: Record<string, unknown> | null;
+    notifyStatus?: string | null;
+    failureReason?: string | null;
+    status?: PaymentOrder["status"];
+    paidAt?: string | null;
+    refundedAt?: string | null;
+    closedAt?: string | null;
+  },
+) {
+  const supabase = getSupabaseAdmin();
+  const updatePayload: Record<string, unknown> = {};
+
+  if (input.providerName !== undefined) {
+    updatePayload.provider_name = input.providerName;
+  }
+  if (input.tradeNo !== undefined) {
+    updatePayload.trade_no = input.tradeNo;
+  }
+  if (input.buyerAccount !== undefined) {
+    updatePayload.buyer_account = input.buyerAccount;
+  }
+  if (input.buyerId !== undefined) {
+    updatePayload.buyer_id = input.buyerId;
+  }
+  if (input.paymentRequest !== undefined) {
+    updatePayload.payment_request = input.paymentRequest;
+  }
+  if (input.paymentResponse !== undefined) {
+    updatePayload.payment_response = input.paymentResponse;
+  }
+  if (input.notifyPayload !== undefined) {
+    updatePayload.notify_payload = input.notifyPayload;
+  }
+  if (input.refundPayload !== undefined) {
+    updatePayload.refund_payload = input.refundPayload;
+  }
+  if (input.notifyStatus !== undefined) {
+    updatePayload.notify_status = input.notifyStatus;
+  }
+  if (input.failureReason !== undefined) {
+    updatePayload.failure_reason = input.failureReason;
+  }
+  if (input.status !== undefined) {
+    updatePayload.status = input.status;
+  }
+  if (input.paidAt !== undefined) {
+    updatePayload.paid_at = input.paidAt;
+  }
+  if (input.refundedAt !== undefined) {
+    updatePayload.refunded_at = input.refundedAt;
+  }
+  if (input.closedAt !== undefined) {
+    updatePayload.closed_at = input.closedAt;
+  }
+
+  const { data, error } = await supabase
+    .from("payment_orders")
+    .update(updatePayload as never)
+    .eq("order_id", orderId)
+    .select(PAYMENT_ORDER_SELECT)
+    .single<PaymentOrder>();
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return data;
+}
+
+export async function refundPaymentOrder(input: {
+  orderId: string;
+  reason?: string;
+}) {
+  const order = await getPaymentOrderById(input.orderId);
+
+  if (!order) {
+    throw new Error("没有找到这个订单。");
+  }
+
+  if (order.status === "refunded") {
+    return order;
+  }
+
+  if (order.status !== "paid") {
+    throw new Error("只有已支付订单可以退款。");
+  }
+
+  const gateway = getPaymentGateway(order.payment_method);
+
+  if (!gateway.refundPayment) {
+    throw new Error("当前支付方式不支持退款。");
+  }
+
+  const reason = input.reason?.trim() || "后台管理员发起全额退款";
+  const refundResult = await gateway.refundPayment({
+    orderId: order.order_id,
+    tradeNo: order.trade_no,
+    amount: order.amount,
+    reason,
+    refundRequestId: createRefundRequestId(order.order_id),
+  });
+
+  if (!refundResult.success) {
+    await updateOrderPaymentLifecycle(order.order_id, {
+      refundPayload: refundResult.raw,
+      failureReason: "支付宝退款返回未成功",
+    });
+    throw new Error("支付宝退款返回未成功，请在支付宝后台核对。");
+  }
+
+  await revokePaidOrderBenefit(order, reason);
+
+  return updateOrderPaymentLifecycle(order.order_id, {
+    status: "refunded",
+    providerName: refundResult.provider ?? order.provider_name,
+    tradeNo: refundResult.tradeNo ?? order.trade_no,
+    refundPayload: {
+      refundRequestId: refundResult.refundNo,
+      refundAmount: refundResult.refundAmount,
+      reason,
+      raw: refundResult.raw,
+    },
+    notifyStatus: "REFUNDED",
+    failureReason: null,
+    refundedAt: new Date().toISOString(),
+  });
+}
+
 export async function listAdminPaymentOrders(limit = 80) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("payment_orders")
-    .select(
-      "order_id, user_id, order_type, amount, status, payment_method, trade_no, detail, paid_at, created_at, updated_at",
-    )
+    .select(PAYMENT_ORDER_SELECT)
     .order("created_at", { ascending: false })
     .limit(limit)
     .returns<PaymentOrder[]>();
@@ -1075,7 +1469,7 @@ export async function listAdminPaymentOrders(limit = 80) {
     throw error;
   }
 
-  return data ?? [];
+  return enrichOrdersWithUsers(data ?? []);
 }
 
 export async function createActivationCodeBatch(input: {

@@ -30,6 +30,7 @@ const MODE_OPTIONS = [
   { key: "coding", label: "AI编程" },
   { key: "writing", label: "AI写作" },
   { key: "painting", label: "AI绘画" },
+  { key: "video", label: "AI视频" },
   { key: "transcribe", label: "语音识别" },
 ] as const;
 
@@ -135,6 +136,18 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     image_size: "1024x1024",
   },
   {
+    id: "siliconflow-wan22-t2v",
+    mode_key: "video",
+    label: "Wan 2.2 T2V",
+    provider: "SiliconFlow",
+    endpoint_url: "https://api.siliconflow.cn/v1/video/submit",
+    api_key_env: "SILICONFLOW_API_KEY",
+    model: "Wan-AI/Wan2.2-T2V-A14B",
+    description: "适合文生视频场景的基础模板，提交任务后会自动轮询结果并返回视频地址。",
+    badge: "视频专用",
+    image_size: "1280x720",
+  },
+  {
     id: "sensevoice-small",
     mode_key: "transcribe",
     label: "SenseVoice Small",
@@ -176,7 +189,12 @@ function createEmptyPreset(modeKey: string): AiModelPresetRecord {
     model: "",
     description: "",
     badge: "新模板",
-    image_size: modeKey === "painting" ? "1024x1024" : undefined,
+    image_size:
+      modeKey === "painting"
+        ? "1024x1024"
+        : modeKey === "video"
+          ? "1280x720"
+          : undefined,
   };
 }
 
@@ -1343,9 +1361,9 @@ export function AiConfigForm({
                       </select>
                     </label>
 
-                    {config.mode_key === "painting" ? (
+                    {config.mode_key === "painting" || config.mode_key === "video" ? (
                       <label className="block text-sm font-bold text-slate-600">
-                        生成图片尺寸
+                        {config.mode_key === "video" ? "视频画面尺寸" : "生成图片尺寸"}
                         <input
                           value={imageSize}
                           onChange={(event) =>
@@ -1656,9 +1674,9 @@ export function AiConfigForm({
                                   className="mt-2 h-12 w-full rounded-[16px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
                                 />
                               </label>
-                              {preset.mode_key === "painting" && (
+                              {(preset.mode_key === "painting" || preset.mode_key === "video") && (
                                 <label className="block text-sm font-bold text-slate-600 xl:col-span-2">
-                                  默认图片尺寸
+                                  {preset.mode_key === "video" ? "默认视频尺寸" : "默认图片尺寸"}
                                   <input
                                     value={preset.image_size ?? ""}
                                     onChange={(event) =>

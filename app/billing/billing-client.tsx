@@ -100,6 +100,8 @@ function formatOrderStatus(status: string) {
 
 const ORDER_PREVIEW_LIMIT = 5;
 const PENDING_CHECKOUT_STORAGE_KEY = "magic-box:pending-checkout-order";
+const ALIPAY_LOGO_SRC = "/alipay-assets/alipay-logo-square.png";
+const ALIPAY_RECOMMENDED_SRC = "/alipay-assets/recommended.png";
 
 type PendingCheckoutOrder = {
   orderId: string;
@@ -152,6 +154,68 @@ function forgetPendingCheckoutOrder(orderId?: string) {
   }
 
   window.sessionStorage.removeItem(PENDING_CHECKOUT_STORAGE_KEY);
+}
+
+function PaymentMethodSelector({
+  selectedPaymentMethod,
+  onSelect,
+}: {
+  selectedPaymentMethod: PaymentMethod;
+  onSelect: (method: PaymentMethod) => void;
+}) {
+  return (
+    <div className="mt-5">
+      <p className="text-sm font-black text-[#17213f]">请选择支付方式</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => onSelect("alipay_pc")}
+          className={`min-h-[58px] rounded-[4px] border bg-white px-4 py-3 text-left transition ${
+            selectedPaymentMethod === "alipay_pc"
+              ? "border-[#1677ff] shadow-[0_0_0_1px_rgba(22,119,255,0.18)]"
+              : "border-[#e5e7eb] hover:border-[#1677ff]"
+          }`}
+        >
+          <span className="flex items-center gap-3">
+            <span
+              className={`grid size-4 place-items-center rounded-full border ${
+                selectedPaymentMethod === "alipay_pc"
+                  ? "border-[#1677ff] bg-[#1677ff]"
+                  : "border-[#d7dbe3] bg-white"
+              }`}
+              aria-hidden="true"
+            >
+              {selectedPaymentMethod === "alipay_pc" ? (
+                <span className="size-1.5 rounded-full bg-white" />
+              ) : null}
+            </span>
+            <img
+              src={ALIPAY_LOGO_SRC}
+              alt="支付宝"
+              className="size-6 shrink-0 rounded-[4px]"
+            />
+            <span className="text-sm font-black text-[#17213f]">支付宝</span>
+            <img
+              src={ALIPAY_RECOMMENDED_SRC}
+              alt="推荐"
+              className="h-[18px] w-auto shrink-0"
+            />
+          </span>
+        </button>
+
+        <button
+          type="button"
+          disabled
+          className="min-h-[58px] rounded-[4px] border border-[#e5e7eb] bg-white px-4 py-3 text-left opacity-60"
+        >
+          <span className="flex items-center gap-3">
+            <span className="size-4 rounded-full border border-[#d7dbe3] bg-white" />
+            <span className="h-6 w-[92px] rounded-[3px] bg-[#e8ebf0]" />
+          </span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function BillingClient({ initialData }: { initialData: BillingPayload }) {
@@ -701,26 +765,10 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                     <p className="text-lg font-black text-[#17213f]">魔法币充值</p>
                   </div>
 
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPaymentMethod("alipay_pc")}
-                      className={`rounded-[22px] border px-5 py-4 text-left transition ${
-                        selectedPaymentMethod === "alipay_pc"
-                          ? "border-[#8e96ff] bg-[#f1f2ff] shadow-[0_12px_28px_rgba(98,92,255,0.14)]"
-                          : "border-[#e4eaff] bg-[#fbfcff]"
-                      }`}
-                    >
-                      <p className="text-sm font-black text-[#17213f]">支付宝支付</p>
-                    </button>
-                    <button
-                      type="button"
-                      disabled
-                      className="rounded-[22px] border border-dashed border-[#dce5ff] bg-[#f8faff] px-5 py-4 text-left opacity-70"
-                    >
-                      <p className="text-sm font-black text-[#17213f]">微信支付</p>
-                    </button>
-                  </div>
+                  <PaymentMethodSelector
+                    selectedPaymentMethod={selectedPaymentMethod}
+                    onSelect={setSelectedPaymentMethod}
+                  />
 
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {coinOptions.map((option) => (
@@ -773,6 +821,11 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   <div className="mt-3 rounded-[18px] border border-[#f4e2b2] bg-[#fffbf1] px-4 py-3 text-sm leading-7 text-[#8a7141]">
                     订阅套餐之间不能叠加。购买新的订阅会覆盖当前正在生效的订阅。
                   </div>
+
+                  <PaymentMethodSelector
+                    selectedPaymentMethod={selectedPaymentMethod}
+                    onSelect={setSelectedPaymentMethod}
+                  />
 
                   <div className="mt-5 space-y-4">
                     {data.plans.map((plan) => (

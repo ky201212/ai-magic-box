@@ -15,6 +15,9 @@ export type PaymentGatewayCreateResult = {
   paymentUrl: string;
   qrText: string;
   expiresInSeconds: number;
+  provider?: string;
+  requestPayload?: Record<string, unknown>;
+  responsePayload?: Record<string, unknown>;
 };
 
 export type PaymentNotifyPayload = {
@@ -22,6 +25,32 @@ export type PaymentNotifyPayload = {
   tradeNo: string;
   paidAt: string;
   raw: Record<string, unknown>;
+  provider?: string;
+  buyerAccount?: string | null;
+  buyerId?: string | null;
+  status?: string | null;
+};
+
+export type PaymentQueryResult = {
+  orderId: string;
+  tradeNo: string | null;
+  status: string;
+  paidAt: string | null;
+  amount: number | null;
+  raw: Record<string, unknown>;
+  provider?: string;
+  buyerAccount?: string | null;
+  buyerId?: string | null;
+};
+
+export type PaymentRefundResult = {
+  orderId: string;
+  tradeNo: string | null;
+  refundNo: string | null;
+  refundAmount: number;
+  success: boolean;
+  raw: Record<string, unknown>;
+  provider?: string;
 };
 
 type PaymentGateway = {
@@ -33,6 +62,14 @@ type PaymentGateway = {
     },
   ) => Promise<PaymentGatewayCreateResult>;
   parseNotifyPayload: (request: Request) => Promise<PaymentNotifyPayload>;
+  queryPayment?: (orderId: string) => Promise<PaymentQueryResult>;
+  refundPayment?: (input: {
+    orderId: string;
+    tradeNo?: string | null;
+    amount: number;
+    reason: string;
+    refundRequestId: string;
+  }) => Promise<PaymentRefundResult>;
 };
 
 function getRequiredEnv(name: string) {
@@ -173,6 +210,54 @@ function createAlipayPaymentUrl(order: PaymentGatewayOrder, input: {
   return `${getAlipayGatewayUrl()}?${query.toString()}`;
 }
 
+async function requestAlipayOpenApi<T extends Record<string, unknown>>(
+  method: string,
+  bizContent: Record<string, unknown>,
+) {
+  const params: Record<string, string> = {
+    app_id: getRequiredEnv("ALIPAY_APP_ID"),
+    method,
+    format: "JSON",
+    charset: "utf-8",
+    sign_type: "RSA2",
+    timestamp: formatAlipayTimestamp(),
+    version: "1.0",
+    biz_content: JSON.stringify(bizContent),
+  };
+  const signContent = buildSignContent(params);
+  const signature = signWithAlipayRsa2(signContent);
+  const body = new URLSearchParams(params);
+  body.set("sign", signature);
+
+  const response = await fetch(getAlipayGatewayUrl(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+    },
+    body,
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as T & {
+    error_response?: {
+      code?: string;
+      msg?: string;
+      sub_code?: string;
+      sub_msg?: string;
+    };
+  };
+
+  if (!response.ok || payload.error_response) {
+    const errorResponse = payload.error_response;
+    throw new Error(
+      errorResponse?.sub_msg ||
+        errorResponse?.msg ||
+        `支付宝接口 ${method} 调用失败。`,
+    );
+  }
+
+  return payload;
+}
+
 function parseAlipayPaidAt(input?: string) {
   if (!input) {
     return new Date().toISOString();
@@ -197,6 +282,16 @@ const mockGateway: PaymentGateway = {
       paymentUrl: `/billing/mock-pay?order_id=${order.orderId}`,
       qrText: `MOCK_PAY:${order.orderId}`,
       expiresInSeconds: 900,
+      provider: "mock",
+      requestPayload: {
+        orderId: order.orderId,
+        amount: order.amount,
+        title: order.title,
+      },
+      responsePayload: {
+        paymentUrl: `/billing/mock-pay?order_id=${order.orderId}`,
+        qrText: `MOCK_PAY:${order.orderId}`,
+      },
     };
   },
   async parseNotifyPayload(request) {
@@ -215,19 +310,68 @@ const mockGateway: PaymentGateway = {
       tradeNo: body.tradeNo ?? `mock_${body.orderId.replaceAll("-", "").slice(0, 18)}`,
       paidAt: body.paidAt ?? new Date().toISOString(),
       raw: body,
+      provider: "mock",
+      status: "TRADE_SUCCESS",
+    };
+  },
+  async queryPayment(orderId) {
+    return {
+      orderId,
+      tradeNo: null,
+      status: "UNKNOWN",
+      paidAt: null,
+      amount: null,
+      raw: {
+        orderId,
+        message: "Mock 支付不支持真实查单。",
+      },
+      provider: "mock",
+    };
+  },
+  async refundPayment(input) {
+    return {
+      orderId: input.orderId,
+      tradeNo: input.tradeNo ?? null,
+      refundNo: input.refundRequestId,
+      refundAmount: input.amount,
+      success: true,
+      raw: {
+        orderId: input.orderId,
+        refundRequestId: input.refundRequestId,
+        refundAmount: input.amount,
+        reason: input.reason,
+      },
+      provider: "mock",
     };
   },
 };
 
 const alipayGateway: PaymentGateway = {
   async createPayment(order, input) {
-    const paymentUrl = createAlipayPaymentUrl(order, input);
+    const notifyUrl = resolveAbsoluteUrl(input.notifyUrl ?? getAlipayNotifyUrl());
+    const returnUrl = resolveAbsoluteUrl(input.returnUrl ?? getAlipayReturnUrl(order.orderId));
+    const paymentUrl = createAlipayPaymentUrl(order, {
+      notifyUrl,
+      returnUrl,
+    });
 
     return {
       channel: "alipay_pc",
       paymentUrl,
       qrText: paymentUrl,
       expiresInSeconds: 900,
+      provider: "alipay",
+      requestPayload: {
+        outTradeNo: order.orderId,
+        totalAmount: formatAlipayAmount(order.amount),
+        subject: order.title.slice(0, 128),
+        notifyUrl,
+        returnUrl,
+      },
+      responsePayload: {
+        paymentUrl,
+        qrText: paymentUrl,
+      },
     };
   },
   async parseNotifyPayload(request) {
@@ -286,6 +430,60 @@ const alipayGateway: PaymentGateway = {
       tradeNo: raw.trade_no,
       paidAt: parseAlipayPaidAt(raw.gmt_payment || raw.notify_time),
       raw,
+      provider: "alipay",
+      buyerAccount: raw.buyer_logon_id ?? null,
+      buyerId: raw.buyer_id ?? null,
+      status: raw.trade_status ?? null,
+    };
+  },
+  async queryPayment(orderId) {
+    const payload = await requestAlipayOpenApi<{
+      alipay_trade_query_response?: Record<string, string>;
+    }>("alipay.trade.query", {
+      out_trade_no: orderId,
+    });
+    const response = payload.alipay_trade_query_response ?? {};
+    const status = response.trade_status ?? "UNKNOWN";
+    const paidAt =
+      status === "TRADE_SUCCESS" || status === "TRADE_FINISHED"
+        ? parseAlipayPaidAt(response.send_pay_date)
+        : null;
+
+    return {
+      orderId: response.out_trade_no ?? orderId,
+      tradeNo: response.trade_no ?? null,
+      status,
+      paidAt,
+      amount: response.total_amount ? Math.round(Number(response.total_amount) * 100) : null,
+      raw: response,
+      provider: "alipay",
+      buyerAccount: response.buyer_logon_id ?? null,
+      buyerId: response.buyer_user_id ?? response.buyer_user_type ?? null,
+    };
+  },
+  async refundPayment(input) {
+    const payload = await requestAlipayOpenApi<{
+      alipay_trade_refund_response?: Record<string, string>;
+    }>("alipay.trade.refund", {
+      out_trade_no: input.orderId,
+      trade_no: input.tradeNo || undefined,
+      refund_amount: formatAlipayAmount(input.amount),
+      refund_reason: input.reason,
+      out_request_no: input.refundRequestId,
+    });
+    const response = payload.alipay_trade_refund_response ?? {};
+    const fundChange = response.fund_change;
+
+    return {
+      orderId: response.out_trade_no ?? input.orderId,
+      tradeNo: response.trade_no ?? input.tradeNo ?? null,
+      refundNo: input.refundRequestId,
+      refundAmount: response.refund_fee
+        ? Math.round(Number(response.refund_fee) * 100)
+        : input.amount,
+      success: fundChange === "Y" || response.code === "10000",
+      raw: response,
+      provider: "alipay",
     };
   },
 };
@@ -297,6 +495,16 @@ const placeholderGatewayFactory = (method: "wechat_pc" | "alipay_pc"): PaymentGa
       paymentUrl: `/billing/mock-pay?order_id=${order.orderId}&channel=${method}`,
       qrText: `${method.toUpperCase()}:${order.orderId}`,
       expiresInSeconds: 900,
+      provider: method === "wechat_pc" ? "wechat" : "alipay",
+      requestPayload: {
+        orderId: order.orderId,
+        amount: order.amount,
+        title: order.title,
+      },
+      responsePayload: {
+        paymentUrl: `/billing/mock-pay?order_id=${order.orderId}&channel=${method}`,
+        qrText: `${method.toUpperCase()}:${order.orderId}`,
+      },
     };
   },
   async parseNotifyPayload(request) {
@@ -315,6 +523,8 @@ const placeholderGatewayFactory = (method: "wechat_pc" | "alipay_pc"): PaymentGa
       tradeNo: body.tradeNo,
       paidAt: body.paidAt ?? new Date().toISOString(),
       raw: body,
+      provider: method === "wechat_pc" ? "wechat" : "alipay",
+      status: "TRADE_SUCCESS",
     };
   },
 });

@@ -22,9 +22,26 @@ type PaymentsConsoleProps = {
     amount: number;
     status: string;
     payment_method: string;
+    trade_no: string | null;
+    provider_name: string | null;
+    buyer_account: string | null;
+    buyer_id: string | null;
+    notify_status: string | null;
+    failure_reason: string | null;
     created_at: string;
     paid_at: string | null;
+    refunded_at: string | null;
+    closed_at: string | null;
     detail: Record<string, unknown>;
+    payment_request: Record<string, unknown>;
+    payment_response: Record<string, unknown>;
+    notify_payload: Record<string, unknown> | null;
+    refund_payload: Record<string, unknown> | null;
+    user: {
+      id: string;
+      phone: string;
+      nickname: string | null;
+    } | null;
   }>;
   initialBatches: Array<{
     id: string;
@@ -111,6 +128,85 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatOrderType(orderType: "coin_purchase" | "subscription") {
+  return orderType === "coin_purchase" ? "魔法币充值" : "订阅购买";
+}
+
+function formatPaymentMethod(method: string) {
+  if (method === "alipay_pc") {
+    return "支付宝";
+  }
+
+  if (method === "wechat_pc") {
+    return "微信支付";
+  }
+
+  return "Mock 支付";
+}
+
+function formatOrderStatus(status: string) {
+  if (status === "pending") {
+    return "待支付";
+  }
+
+  if (status === "paid") {
+    return "已支付";
+  }
+
+  if (status === "cancelled") {
+    return "已关闭";
+  }
+
+  if (status === "refunded") {
+    return "已退款";
+  }
+
+  return status;
+}
+
+function getOrderStatusTone(status: string) {
+  if (status === "paid") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "pending") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (status === "refunded") {
+    return "bg-sky-50 text-sky-700";
+  }
+
+  return "bg-slate-100 text-slate-600";
+}
+
+function summarizeOrderDetail(
+  order: PaymentsConsoleProps["initialOrders"][number],
+) {
+  if (order.order_type === "subscription") {
+    const planName = typeof order.detail.planName === "string" ? order.detail.planName : "订阅套餐";
+    const durationDays =
+      typeof order.detail.durationDays === "number" ? order.detail.durationDays : null;
+    const dailyCoins =
+      typeof order.detail.dailyCoins === "number" ? order.detail.dailyCoins : null;
+
+    return `${planName}${durationDays ? ` / ${durationDays} 天` : ""}${
+      dailyCoins ? ` / 每日 ${dailyCoins} 币` : ""
+    }`;
+  }
+
+  const coins = typeof order.detail.coins === "number" ? order.detail.coins : null;
+  return coins ? `${coins} 魔法币` : "魔法币充值";
+}
+
+function formatJson(value: Record<string, unknown> | null | undefined) {
+  if (!value || !Object.keys(value).length) {
+    return "暂无";
+  }
+
+  return JSON.stringify(value, null, 2);
+}
+
 function createCodePreview(code: string) {
   return `${code.slice(0, 4)}-****-${code.slice(-4)}`;
 }
@@ -147,16 +243,21 @@ export function PaymentsConsole({
 }: PaymentsConsoleProps) {
   const [coinPerYuan, setCoinPerYuan] = useState(initialRate.coin_per_yuan);
   const [plans, setPlans] = useState(initialPlans);
-  const [orders] = useState(initialOrders);
+  const [orders, setOrders] = useState(initialOrders);
   const [batches, setBatches] = useState(initialBatches);
   const [rateState, setRateState] = useState<SaveState>("idle");
   const [planState, setPlanState] = useState<SaveState>("idle");
   const [batchState, setBatchState] = useState<SaveState>("idle");
+  const [orderActionState, setOrderActionState] = useState<
+    Record<string, "syncing" | "refunding" | undefined>
+  >({});
+  const [orderMessage, setOrderMessage] = useState("");
   const [plainCodes, setPlainCodes] = useState<string[]>([]);
   const [planDraft, setPlanDraft] = useState<PlanFormState>(createDefaultPlanDraft);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planMessage, setPlanMessage] = useState("");
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [batchCodeDetails, setBatchCodeDetails] = useState<
     Record<string, BatchCodeState>
@@ -474,6 +575,105 @@ export function PaymentsConsole({
     }
   };
 
+  const replaceOrder = (order: PaymentsConsoleProps["initialOrders"][number]) => {
+    setOrders((current) =>
+      current.map((item) => (item.order_id === order.order_id ? order : item)),
+    );
+  };
+
+  const handleSyncOrder = async (
+    order: PaymentsConsoleProps["initialOrders"][number],
+  ) => {
+    setOrderActionState((current) => ({
+      ...current,
+      [order.order_id]: "syncing",
+    }));
+    setOrderMessage("");
+
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "sync_order",
+          orderId: order.order_id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        order?: PaymentsConsoleProps["initialOrders"][number];
+        error?: string;
+      };
+
+      if (!response.ok || !payload.order) {
+        throw new Error(payload.error ?? "订单查单失败");
+      }
+
+      replaceOrder(payload.order);
+      setOrderMessage("订单状态已从支付宝同步。");
+    } catch (error) {
+      setOrderMessage(error instanceof Error ? error.message : "订单查单失败。");
+    } finally {
+      setOrderActionState((current) => ({
+        ...current,
+        [order.order_id]: undefined,
+      }));
+    }
+  };
+
+  const handleRefundOrder = async (
+    order: PaymentsConsoleProps["initialOrders"][number],
+  ) => {
+    const reason =
+      window.prompt(
+        `确认给订单 ${order.order_id} 发起全额退款？请输入退款原因：`,
+        "用户申请退款",
+      ) ?? "";
+
+    if (!reason.trim()) {
+      return;
+    }
+
+    setOrderActionState((current) => ({
+      ...current,
+      [order.order_id]: "refunding",
+    }));
+    setOrderMessage("");
+
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "refund_order",
+          orderId: order.order_id,
+          reason,
+        }),
+      });
+      const payload = (await response.json()) as {
+        order?: PaymentsConsoleProps["initialOrders"][number];
+        error?: string;
+      };
+
+      if (!response.ok || !payload.order) {
+        throw new Error(payload.error ?? "订单退款失败");
+      }
+
+      replaceOrder(payload.order);
+      setOrderMessage("订单已退款，权益已同步回收。");
+    } catch (error) {
+      setOrderMessage(error instanceof Error ? error.message : "订单退款失败。");
+    } finally {
+      setOrderActionState((current) => ({
+        ...current,
+        [order.order_id]: undefined,
+      }));
+    }
+  };
+
   return (
     <div className="space-y-5">
       <section className="grid gap-4 xl:grid-cols-4">
@@ -495,7 +695,7 @@ export function PaymentsConsole({
         <div className="rounded-[28px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
           <p className="text-xs font-bold tracking-[0.14em] text-slate-400">待支付订单</p>
           <p className="mt-3 text-4xl font-black text-slate-900">{pendingOrdersCount}</p>
-          <p className="mt-2 text-sm text-slate-500">Mock 支付未完成</p>
+          <p className="mt-2 text-sm text-slate-500">待完成或待排查的订单</p>
         </div>
       </section>
 
@@ -920,33 +1120,199 @@ export function PaymentsConsole({
         </article>
 
         <article className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
-          <p className="text-lg font-black text-slate-800">订单记录</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-lg font-black text-slate-800">订单记录</p>
+              {orderMessage ? (
+                <p className="mt-2 text-sm text-slate-500">{orderMessage}</p>
+              ) : null}
+            </div>
+          </div>
           <div className="mt-5 space-y-3">
             {orders.map((order) => (
               <div
                 key={order.order_id}
                 className="rounded-[20px] border border-slate-100 bg-slate-50 px-4 py-4"
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-black text-slate-800">
-                      {order.order_type === "coin_purchase" ? "魔法币充值" : "订阅购买"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      用户 {order.user_id.slice(0, 8)} / {order.payment_method}
-                    </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedOrderId((current) =>
+                      current === order.order_id ? null : order.order_id,
+                    )
+                  }
+                  className="w-full text-left"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-black text-slate-800">
+                          {formatOrderType(order.order_type)}
+                        </p>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-bold ${getOrderStatusTone(
+                            order.status,
+                          )}`}
+                        >
+                          {formatOrderStatus(order.status)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {order.user
+                          ? `${order.user.phone}${order.user.nickname ? ` / ${order.user.nickname}` : ""}`
+                          : `用户 ${order.user_id.slice(0, 8)}`}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {summarizeOrderDetail(order)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {formatPaymentMethod(order.payment_method)}
+                        {order.provider_name ? ` / ${order.provider_name}` : ""}
+                        {order.trade_no ? ` / 流水 ${order.trade_no}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-base font-black text-slate-900">
+                        {formatPrice(order.amount)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {expandedOrderId === order.order_id ? "收起详情" : "查看详情"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-base font-black text-slate-900">
-                      {formatPrice(order.amount)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">{order.status}</p>
+                  <p className="mt-3 text-xs text-slate-400">
+                    创建于 {formatDateTime(order.created_at)}
+                    {order.paid_at ? ` / 支付于 ${formatDateTime(order.paid_at)}` : ""}
+                    {order.refunded_at
+                      ? ` / 退款于 ${formatDateTime(order.refunded_at)}`
+                      : ""}
+                  </p>
+                </button>
+
+                {expandedOrderId === order.order_id ? (
+                  <div className="mt-4 rounded-[18px] border border-white bg-white p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-[16px] bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-bold text-slate-400">用户信息</p>
+                        <p className="mt-2 text-sm font-bold text-slate-800">
+                          {order.user?.phone ?? "未知手机号"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          用户ID：{order.user_id}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          昵称：{order.user?.nickname ?? "暂无"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-[16px] bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-bold text-slate-400">订单信息</p>
+                        <p className="mt-2 text-sm font-bold text-slate-800">
+                          订单号：{order.order_id}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          商品：{summarizeOrderDetail(order)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          金额：{formatPrice(order.amount)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-[16px] bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-bold text-slate-400">支付与通道</p>
+                        <p className="mt-2 text-sm text-slate-700">
+                          支付方式：{formatPaymentMethod(order.payment_method)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          通道标识：{order.provider_name ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          商户单号：{order.order_id}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          上游流水号：{order.trade_no ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          回调状态：{order.notify_status ?? "暂无"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-[16px] bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-bold text-slate-400">付款人信息</p>
+                        <p className="mt-2 text-sm text-slate-700">
+                          买家账号：{order.buyer_account ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          买家ID：{order.buyer_id ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          失败原因：{order.failure_reason ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          关闭时间：{formatDateTime(order.closed_at)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleSyncOrder(order)}
+                        disabled={Boolean(orderActionState[order.order_id])}
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {orderActionState[order.order_id] === "syncing"
+                          ? "查单中"
+                          : "向支付宝查单"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRefundOrder(order)}
+                        disabled={
+                          order.status !== "paid" ||
+                          Boolean(orderActionState[order.order_id])
+                        }
+                        className="rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {orderActionState[order.order_id] === "refunding"
+                          ? "退款中"
+                          : "全额退款"}
+                      </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3">
+                      <div className="rounded-[16px] bg-slate-950 px-4 py-3 text-slate-100">
+                        <p className="text-xs font-bold text-slate-300">下单请求快照</p>
+                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6">
+                          {formatJson(order.payment_request)}
+                        </pre>
+                      </div>
+
+                      <div className="rounded-[16px] bg-slate-950 px-4 py-3 text-slate-100">
+                        <p className="text-xs font-bold text-slate-300">支付创建返回</p>
+                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6">
+                          {formatJson(order.payment_response)}
+                        </pre>
+                      </div>
+
+                      <div className="rounded-[16px] bg-slate-950 px-4 py-3 text-slate-100">
+                        <p className="text-xs font-bold text-slate-300">支付回调原文</p>
+                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6">
+                          {formatJson(order.notify_payload)}
+                        </pre>
+                      </div>
+
+                      {order.refund_payload ? (
+                        <div className="rounded-[16px] bg-slate-950 px-4 py-3 text-slate-100">
+                          <p className="text-xs font-bold text-slate-300">退款返回原文</p>
+                          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6">
+                            {formatJson(order.refund_payload)}
+                          </pre>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-                <p className="mt-2 text-xs text-slate-400">
-                  创建于 {formatDateTime(order.created_at)}
-                  {order.paid_at ? ` / 支付于 ${formatDateTime(order.paid_at)}` : ""}
-                </p>
+                ) : null}
               </div>
             ))}
           </div>

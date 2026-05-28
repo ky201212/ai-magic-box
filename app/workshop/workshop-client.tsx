@@ -119,8 +119,10 @@ type WorkshopDraftSnapshot = {
   writingPrompt: string;
   writingResult: string;
   drawingPrompt: string;
+  videoPrompt: string;
   generatedCode: string;
   generatedImageUrl: string;
+  generatedVideoUrl: string;
 };
 
 type CommunityReusePayload = {
@@ -486,6 +488,7 @@ function parseWorkshopDraftSnapshot(rawDraft: string | null) {
       typeof draft.writingResult === "string" ? draft.writingResult : "",
     drawingPrompt:
       typeof draft.drawingPrompt === "string" ? draft.drawingPrompt : "",
+    videoPrompt: typeof draft.videoPrompt === "string" ? draft.videoPrompt : "",
     generatedCode:
       typeof draft.generatedCode === "string" && draft.generatedCode.trim()
         ? draft.generatedCode
@@ -493,6 +496,10 @@ function parseWorkshopDraftSnapshot(rawDraft: string | null) {
     generatedImageUrl:
       typeof draft.generatedImageUrl === "string"
         ? draft.generatedImageUrl
+        : "",
+    generatedVideoUrl:
+      typeof draft.generatedVideoUrl === "string"
+        ? draft.generatedVideoUrl
         : "",
   } satisfies WorkshopDraftSnapshot;
 }
@@ -1424,16 +1431,20 @@ function WorkshopContent() {
   const [writingPrompt, setWritingPrompt] = useState("");
   const [writingResult, setWritingResult] = useState("");
   const [drawingPrompt, setDrawingPrompt] = useState("");
+  const [videoPrompt, setVideoPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isVideoGenerating, setIsVideoGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const [writingError, setWritingError] = useState("");
   const [generatedCode, setGeneratedCode] = useState(defaultPreviewHtml);
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
   const [drawingError, setDrawingError] = useState("");
+  const [videoError, setVideoError] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [writingLoadingMessageIndex, setWritingLoadingMessageIndex] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
@@ -1482,6 +1493,7 @@ function WorkshopContent() {
   const isCodingMode = activeMode === "coding";
   const isWritingMode = activeMode === "writing";
   const isPaintingMode = activeMode === "painting";
+  const isVideoMode = activeMode === "video";
   const activeShareMode: ShareableMode | null =
     isCodingMode || isWritingMode || isPaintingMode
       ? (activeMode as ShareableMode)
@@ -1518,8 +1530,10 @@ function WorkshopContent() {
       writingPrompt,
       writingResult,
       drawingPrompt,
+      videoPrompt,
       generatedCode,
       generatedImageUrl,
+      generatedVideoUrl,
     };
 
     window.sessionStorage.setItem(
@@ -1543,8 +1557,10 @@ function WorkshopContent() {
           setWritingPrompt(savedDraft.writingPrompt);
           setWritingResult(savedDraft.writingResult);
           setDrawingPrompt(savedDraft.drawingPrompt);
+          setVideoPrompt(savedDraft.videoPrompt);
           setGeneratedCode(savedDraft.generatedCode);
           setGeneratedImageUrl(savedDraft.generatedImageUrl);
+          setGeneratedVideoUrl(savedDraft.generatedVideoUrl);
         }
       } catch {
         window.sessionStorage.removeItem(WORKSHOP_DRAFT_STORAGE_KEY);
@@ -1594,6 +1610,8 @@ function WorkshopContent() {
           setWritingResult(sourcePost.preview_code);
           setDrawingPrompt("");
           setGeneratedImageUrl("");
+          setVideoPrompt("");
+          setGeneratedVideoUrl("");
           setPromptText("");
           setGeneratedCode(defaultPreviewHtml);
         } else if (sourcePost.mode === "painting") {
@@ -1603,6 +1621,8 @@ function WorkshopContent() {
           setGeneratedCode(defaultPreviewHtml);
           setWritingPrompt("");
           setWritingResult("");
+          setVideoPrompt("");
+          setGeneratedVideoUrl("");
         } else {
           setPromptText(sourcePost.prompt);
           setGeneratedCode(
@@ -1612,6 +1632,8 @@ function WorkshopContent() {
           setWritingResult("");
           setDrawingPrompt("");
           setGeneratedImageUrl("");
+          setVideoPrompt("");
+          setGeneratedVideoUrl("");
         }
 
         setShareMessage(`已载入《${sourcePost.title}》，现在可以继续修改和复用。`);
@@ -1822,8 +1844,10 @@ function WorkshopContent() {
           writingPrompt,
           writingResult,
           drawingPrompt,
+          videoPrompt,
           generatedCode,
           generatedImageUrl,
+          generatedVideoUrl,
         }),
       );
     } catch {
@@ -1834,8 +1858,10 @@ function WorkshopContent() {
     writingPrompt,
     writingResult,
     drawingPrompt,
+    videoPrompt,
     generatedCode,
     generatedImageUrl,
+    generatedVideoUrl,
   ]);
 
   useEffect(() => {
@@ -2662,8 +2688,84 @@ function WorkshopContent() {
     }
   };
 
+  const handleGenerateVideo = async () => {
+    if (!videoPrompt.trim()) {
+      window.alert("请先写下这段视频想讲的故事和画面。");
+      return;
+    }
+
+    setGeneratedVideoUrl("");
+    setVideoError("");
+    setShareMessage("");
+    setShareFeedback(null);
+    setIsShareConfirmOpen(false);
+    setIsVideoGenerating(true);
+
+    try {
+      const response = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: videoPrompt,
+        }),
+      });
+
+      const { data, rawText } = await parseApiResponse<{
+        videoUrl?: string;
+        error?: string;
+        remainingCredits?: number;
+      }>(response);
+
+      if (response.status === 401) {
+        if (isUpstreamCredentialError(data?.error)) {
+          setVideoError(
+            data?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
+          );
+          return;
+        }
+
+        showLoginPrompt(
+          "登录状态断开了，这次视频还没有完成。当前内容已经保留，重新登录后可以继续。",
+        );
+        return;
+      }
+
+      if (typeof data?.remainingCredits === "number") {
+        setMagicCredits(data.remainingCredits);
+      }
+
+      if (!response.ok || !data?.videoUrl) {
+        setVideoError(
+          toReadableApiError(
+            response,
+            "这次视频没有生成成功，我们再试一次。",
+            data?.error,
+            rawText,
+          ),
+        );
+        setGeneratedVideoUrl("");
+        return;
+      }
+
+      if (!/^https?:\/\//i.test(data.videoUrl.trim())) {
+        setGeneratedVideoUrl("");
+        setVideoError("视频接口没有返回可播放的视频地址，请检查后台 AI 视频配置。");
+        return;
+      }
+
+      setVideoError("");
+      setGeneratedVideoUrl(data.videoUrl);
+    } catch {
+      setVideoError("刚刚和光影工坊失去了一下联系，请稍后再试试。");
+    } finally {
+      setIsVideoGenerating(false);
+    }
+  };
+
   const activeComingSoon =
-    isCodingMode || isPaintingMode || isWritingMode
+    isCodingMode || isPaintingMode || isWritingMode || isVideoMode
       ? null
       : comingSoonConfig[activeMode];
   const completedGoalCount =
@@ -3297,6 +3399,69 @@ function WorkshopContent() {
                       </div>
                     </div>
                   </div>
+                ) : isVideoMode ? (
+                  <div className="space-y-4">
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <div className="flex items-start gap-3">
+                        <div>
+                          <p className="text-[15px] font-black text-slate-700">视频故事台</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">
+                            把主角、场景、镜头动作和氛围写清楚，生成的视频会更完整。
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">视频提示词</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        可以写清角色、动作、镜头、场景、色彩和想要的故事感觉。
+                      </p>
+                      <textarea
+                        id="video-prompt"
+                        rows={12}
+                        value={videoPrompt}
+                        onChange={(event) => setVideoPrompt(event.target.value)}
+                        placeholder="输入你想生成的视频描述..."
+                        className="mt-4 w-full resize-none rounded-[22px] border border-[#cae6f7] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(191,219,254,0.35)]"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerateVideo}
+                      disabled={isVideoGenerating}
+                      className="inline-flex h-14 w-full items-center justify-center rounded-full bg-gradient-to-r from-[#c8f3eb] via-[#d9f0ff] to-[#e4f3ff] px-6 text-lg font-black text-[#1e5d7d] shadow-[0_16px_34px_rgba(56,189,248,0.18)] transition duration-200 hover:-translate-y-1"
+                    >
+                      {isVideoGenerating ? "正在生成视频" : "开始生成视频"}
+                    </button>
+
+                    <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">创作提示</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-[18px] bg-[#eefcff] px-4 py-4">
+                          <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
+                            当前状态
+                          </p>
+                          <p className="mt-2 text-sm font-black text-slate-700">
+                            {isVideoGenerating
+                              ? "光影镜头正在生成"
+                              : generatedVideoUrl
+                                ? "视频已完成"
+                                : "等待开始生成"}
+                          </p>
+                        </div>
+                        <div className="rounded-[18px] bg-[#f7fbff] px-4 py-4">
+                          <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
+                            展示方式
+                          </p>
+                          <p className="mt-2 text-sm font-black text-slate-700">
+                            成片会在右侧视频舞台中播放
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-4">
                     <div className={`rounded-[22px] bg-gradient-to-br ${activeVisual.cardClass} p-5 shadow-[0_14px_32px_rgba(148,163,184,0.08)]`}>
@@ -3370,6 +3535,8 @@ function WorkshopContent() {
                         ? "展示区"
                         : isPaintingMode
                           ? "画板区"
+                          : isVideoMode
+                            ? "放映区"
                           : "预览区"}
                   </p>
                   <h2 className="mt-2 text-[18px] font-black text-slate-800">
@@ -3379,6 +3546,8 @@ function WorkshopContent() {
                         ? "灵感信纸"
                         : isPaintingMode
                           ? "梦幻画板"
+                          : isVideoMode
+                            ? "光影舞台"
                           : activeTab.label}
                   </h2>
                 </div>
@@ -3487,6 +3656,27 @@ function WorkshopContent() {
                           {isSharing ? "正在分享" : "分享到社区"}
                         </button>
                       )}
+                    </div>
+                  ) : isVideoMode ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGeneratedVideoUrl("");
+                          setVideoError("");
+                        }}
+                        className="inline-flex h-11 items-center justify-center rounded-full border border-[#bfe4f4] bg-white px-6 text-base font-black text-[#1d7592] shadow-[0_10px_22px_rgba(148,163,184,0.08)]"
+                      >
+                        清空舞台
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGenerateVideo}
+                        disabled={isVideoGenerating}
+                        className="inline-flex h-11 items-center justify-center rounded-full bg-[linear-gradient(90deg,#c8f3eb_0%,#d9f0ff_48%,#e4f3ff_100%)] px-7 text-base font-black text-[#1e5d7d] shadow-[0_14px_28px_rgba(56,189,248,0.18)]"
+                      >
+                        {isVideoGenerating ? "生成中" : "生成视频"}
+                      </button>
                     </div>
                   ) : (
                     <div className="flex flex-wrap items-center gap-3">
@@ -3716,6 +3906,71 @@ function WorkshopContent() {
                                 {drawingError && (
                                   <div className="mt-5 max-w-md rounded-[22px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
                                     {drawingError}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : isVideoMode ? (
+                <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+                  <div className="flex min-h-0 flex-1 px-6 pb-6 pt-3 lg:px-8">
+                    <div className="relative flex h-full w-full min-h-0 items-center justify-center overflow-hidden rounded-[24px] border border-[#bfe4f4] bg-[linear-gradient(180deg,rgba(236,254,255,0.72),rgba(239,246,255,0.92))] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6),0_18px_40px_rgba(56,189,248,0.08)]">
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),transparent_58%,rgba(56,189,248,0.08))]" />
+                      <div className="absolute left-8 bottom-10 hidden h-44 w-44 rounded-full border border-white/40 lg:block" />
+                      <div className="absolute right-8 top-8 hidden h-52 w-52 rounded-full border border-white/38 lg:block" />
+
+                      <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4 lg:p-5">
+                        <div className="flex h-full min-h-0 w-full rounded-[26px] bg-gradient-to-br from-white via-[#f0fbff] to-[#eef6ff] p-4 shadow-[0_20px_50px_rgba(56,189,248,0.12)]">
+                          <div className="mx-auto flex h-full min-h-0 w-full items-center justify-center rounded-[22px] border-2 border-dashed border-[#bfe4f4] bg-white/78 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.9)]">
+                            {isVideoGenerating ? (
+                              <div className="flex h-full min-h-0 w-full flex-col items-center justify-center text-center">
+                                <div className="relative flex h-28 w-28 items-center justify-center">
+                                  <div className="absolute inset-0 rounded-full border-4 border-dashed border-[#bfe4f4] animate-spin" />
+                                  <div className="absolute inset-3 rounded-full bg-white/82" />
+                                  <div className="relative h-12 w-12 rounded-[18px] bg-gradient-to-br from-[#c8f3eb] to-[#dcecff]" />
+                                  <div className="absolute -right-1 top-3 h-3 w-3 rounded-full bg-[#d8f4ff] animate-ping" />
+                                  <div className="absolute -left-1 bottom-4 h-2.5 w-2.5 rounded-full bg-[#b7f0e3] animate-pulse" />
+                                </div>
+                                <div className="mt-6 rounded-full bg-white px-4 py-2 text-sm font-bold text-[#178ca7] shadow-[0_10px_24px_rgba(148,163,184,0.12)]">
+                                  正在整理镜头和画面
+                                </div>
+                                <p className="mt-5 max-w-md text-lg font-black leading-8 text-slate-600">
+                                  视频生成通常会比图片更久一点，我们正在等待完整成片返回。
+                                </p>
+                              </div>
+                            ) : generatedVideoUrl ? (
+                              <div className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-[24px] bg-[#f3fbff]">
+                                <video
+                                  src={generatedVideoUrl}
+                                  controls
+                                  className="h-full max-h-full w-full rounded-[24px] object-contain shadow-[0_22px_60px_rgba(148,163,184,0.2)]"
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex h-full min-h-0 w-full flex-col items-center justify-center text-center">
+                                <div className="grid h-28 w-28 place-items-center rounded-[30px] bg-gradient-to-br from-[#c8f3eb] via-[#dff8ff] to-[#dcecff] shadow-[0_16px_36px_rgba(148,163,184,0.12)]">
+                                  <Image
+                                    src="/landing-assets/icon-video.png"
+                                    alt="视频图标"
+                                    width={44}
+                                    height={44}
+                                    className="h-11 w-11 object-contain"
+                                  />
+                                </div>
+                                <p className="mt-6 font-['STZhongsong','Songti_SC','PingFang_SC',serif] text-3xl font-black text-slate-700">
+                                  空白舞台
+                                </p>
+                                <p className="mt-3 max-w-md text-base leading-8 text-slate-500">
+                                  在左侧写下故事和镜头，开始生成后，右边会播放完整视频作品。
+                                </p>
+                                {videoError && (
+                                  <div className="mt-5 max-w-md rounded-[22px] bg-[#fff1f2] px-4 py-3 text-sm font-bold text-[#d45b85]">
+                                    {videoError}
                                   </div>
                                 )}
                               </div>

@@ -308,6 +308,55 @@ export async function addCredits(
   return nextCredits;
 }
 
+export async function deductCredits(
+  userId: string,
+  amount: number,
+  metadata?: {
+    reasonCode?: string;
+    reasonLabel?: string;
+    note?: string;
+  },
+) {
+  await ensureUserCredits(userId);
+  const supabaseAdmin = getSupabaseAdmin();
+  const normalizedAmount = Math.max(0, Math.floor(amount));
+
+  const { data: currentCredits, error: fetchError } = await supabaseAdmin
+    .from("user_credits")
+    .select("credits")
+    .eq("user_id", userId)
+    .single<AdjustCreditsResult>();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  const nextCredits = Math.max(0, (currentCredits?.credits ?? 0) - normalizedAmount);
+
+  const { error: updateError } = await supabaseAdmin
+    .from("user_credits")
+    .update({
+      credits: nextCredits,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("user_id", userId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await createCreditLog({
+    user_id: userId,
+    change_amount: -normalizedAmount,
+    balance_after: nextCredits,
+    reason_code: metadata?.reasonCode ?? "payment_refund_deduct",
+    reason_label: metadata?.reasonLabel ?? "支付退款扣回",
+    note: metadata?.note ?? null,
+  });
+
+  return nextCredits;
+}
+
 export async function listUserCreditLogs(userId: string, limit = 30) {
   const supabaseAdmin = getSupabaseAdmin();
 

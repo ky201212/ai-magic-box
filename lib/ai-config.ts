@@ -55,6 +55,21 @@ const modeFallbacks: Record<
       creditCost: 5,
     },
   },
+  video: {
+    endpointUrl: "https://api.siliconflow.cn/v1/video/submit",
+    apiKeyEnv: "SILICONFLOW_API_KEY",
+    model: "Wan-AI/Wan2.2-T2V-A14B",
+    systemPrompt:
+      "请根据用户输入的中文故事提示，生成适合儿童教育展示的短视频镜头描述与动画结果。",
+    isEnabled: true,
+    extraPayload: {
+      image_size: "1280x720",
+      creditEnabled: false,
+      creditCost: 0,
+      pollIntervalMs: 5000,
+      pollTimeoutMs: 180000,
+    },
+  },
   transcribe: {
     endpointUrl: "https://api.siliconflow.cn/v1/audio/transcriptions",
     apiKeyEnv: "SILICONFLOW_API_KEY",
@@ -102,6 +117,26 @@ function resolvePaintingEndpoint(endpointUrl: string) {
   return absoluteEndpoint;
 }
 
+function resolveVideoSubmitEndpoint(endpointUrl: string) {
+  const fallbackEndpoint = modeFallbacks.video.endpointUrl;
+  const absoluteEndpoint = ensureAbsoluteEndpoint(endpointUrl, fallbackEndpoint);
+  const normalizedEndpoint = absoluteEndpoint.toLowerCase();
+
+  if (normalizedEndpoint.endsWith("/video/submit")) {
+    return absoluteEndpoint;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1")) {
+    return `${absoluteEndpoint}/video/submit`;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1/")) {
+    return `${absoluteEndpoint}video/submit`;
+  }
+
+  return absoluteEndpoint;
+}
+
 function resolveTranscribeEndpoint(endpointUrl: string) {
   const fallbackEndpoint = modeFallbacks.transcribe.endpointUrl;
   const absoluteEndpoint = ensureAbsoluteEndpoint(endpointUrl, fallbackEndpoint);
@@ -123,7 +158,7 @@ function resolveTranscribeEndpoint(endpointUrl: string) {
 }
 
 export async function resolveAiModeConfig(
-  modeKey: "coding" | "writing" | "painting" | "transcribe",
+  modeKey: "coding" | "writing" | "painting" | "video" | "transcribe",
 ): Promise<ResolvedAiModeConfig> {
   const fallback = modeFallbacks[modeKey];
 
@@ -142,6 +177,8 @@ export async function resolveAiModeConfig(
       endpointUrl:
         modeKey === "painting"
           ? resolvePaintingEndpoint(dbConfig.endpoint_url)
+          : modeKey === "video"
+            ? resolveVideoSubmitEndpoint(dbConfig.endpoint_url)
           : modeKey === "transcribe"
             ? resolveTranscribeEndpoint(dbConfig.endpoint_url)
             : ensureAbsoluteEndpoint(dbConfig.endpoint_url, fallback.endpointUrl),

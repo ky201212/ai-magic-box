@@ -234,6 +234,17 @@ values
     '{"image_size":"1024x1024","creditEnabled":true,"creditCost":5}'::jsonb
   ),
   (
+    'video',
+    'AI视频',
+    'siliconflow',
+    'https://api.siliconflow.cn/v1/video/submit',
+    'SILICONFLOW_API_KEY',
+    'Wan-AI/Wan2.2-T2V-A14B',
+    '请根据用户输入的中文故事提示，生成适合儿童教育展示的短视频镜头描述与动画结果。',
+    true,
+    '{"image_size":"1280x720","creditEnabled":false,"creditCost":0,"pollIntervalMs":5000,"pollTimeoutMs":180000}'::jsonb
+  ),
+  (
     'transcribe',
     '语音识别',
     'siliconflow',

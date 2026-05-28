@@ -29,11 +29,35 @@ create table if not exists public.payment_orders (
   status text not null default 'pending' check (status in ('pending', 'paid', 'cancelled', 'refunded')),
   payment_method text not null default 'mock' check (payment_method in ('mock', 'wechat_pc', 'alipay_pc')),
   trade_no text,
+  provider_name text,
+  buyer_account text,
+  buyer_id text,
+  notify_status text,
+  failure_reason text,
   detail jsonb not null default '{}'::jsonb,
+  payment_request jsonb not null default '{}'::jsonb,
+  payment_response jsonb not null default '{}'::jsonb,
+  notify_payload jsonb,
+  refund_payload jsonb,
   paid_at timestamptz,
+  refunded_at timestamptz,
+  closed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.payment_orders
+  add column if not exists provider_name text,
+  add column if not exists buyer_account text,
+  add column if not exists buyer_id text,
+  add column if not exists notify_status text,
+  add column if not exists failure_reason text,
+  add column if not exists payment_request jsonb not null default '{}'::jsonb,
+  add column if not exists payment_response jsonb not null default '{}'::jsonb,
+  add column if not exists notify_payload jsonb,
+  add column if not exists refund_payload jsonb,
+  add column if not exists refunded_at timestamptz,
+  add column if not exists closed_at timestamptz;
 
 create table if not exists public.coin_transactions (
   id uuid primary key default gen_random_uuid(),
@@ -45,6 +69,9 @@ create table if not exists public.coin_transactions (
   signature text not null,
   created_at timestamptz not null default now()
 );
+
+alter table public.coin_transactions
+  drop constraint if exists coin_transactions_amount_check;
 
 create table if not exists public.user_subscriptions (
   id uuid primary key default gen_random_uuid(),
