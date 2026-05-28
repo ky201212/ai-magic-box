@@ -37,12 +37,23 @@ type VideoStatusResponse = {
     };
     url?: string;
   };
+  results?: {
+    videos?: Array<{
+      url?: string;
+    }>;
+    video?: {
+      url?: string;
+    };
+    videoUrl?: string;
+    url?: string;
+  };
   videos?: Array<{
     url?: string;
   }>;
   video?: {
     url?: string;
   };
+  videoUrl?: string;
   url?: string;
 };
 
@@ -66,30 +77,27 @@ function parsePossibleJson<T>(rawText: string) {
   }
 }
 
-function resolveVideoStatusEndpoint(endpointUrl: string, requestId: string) {
+function resolveVideoStatusEndpoint(endpointUrl: string) {
   const trimmedEndpoint = endpointUrl.trim();
   const normalizedEndpoint = trimmedEndpoint.toLowerCase();
-  const encodedRequestId = encodeURIComponent(requestId);
 
   if (normalizedEndpoint.endsWith("/video/submit")) {
-    return trimmedEndpoint.replace(/\/video\/submit$/i, `/video/status?requestId=${encodedRequestId}`);
+    return trimmedEndpoint.replace(/\/video\/submit$/i, "/video/status");
   }
 
   if (normalizedEndpoint.endsWith("/v1")) {
-    return `${trimmedEndpoint}/video/status?requestId=${encodedRequestId}`;
+    return `${trimmedEndpoint}/video/status`;
   }
 
   if (normalizedEndpoint.endsWith("/v1/")) {
-    return `${trimmedEndpoint}video/status?requestId=${encodedRequestId}`;
+    return `${trimmedEndpoint}video/status`;
   }
 
   if (normalizedEndpoint.includes("/video/status")) {
-    return trimmedEndpoint.includes("?")
-      ? `${trimmedEndpoint}&requestId=${encodedRequestId}`
-      : `${trimmedEndpoint}?requestId=${encodedRequestId}`;
+    return trimmedEndpoint;
   }
 
-  return `${trimmedEndpoint}?requestId=${encodedRequestId}`;
+  return trimmedEndpoint;
 }
 
 function buildVideoSubmitRequestBody(input: {
@@ -97,17 +105,10 @@ function buildVideoSubmitRequestBody(input: {
   prompt: string;
   imageSize: string;
 }) {
-  const [widthText, heightText] = input.imageSize.split("x");
-  const width = Number(widthText);
-  const height = Number(heightText);
-
   return {
     model: input.model,
     prompt: input.prompt,
     image_size: input.imageSize,
-    ...(Number.isFinite(width) && Number.isFinite(height)
-      ? { width, height }
-      : {}),
   };
 }
 
@@ -127,8 +128,13 @@ function extractVideoUrl(data: VideoStatusResponse) {
     data.result?.videos?.[0]?.url ||
     data.result?.video?.url ||
     data.result?.url ||
+    data.results?.videos?.[0]?.url ||
+    data.results?.video?.url ||
+    data.results?.videoUrl ||
+    data.results?.url ||
     data.videos?.[0]?.url ||
     data.video?.url ||
+    data.videoUrl ||
     data.url ||
     "";
 
@@ -164,13 +170,25 @@ function isVideoTaskFailed(status: string) {
   );
 }
 
-function buildVideoErrorMessage(rawText: string, model: string, endpointUrl: string) {
+function buildVideoErrorMessage(
+  rawText: string,
+  model: string,
+  endpointUrl: string,
+  stageLabel = "视频接口",
+) {
   const parsed = parsePossibleJson<{ error?: { message?: string; code?: string } }>(
     rawText,
   );
   const message = parsed?.error?.message?.trim() || rawText.trim();
   const errorCode = parsed?.error?.code?.trim().toLowerCase();
   const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("404") ||
+    normalizedMessage.includes("not found")
+  ) {
+    return `${stageLabel}返回 Not Found。当前请求地址是 ${endpointUrl}，请确认后台 AI 视频接口地址填写为 https://api.siliconflow.cn/v1/video/submit。`;
+  }
 
   if (
     errorCode === "model_not_found" ||
@@ -188,7 +206,7 @@ function buildVideoErrorMessage(rawText: string, model: string, endpointUrl: str
     return "视频接口返回 Invalid token，请检查后台 AI 视频配置里的接口密钥是否正确、是否过期。";
   }
 
-  return message || "视频生成接口请求失败，请稍后再试。";
+  return message || `${stageLabel}请求失败，请稍后再试。`;
 }
 
 function waitFor(ms: number) {
@@ -304,6 +322,7 @@ export async function POST(request: Request) {
             errorText,
             aiConfig.model,
             aiConfig.endpointUrl,
+            "视频提交接口",
           ),
           remainingCredits,
         },
@@ -333,17 +352,18 @@ export async function POST(request: Request) {
     }
 
     const deadline = Date.now() + pollTimeoutMs;
-    const statusEndpoint = resolveVideoStatusEndpoint(aiConfig.endpointUrl, requestId);
+    const statusEndpoint = resolveVideoStatusEndpoint(aiConfig.endpointUrl);
 
     while (Date.now() < deadline) {
       await waitFor(pollIntervalMs);
 
       const statusResponse = await fetch(statusEndpoint, {
-        method: "GET",
+        method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({ requestId }),
         cache: "no-store",
       });
 
@@ -362,12 +382,13 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: buildVideoErrorMessage(
-              statusText,
-              aiConfig.model,
-              statusEndpoint,
-            ),
-            remainingCredits,
-          },
+            statusText,
+            aiConfig.model,
+            statusEndpoint,
+            "视频状态接口",
+          ),
+          remainingCredits,
+        },
           { status: mapUpstreamStatusToGatewayStatus(statusResponse.status) },
         );
       }
