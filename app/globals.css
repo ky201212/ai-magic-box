@@ -310,15 +310,10 @@ li {
   }
 
   .workshop-mobile-stage {
-    --workshop-landscape-width: 1648;
-    --workshop-landscape-height: 960;
-    --workshop-landscape-scale: min(
-      calc((100vw - 20px) / (var(--workshop-landscape-width) * 1px)),
-      calc((100vh - 20px) / (var(--workshop-landscape-height) * 1px))
-    );
     position: relative;
-    width: calc(var(--workshop-landscape-width) * var(--workshop-landscape-scale) * 1px);
-    height: calc(var(--workshop-landscape-height) * var(--workshop-landscape-scale) * 1px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
     max-width: 100%;
     max-height: calc(100vh - 20px);
     margin: 0 auto;
@@ -326,11 +321,6 @@ li {
   }
 
   .workshop-canvas {
-    width: calc(var(--workshop-landscape-width) * 1px);
-    min-width: calc(var(--workshop-landscape-width) * 1px);
-    min-height: calc(var(--workshop-landscape-height) * 1px);
-    height: calc(var(--workshop-landscape-height) * 1px);
-    zoom: var(--workshop-landscape-scale);
     transform-origin: top center;
   }
 

@@ -206,6 +206,10 @@ const modeTabs = [
   { id: "modeling", label: "AI建模", subtitle: "搭建立体小世界" },
 ] as const;
 
+const LANDSCAPE_STAGE_WIDTH = 1648;
+const LANDSCAPE_STAGE_HEIGHT = 1040;
+const LANDSCAPE_STAGE_GUTTER = 20;
+
 type ModeId = (typeof modeTabs)[number]["id"];
 type ShareableMode = Extract<ModeId, "coding" | "writing" | "painting">;
 type PromptTarget = "coding" | "writing" | "painting" | "speech" | "video";
@@ -1565,6 +1569,62 @@ const createMessagePreviewHtml = (title: string, message: string) => `
   </html>
 `;
 
+const ensurePreviewHtmlDocument = (rawHtml: string) => {
+  const cleanedHtml = rawHtml
+    .replace(/```(?:html|htm|xml)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  if (!cleanedHtml) {
+    return defaultPreviewHtml;
+  }
+
+  const normalizedHtml = cleanedHtml.toLowerCase();
+
+  if (
+    normalizedHtml.startsWith("<!doctype html") ||
+    normalizedHtml.startsWith("<html")
+  ) {
+    return cleanedHtml;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; min-height: 100vh; margin: 0; }
+      body {
+        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: linear-gradient(180deg, #f8fbff 0%, #fff7fb 46%, #edf6ff 100%);
+        color: #334155;
+      }
+      .preview-shell {
+        min-height: 100vh;
+        padding: 24px;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: 14px/1.75 Consolas, "SFMono-Regular", Monaco, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-shell">
+      <pre>${cleanedHtml
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")}</pre>
+    </main>
+  </body>
+</html>`;
+};
+
 function WorkshopContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -1643,6 +1703,9 @@ function WorkshopContent() {
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const [magicCredits, setMagicCredits] = useState<number | null>(null);
   const [creditLogs, setCreditLogs] = useState<WorkshopCreditLog[]>([]);
+  const [isLandscapeCompactViewport, setIsLandscapeCompactViewport] =
+    useState(false);
+  const [landscapeStageScale, setLandscapeStageScale] = useState(1);
   const [brand, setBrand] = useState<WorkshopBrand>({
     siteName: "小红车魔法工坊",
     tagline: "激发创造力，探索 AI 的无限可能",
@@ -1688,6 +1751,48 @@ function WorkshopContent() {
     () => buildCodeGuideRows(codingPreviewDoc),
     [codingPreviewDoc],
   );
+
+  useEffect(() => {
+    const syncLandscapeStage = () => {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const compactLandscape =
+        viewportWidth <= 1100 && viewportWidth > viewportHeight;
+
+      setIsLandscapeCompactViewport(compactLandscape);
+
+      if (!compactLandscape) {
+        setLandscapeStageScale(1);
+        return;
+      }
+
+      const availableWidth = Math.max(
+        viewportWidth - LANDSCAPE_STAGE_GUTTER,
+        320,
+      );
+      const availableHeight = Math.max(
+        viewportHeight - LANDSCAPE_STAGE_GUTTER,
+        320,
+      );
+      const nextScale = Math.min(
+        availableWidth / LANDSCAPE_STAGE_WIDTH,
+        availableHeight / LANDSCAPE_STAGE_HEIGHT,
+      );
+
+      setLandscapeStageScale(
+        Number.isFinite(nextScale) ? Math.max(nextScale, 0.32) : 1,
+      );
+    };
+
+    syncLandscapeStage();
+    window.addEventListener("resize", syncLandscapeStage);
+    window.addEventListener("orientationchange", syncLandscapeStage);
+
+    return () => {
+      window.removeEventListener("resize", syncLandscapeStage);
+      window.removeEventListener("orientationchange", syncLandscapeStage);
+    };
+  }, []);
   const selectedCodeGuideMarkerId = useMemo(() => {
     if (!isCodeGuideOpen) {
       return null;
@@ -2890,12 +2995,7 @@ function WorkshopContent() {
         return;
       }
 
-      const cleanedHtml = data.code
-        .replace(/```(html)?/gi, "")
-        .replace(/```/g, "")
-        .trim();
-
-      setGeneratedCode(cleanedHtml);
+      setGeneratedCode(ensurePreviewHtmlDocument(data.code));
     } catch {
       setGeneratedCode(
         createMessagePreviewHtml(
@@ -3467,6 +3567,22 @@ function WorkshopContent() {
     cappedCompletedGoalCount >= dailyGoalTarget
       ? "今天的小目标已经完成啦"
       : `再完成 ${dailyGoalTarget - cappedCompletedGoalCount} 个创意作品就达标`;
+  const landscapeStageStyle = isLandscapeCompactViewport
+    ? {
+        width: `${LANDSCAPE_STAGE_WIDTH * landscapeStageScale}px`,
+        height: `${LANDSCAPE_STAGE_HEIGHT * landscapeStageScale}px`,
+      }
+    : undefined;
+  const landscapeCanvasStyle = isLandscapeCompactViewport
+    ? {
+        width: `${LANDSCAPE_STAGE_WIDTH}px`,
+        minWidth: `${LANDSCAPE_STAGE_WIDTH}px`,
+        height: `${LANDSCAPE_STAGE_HEIGHT}px`,
+        minHeight: `${LANDSCAPE_STAGE_HEIGHT}px`,
+        transform: `scale(${landscapeStageScale})`,
+        transformOrigin: "top center",
+      }
+    : undefined;
 
   return (
     <main className="workshop-root relative min-h-screen overflow-hidden bg-[#edf4ff] text-slate-700">
@@ -3481,9 +3597,15 @@ function WorkshopContent() {
       </div>
 
       <div className="workshop-shell relative flex min-h-screen w-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4 lg:py-4">
-        <div className="workshop-mobile-stage w-full">
-          <section className="workshop-canvas flex min-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl">
-          <header className="workshop-header flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
+        <div
+          className="workshop-mobile-stage w-full"
+          style={landscapeStageStyle}
+        >
+          <section
+            className="workshop-canvas flex min-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,249,255,0.98))] shadow-[0_26px_80px_rgba(148,163,184,0.14)] backdrop-blur-xl"
+            style={landscapeCanvasStyle}
+          >
+            <header className="workshop-header flex flex-wrap items-center justify-between gap-3 border-b border-white/80 px-4 py-4 lg:px-7 lg:py-5">
             <div className="workshop-header-brand flex min-w-0 items-center gap-4">
               <Image
                 src={brand.logoUrl}
