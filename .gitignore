@@ -23,6 +23,7 @@ build/
 # misc
 .DS_Store
 *.pem
+/小红车图标.jpg
 
 # debug
 npm-debug.log*

@@ -5,6 +5,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "小红车魔法工坊",
   description: "专注青少年人工智能与前沿科技启蒙的多模态创作平台",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport: Viewport = {
