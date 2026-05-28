@@ -142,26 +142,30 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_10%,rgba(126,171,255,0.34),transparent_28%),radial-gradient(circle_at_82%_14%,rgba(255,159,211,0.3),transparent_24%),linear-gradient(180deg,#ffffff_0%,#f7f8ff_48%,#eff5ff_100%)]" />
         <div className="home-grid absolute inset-0 opacity-80" />
         <div className="home-sweep absolute left-[-12%] top-[16%] h-44 w-[70%] rounded-full bg-[linear-gradient(90deg,rgba(139,165,255,0),rgba(139,165,255,0.28),rgba(255,177,213,0))] blur-3xl" />
-        <div className="absolute left-[58%] top-[9%] hidden h-[156px] w-[248px] -translate-x-1/2 items-center justify-center sm:flex">
-          <Image
-            src="/landing-assets/planet-smile-login-clean-v2.png"
-            alt="微笑星球"
-            width={179}
-            height={101}
-            className="orbital-float h-[102px] w-auto object-contain drop-shadow-[0_20px_36px_rgba(92,112,170,0.14)]"
-            priority
-            unoptimized
-          />
+        <div className="absolute left-[54%] top-[13%] hidden h-[128px] w-[210px] -translate-x-1/2 items-center justify-center overflow-visible sm:flex">
+          <div className="orbital-float">
+            <Image
+              src="/brand-spec-assets/deco-planet-large.png"
+              alt="微笑星球"
+              width={127}
+              height={91}
+              className="h-[88px] w-auto object-contain drop-shadow-[0_20px_36px_rgba(92,112,170,0.14)]"
+              priority
+              unoptimized
+            />
+          </div>
         </div>
-        <div className="absolute right-[7%] top-[10%] hidden h-[132px] w-[196px] items-center justify-center sm:flex">
-          <Image
-            src="/landing-assets/rocket-launch-login-clean-v2.png"
-            alt="探索火箭"
-            width={163}
-            height={117}
-            className="orbital-float h-[72px] w-auto rotate-[8deg] object-contain drop-shadow-[0_18px_30px_rgba(92,112,170,0.14)]"
-            unoptimized
-          />
+        <div className="absolute right-[5%] top-[11%] hidden h-[126px] w-[170px] items-center justify-center overflow-visible sm:flex">
+          <div className="orbital-float rotate-[14deg]">
+            <Image
+              src="/brand-spec-assets/deco-rocket-small.png"
+              alt="探索火箭"
+              width={117}
+              height={122}
+              className="h-[86px] w-auto object-contain drop-shadow-[0_18px_30px_rgba(92,112,170,0.14)]"
+              unoptimized
+            />
+          </div>
         </div>
       </div>
 
