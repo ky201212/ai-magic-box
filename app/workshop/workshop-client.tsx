@@ -55,6 +55,117 @@ const writingCapsules = [
   },
 ] as const;
 
+const compositionTopicBank = [
+  {
+    grade: "一年级",
+    semesters: {
+      上学期: ["看图写话：秋天来了", "我的新朋友", "可爱的小动物", "快乐的一天"],
+      下学期: ["春天来了", "我学会了", "帮家人做一件事", "我喜欢的玩具"],
+    },
+  },
+  {
+    grade: "二年级",
+    semesters: {
+      上学期: ["我喜欢的玩具", "有趣的一天", "小动物观察记", "看图讲故事"],
+      下学期: ["我的好朋友", "难忘的节日", "如果我会飞", "我的小制作"],
+    },
+  },
+  {
+    grade: "三年级",
+    semesters: {
+      上学期: ["猜猜他是谁", "我来编童话", "续写故事", "这儿真美", "写日记"],
+      下学期: ["我的植物朋友", "身边有特点的人", "国宝大熊猫", "奇妙的想象"],
+    },
+  },
+  {
+    grade: "四年级",
+    semesters: {
+      上学期: ["推荐一个好地方", "小小动物园", "写观察日记", "我和神话人物过一天"],
+      下学期: ["我的乐园", "我的奇思妙想", "游览过的地方", "我学会了", "故事新编"],
+    },
+  },
+  {
+    grade: "五年级",
+    semesters: {
+      上学期: ["我的心爱之物", "漫画老师", "二十年后的家乡", "介绍一种事物", "推荐一本书"],
+      下学期: ["那一刻我长大了", "他陶醉了", "形形色色的人", "中国的世界文化遗产", "神奇的探险之旅"],
+    },
+  },
+  {
+    grade: "六年级",
+    semesters: {
+      上学期: ["变形记", "多彩的活动", "笔尖流出的故事", "围绕中心意思写", "我的拿手好戏"],
+      下学期: ["家乡的风俗", "写作品梗概", "让真情自然流露", "心愿", "插上科学的翅膀飞"],
+    },
+  },
+] as const;
+
+const handbillTopics = [
+  {
+    label: "国庆节",
+    note: "红色主题",
+    prompt:
+      "画一张小学生国庆节主题手抄报模板，标题写“喜迎国庆”，画面有五星红旗、天安门、灯笼、烟花、和平鸽和长城元素，整体喜庆明亮，保留3个干净的文字框和清晰标题区，不要生成密集小字。",
+  },
+  {
+    label: "五一劳动节",
+    note: "劳动最光荣",
+    prompt:
+      "画一张小学生五一劳动节主题手抄报模板，标题写“劳动最光荣”，画面有工人、农民、医生、老师、清洁员等劳动者元素，色彩温暖阳光，保留多个空白文字框，适合孩子后期填写内容。",
+  },
+  {
+    label: "端午节",
+    note: "传统节日",
+    prompt:
+      "画一张小学生端午节主题手抄报模板，标题写“粽香端午”，画面有粽子、龙舟、艾草、香囊、江水波纹和中国风边框，配色清新，保留空白文字区，不要生成大段文字。",
+  },
+  {
+    label: "读书",
+    note: "阅读成长",
+    prompt:
+      "画一张小学生读书主题手抄报模板，标题写“快乐阅读”，画面有翻开的书、书架、小台灯、星星、孩子读书和知识小树，风格温柔清爽，保留4个文字框，适合填写读书名言和阅读心得。",
+  },
+  {
+    label: "科技",
+    note: "未来探索",
+    prompt:
+      "画一张小学生科技主题手抄报模板，标题写“科技点亮未来”，画面有火箭、机器人、星球、芯片、实验器材和未来城市，蓝白配色，科技感但要可爱，保留清楚的文字框和标题区。",
+  },
+  {
+    label: "英语",
+    note: "English",
+    prompt:
+      "画一张小学生英语主题手抄报模板，标题写“Happy English”，画面有英文字母、单词卡片、地球、书本、彩虹和可爱对话气泡，色彩活泼，保留空白文字框，方便填写英语单词和短句。",
+  },
+] as const;
+
+const videoCreationPresets = [
+  {
+    label: "作文朗读视频",
+    note: "作品展示",
+    template:
+      "请把下面这篇小学生作文变成一个适合孩子展示的朗读视频。画面要像温柔的动画绘本：有孩子在书桌前朗读、作文内容对应的场景插画、镜头缓慢推进、字幕感留白、明亮干净、适合校园展示。不要生成真实人物特写，不要出现复杂文字。作文内容：",
+  },
+  {
+    label: "演讲小主播",
+    note: "上台练习",
+    template:
+      "请把下面这段演讲稿变成一个小学生上台演讲练习视频。画面要有明亮教室、小舞台、孩子背影或卡通小主播、观众掌声、自然镜头切换，氛围自信温暖，适合练习表达。不要生成密集文字。演讲稿内容：",
+  },
+  {
+    label: "绘本动画",
+    note: "故事成片",
+    template:
+      "请把下面的故事变成一段儿童绘本动画视频。画面要有清晰的主角、连续场景、柔和色彩、轻微镜头运动和温暖童话氛围，像一本绘本被慢慢翻开。不要生成恐怖或危险画面。故事内容：",
+  },
+  {
+    label: "知识讲解",
+    note: "科普表达",
+    template:
+      "请把下面这段知识内容变成一段适合小学生看的科普讲解视频。画面要有卡通黑板、简单图示、关键物体动画、清楚的镜头层次和轻松课堂感，不要出现密集小字。讲解内容：",
+  },
+] as const;
+
 const modeTabs = [
   { id: "coding", label: "AI编程", subtitle: "做出会互动的小程序" },
   { id: "writing", label: "AI写作", subtitle: "把念头写成完整文章" },
@@ -1431,6 +1542,8 @@ function WorkshopContent() {
   const [writingPrompt, setWritingPrompt] = useState("");
   const [writingResult, setWritingResult] = useState("");
   const [drawingPrompt, setDrawingPrompt] = useState("");
+  const [selectedCompositionGrade, setSelectedCompositionGrade] = useState("三年级");
+  const [selectedCompositionSemester, setSelectedCompositionSemester] = useState<"上学期" | "下学期">("上学期");
   const [videoPrompt, setVideoPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
@@ -1495,6 +1608,11 @@ function WorkshopContent() {
   const isWritingMode = activeMode === "writing";
   const isPaintingMode = activeMode === "painting";
   const isVideoMode = activeMode === "video";
+  const selectedCompositionGroup =
+    compositionTopicBank.find((item) => item.grade === selectedCompositionGrade) ??
+    compositionTopicBank[2];
+  const selectedCompositionTopics =
+    selectedCompositionGroup.semesters[selectedCompositionSemester];
   const activeShareMode: ShareableMode | null =
     isCodingMode || isWritingMode || isPaintingMode
       ? (activeMode as ShareableMode)
@@ -2011,6 +2129,22 @@ function WorkshopContent() {
 
   const handleWritingCapsuleClick = (prompt: string) => {
     setWritingPrompt(prompt);
+  };
+
+  const handleCompositionTopicClick = (topic: string) => {
+    setWritingPrompt(
+      `请按小学${selectedCompositionGrade}${selectedCompositionSemester}常见课内作文要求，帮我写一篇《${topic}》。要求：结构完整，有开头、经过和结尾；语言适合${selectedCompositionGrade}学生；内容具体，有细节描写和真情实感；不要写得太像模板；字数控制在适合这个年级的范围内。`,
+    );
+  };
+
+  const handleHandbillTopicClick = (prompt: string) => {
+    setDrawingPrompt(prompt);
+  };
+
+  const handleVideoPresetClick = (template: string) => {
+    const existingPrompt = videoPrompt.trim();
+
+    setVideoPrompt(`${template}${existingPrompt ? `\n${existingPrompt}` : "\n"}`);
   };
 
   const handleModeChange = (mode: ModeId) => {
@@ -3338,6 +3472,57 @@ function WorkshopContent() {
                       })}
                     </div>
 
+                    <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,250,233,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
+                      <p className="text-[15px] font-black text-amber-900">课内作文题库</p>
+                      <p className="mt-1 text-xs leading-6 text-amber-600/80">
+                        常见教材作文主题，点题目自动填入写作需求。
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {compositionTopicBank.map((group) => (
+                          <button
+                            key={group.grade}
+                            type="button"
+                            onClick={() => setSelectedCompositionGrade(group.grade)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                              selectedCompositionGrade === group.grade
+                                ? "bg-amber-500 text-white shadow-[0_8px_18px_rgba(245,158,11,0.18)]"
+                                : "bg-white text-amber-700"
+                            }`}
+                          >
+                            {group.grade}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {(["上学期", "下学期"] as const).map((semester) => (
+                          <button
+                            key={semester}
+                            type="button"
+                            onClick={() => setSelectedCompositionSemester(semester)}
+                            className={`rounded-[16px] px-3 py-2 text-xs font-black transition ${
+                              selectedCompositionSemester === semester
+                                ? "bg-[#fff0c8] text-amber-900"
+                                : "bg-white text-amber-600"
+                            }`}
+                          >
+                            {semester}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        {selectedCompositionTopics.map((topic) => (
+                          <button
+                            key={topic}
+                            type="button"
+                            onClick={() => handleCompositionTopicClick(topic)}
+                            className="rounded-[16px] border border-[#f7e8b7] bg-white px-3 py-2 text-left text-xs font-bold leading-5 text-amber-900 transition hover:-translate-y-0.5 hover:bg-[#fff8e9]"
+                          >
+                            {topic}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="rounded-[22px] border border-[#f7e8b7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,251,238,0.98))] p-4 shadow-[0_10px_24px_rgba(217,119,6,0.08)]">
                       <label
                         htmlFor="writing-prompt"
@@ -3403,6 +3588,30 @@ function WorkshopContent() {
                       </div>
                     </div>
 
+                    <div className="rounded-[22px] border border-[#f3d5e6] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,247,251,0.98))] p-4 shadow-[0_10px_24px_rgba(244,114,182,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">手抄报主题</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-400">
+                        常用作业主题，点一下生成适合留白填写的版面描述。
+                      </p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {handbillTopics.map((topic) => (
+                          <button
+                            key={topic.label}
+                            type="button"
+                            onClick={() => handleHandbillTopicClick(topic.prompt)}
+                            className="rounded-[18px] bg-white px-3 py-3 text-left shadow-[0_8px_20px_rgba(244,114,182,0.08)] transition hover:-translate-y-0.5 hover:bg-[#fff7fb]"
+                          >
+                            <span className="block text-sm font-black text-slate-700">
+                              {topic.label}
+                            </span>
+                            <span className="mt-1 block text-[11px] font-bold text-[#d25586]">
+                              {topic.note}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">绘画描述</p>
                       <p className="mt-1 text-sm leading-6 text-slate-400">
@@ -3460,23 +3669,47 @@ function WorkshopContent() {
                         <div>
                           <p className="text-[15px] font-black text-slate-700">视频故事台</p>
                           <p className="mt-1 text-sm leading-6 text-slate-400">
-                            把主角、场景、镜头动作和氛围写清楚，生成的视频会更完整。
+                            把作文、演讲稿或故事粘进来，先选一种视频形式。
                           </p>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[22px] border border-[#cae6f7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(239,251,255,0.98))] p-4 shadow-[0_10px_24px_rgba(56,189,248,0.08)]">
+                      <p className="text-[15px] font-black text-slate-700">视频作业模板</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-400">
+                        先点模板，再把孩子的作文或演讲稿粘进去。
+                      </p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {videoCreationPresets.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => handleVideoPresetClick(preset.template)}
+                            className="rounded-[18px] bg-white px-3 py-3 text-left shadow-[0_8px_20px_rgba(56,189,248,0.08)] transition hover:-translate-y-0.5 hover:bg-[#f2fcff]"
+                          >
+                            <span className="block text-sm font-black text-slate-700">
+                              {preset.label}
+                            </span>
+                            <span className="mt-1 block text-[11px] font-bold text-[#178ca7]">
+                              {preset.note}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     </div>
 
                     <div className="rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
                       <p className="text-[15px] font-black text-slate-700">视频提示词</p>
                       <p className="mt-1 text-sm leading-6 text-slate-400">
-                        可以写清角色、动作、镜头、场景、色彩和想要的故事感觉。
+                        可以直接粘贴作文、演讲稿、故事或知识点。
                       </p>
                       <textarea
                         id="video-prompt"
                         rows={12}
                         value={videoPrompt}
                         onChange={(event) => setVideoPrompt(event.target.value)}
-                        placeholder="输入你想生成的视频描述..."
+                        placeholder="先选模板，或直接输入想生成的视频内容..."
                         className="mt-4 w-full resize-none rounded-[22px] border border-[#cae6f7] bg-white px-5 py-5 text-base leading-8 text-slate-700 outline-none transition placeholder:text-slate-400 focus:shadow-[0_0_0_4px_rgba(191,219,254,0.35)]"
                       />
                     </div>
