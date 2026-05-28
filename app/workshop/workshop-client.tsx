@@ -1445,6 +1445,7 @@ function WorkshopContent() {
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
   const [drawingError, setDrawingError] = useState("");
   const [videoError, setVideoError] = useState("");
+  const [videoTaskMessage, setVideoTaskMessage] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [writingLoadingMessageIndex, setWritingLoadingMessageIndex] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
@@ -2696,27 +2697,78 @@ function WorkshopContent() {
 
     setGeneratedVideoUrl("");
     setVideoError("");
+    setVideoTaskMessage("正在提交视频任务，请稍等。");
     setShareMessage("");
     setShareFeedback(null);
     setIsShareConfirmOpen(false);
     setIsVideoGenerating(true);
 
     try {
-      const response = await fetch("/api/generate-video", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: videoPrompt,
-        }),
-      });
+      const requestVideoResult = async (body: {
+        prompt?: string;
+        requestId?: string;
+      }) => {
+        const response = await fetch("/api/generate-video", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const parsed = await parseApiResponse<{
+          videoUrl?: string;
+          error?: string;
+          message?: string;
+          requestId?: string;
+          status?: string;
+          remainingCredits?: number;
+        }>(response);
 
-      const { data, rawText } = await parseApiResponse<{
-        videoUrl?: string;
-        error?: string;
-        remainingCredits?: number;
-      }>(response);
+        return {
+          response,
+          ...parsed,
+        };
+      };
+      let result = await requestVideoResult({ prompt: videoPrompt });
+      let response = result.response;
+      let data = result.data;
+      let rawText = result.rawText;
+
+      if (response.status === 202 && data?.requestId) {
+        const startedAt = Date.now();
+        const maxClientWaitMs = 10 * 60 * 1000;
+
+        setVideoTaskMessage(data.message ?? "视频任务已提交，正在生成中。");
+
+        while (response.status === 202 && Date.now() - startedAt < maxClientWaitMs) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 5000);
+          });
+
+          const pollingRequestId = data?.requestId;
+
+          if (!pollingRequestId) {
+            break;
+          }
+
+          result = await requestVideoResult({ requestId: pollingRequestId });
+          response = result.response;
+          data = result.data;
+          rawText = result.rawText;
+
+          if (data?.message) {
+            setVideoTaskMessage(data.message);
+          } else {
+            setVideoTaskMessage("视频还在生成中，请继续等待。");
+          }
+        }
+      }
+
+      if (response.status === 202 && data?.requestId) {
+        setVideoError("视频任务还在生成中，平台这次比较慢。请复制这个任务号发给管理员查询，或稍后再试。任务号：" + data.requestId);
+        setGeneratedVideoUrl("");
+        return;
+      }
 
       if (response.status === 401) {
         if (isUpstreamCredentialError(data?.error)) {
@@ -2756,10 +2808,12 @@ function WorkshopContent() {
       }
 
       setVideoError("");
+      setVideoTaskMessage("");
       setGeneratedVideoUrl(data.videoUrl);
     } catch {
       setVideoError("刚刚和光影工坊失去了一下联系，请稍后再试试。");
     } finally {
+      setVideoTaskMessage("");
       setIsVideoGenerating(false);
     }
   };
@@ -3942,6 +3996,11 @@ function WorkshopContent() {
                                 <p className="mt-5 max-w-md text-lg font-black leading-8 text-slate-600">
                                   视频生成通常会比图片更久一点，我们正在等待完整成片返回。
                                 </p>
+                                {videoTaskMessage ? (
+                                  <p className="mt-3 max-w-md text-sm font-bold leading-7 text-[#178ca7]">
+                                    {videoTaskMessage}
+                                  </p>
+                                ) : null}
                               </div>
                             ) : generatedVideoUrl ? (
                               <div className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-[24px] bg-[#f3fbff]">

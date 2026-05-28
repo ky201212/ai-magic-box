@@ -215,16 +215,79 @@ function waitFor(ms: number) {
   });
 }
 
+async function fetchVideoTaskStatus(input: {
+  apiKey: string;
+  endpointUrl: string;
+  model: string;
+  requestId: string;
+}) {
+  const statusEndpoint = resolveVideoStatusEndpoint(input.endpointUrl);
+  const statusResponse = await fetch(statusEndpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ requestId: input.requestId }),
+    cache: "no-store",
+  });
+  const statusText = await statusResponse.text();
+  const statusData = parsePossibleJson<VideoStatusResponse>(statusText);
+
+  if (!statusResponse.ok) {
+    return NextResponse.json(
+      {
+        error: buildVideoErrorMessage(
+          statusText,
+          input.model,
+          statusEndpoint,
+          "视频状态接口",
+        ),
+      },
+      { status: mapUpstreamStatusToGatewayStatus(statusResponse.status) },
+    );
+  }
+
+  const resolvedStatus = resolveVideoStatusValue(statusData ?? {});
+  const videoUrl = statusData ? extractVideoUrl(statusData) : "";
+
+  if (isVideoTaskSucceeded(resolvedStatus, Boolean(videoUrl)) && videoUrl) {
+    return NextResponse.json({
+      videoUrl,
+      requestId: input.requestId,
+      status: "succeeded",
+    });
+  }
+
+  if (isVideoTaskFailed(resolvedStatus)) {
+    return NextResponse.json(
+      {
+        error:
+          statusData?.error?.message?.trim() ||
+          "视频生成失败了，请检查模型配置或稍后重试。",
+        requestId: input.requestId,
+        status: resolvedStatus || "failed",
+      },
+      { status: 502 },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      requestId: input.requestId,
+      status: resolvedStatus || "processing",
+      message: "视频任务还在生成中，请继续等待。",
+    },
+    { status: 202 },
+  );
+}
+
 export async function POST(request: Request) {
   try {
-    const { prompt } = (await request.json()) as { prompt?: string };
-
-    if (!prompt?.trim()) {
-      return NextResponse.json(
-        { error: "缺少有效的 prompt 参数。" },
-        { status: 400 },
-      );
-    }
+    const { prompt, requestId: existingRequestId } = (await request.json()) as {
+      prompt?: string;
+      requestId?: string;
+    };
 
     const aiConfig = await resolveAiModeConfig("video");
     const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
@@ -258,6 +321,22 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
         { status: 500 },
+      );
+    }
+
+    if (existingRequestId?.trim()) {
+      return fetchVideoTaskStatus({
+        apiKey,
+        endpointUrl: aiConfig.endpointUrl,
+        model: aiConfig.model,
+        requestId: existingRequestId.trim(),
+      });
+    }
+
+    if (!prompt?.trim()) {
+      return NextResponse.json(
+        { error: "缺少有效的 prompt 参数。" },
+        { status: 400 },
       );
     }
 
@@ -351,27 +430,36 @@ export async function POST(request: Request) {
       );
     }
 
-    const deadline = Date.now() + pollTimeoutMs;
-    const statusEndpoint = resolveVideoStatusEndpoint(aiConfig.endpointUrl);
+    const quickPollDeadline = Date.now() + Math.min(pollTimeoutMs, 12000);
 
-    while (Date.now() < deadline) {
+    while (Date.now() < quickPollDeadline) {
       await waitFor(pollIntervalMs);
 
-      const statusResponse = await fetch(statusEndpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ requestId }),
-        cache: "no-store",
+      const taskResponse = await fetchVideoTaskStatus({
+        apiKey,
+        endpointUrl: aiConfig.endpointUrl,
+        model: aiConfig.model,
+        requestId,
       });
+      const taskData = (await taskResponse.clone().json().catch(() => null)) as {
+        videoUrl?: string;
+        error?: string;
+        status?: string;
+      } | null;
 
-      const statusText = await statusResponse.text();
-      const statusData = parsePossibleJson<VideoStatusResponse>(statusText);
-
-      if (!statusResponse.ok) {
+      if (taskResponse.status !== 202) {
         if (shouldCharge && chargedUserId) {
+          if (taskResponse.ok && taskData?.videoUrl) {
+            const successPayload = {
+              videoUrl: taskData.videoUrl,
+              requestId,
+              status: taskData.status ?? "succeeded",
+              remainingCredits,
+            };
+
+            return NextResponse.json(successPayload);
+          }
+
           remainingCredits = await addCredits(chargedUserId, creditCost, {
             reasonCode: "video_refund",
             reasonLabel: "AI视频失败退回",
@@ -379,68 +467,23 @@ export async function POST(request: Request) {
           });
         }
 
-        return NextResponse.json(
-          {
-            error: buildVideoErrorMessage(
-            statusText,
-            aiConfig.model,
-            statusEndpoint,
-            "视频状态接口",
-          ),
+        const failedPayload = {
+          ...(taskData ?? {}),
           remainingCredits,
-        },
-          { status: mapUpstreamStatusToGatewayStatus(statusResponse.status) },
-        );
+        };
+
+        return NextResponse.json(failedPayload, { status: taskResponse.status });
       }
-
-      const resolvedStatus = resolveVideoStatusValue(statusData ?? {});
-      const videoUrl = statusData ? extractVideoUrl(statusData) : "";
-
-      if (isVideoTaskSucceeded(resolvedStatus, Boolean(videoUrl)) && videoUrl) {
-        return NextResponse.json({
-          videoUrl,
-          requestId,
-          remainingCredits,
-        });
-      }
-
-      if (isVideoTaskFailed(resolvedStatus)) {
-        if (shouldCharge && chargedUserId) {
-          remainingCredits = await addCredits(chargedUserId, creditCost, {
-            reasonCode: "video_refund",
-            reasonLabel: "AI视频失败退回",
-            note: `AI 视频生成失败，退回 ${creditCost} 个魔法币。`,
-          });
-        }
-
-        return NextResponse.json(
-          {
-            error:
-              statusData?.error?.message?.trim() ||
-              "视频生成失败了，请检查模型配置或稍后重试。",
-            remainingCredits,
-          },
-          { status: 502 },
-        );
-      }
-    }
-
-    if (shouldCharge && chargedUserId) {
-      remainingCredits = await addCredits(chargedUserId, creditCost, {
-        reasonCode: "video_refund",
-        reasonLabel: "AI视频超时退回",
-        note: `AI 视频生成超时，退回 ${creditCost} 个魔法币。`,
-      });
     }
 
     return NextResponse.json(
       {
-        error:
-          "视频任务已经提交，但在等待时间内还没有完成。请稍后再试，或者把后台轮询超时时间调大一些。",
         requestId,
+        status: "processing",
+        message: "视频任务已经提交，正在继续生成中。",
         remainingCredits,
       },
-      { status: 504 },
+      { status: 202 },
     );
   } catch (error) {
     console.error("【AI 视频生成失败】:", error);
