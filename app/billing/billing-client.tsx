@@ -15,6 +15,14 @@ export type BillingPayload = {
   rate: {
     coin_per_yuan: number;
   };
+  packages: Array<{
+    id: string;
+    name: string;
+    coins: number;
+    price: number;
+    sort_order: number;
+    is_active: boolean;
+  }>;
   plans: Array<{
     id: string;
     name: string;
@@ -224,7 +232,8 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
   const [data, setData] = useState<BillingPayload>(initialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [selectedCoins, setSelectedCoins] = useState(100);
+  const firstPackageId = initialData.packages[0]?.id ?? "";
+  const [selectedPackageId, setSelectedPackageId] = useState(firstPackageId);
   const [redeemCode, setRedeemCode] = useState("");
   const [coinOrderState, setCoinOrderState] = useState<SaveState>("idle");
   const [subscriptionOrderState, setSubscriptionOrderState] =
@@ -419,33 +428,8 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
           }
 
           if (attempts >= 6 && payload.order?.status === "pending") {
-            const cancelResponse = await fetch(`/api/billing/orders/${orderId}`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                action: "cancel",
-              }),
-            });
-            const cancelPayload = (await cancelResponse.json()) as {
-              error?: string;
-              order?: BillingPayload["orders"][number];
-            };
-
-            if (!cancelResponse.ok) {
-              throw new Error(cancelPayload.error ?? "订单取消失败。");
-            }
-
-            setMessage("本次支付未完成，订单已自动记为失败。");
-            forgetPendingCheckoutOrder(orderId);
+            setMessage("支付结果正在同步，请稍后刷新或在后台查单确认。");
             await refreshData();
-
-            const nextParams = new URLSearchParams(searchParams.toString());
-            nextParams.delete("order_id");
-            nextParams.delete("channel");
-            const nextQuery = nextParams.toString();
-            router.replace(nextQuery ? `/billing?${nextQuery}` : "/billing");
             return;
           }
 
@@ -476,13 +460,20 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
     };
   }, [refreshData, router, searchParams]);
 
-  const coinOptions = useMemo(() => {
-    const rate = data.rate.coin_per_yuan ?? 10;
-    return [10, 30, 50, 100, 200].map((yuan) => ({
-      yuan,
-      coins: yuan * rate,
-    }));
-  }, [data.rate.coin_per_yuan]);
+  const coinOptions = useMemo(
+    () =>
+      data.packages
+        .filter((packageRecord) => packageRecord.is_active)
+        .sort(
+          (left, right) =>
+            left.sort_order - right.sort_order || left.price - right.price,
+        ),
+    [data.packages],
+  );
+  const selectedPackage =
+    coinOptions.find((packageRecord) => packageRecord.id === selectedPackageId) ??
+    coinOptions[0] ??
+    null;
 
   const returnOrderId = searchParams.get("order_id");
   const returnChannel = searchParams.get("channel");
@@ -502,11 +493,11 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          orderType: "coin_purchase",
-          coins: selectedCoins,
-          paymentMethod: selectedPaymentMethod,
-        }),
+          body: JSON.stringify({
+            orderType: "coin_purchase",
+            packageId: selectedPackage?.id,
+            paymentMethod: selectedPaymentMethod,
+          }),
       });
       const payload = (await response.json()) as {
         error?: string;
@@ -773,22 +764,22 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {coinOptions.map((option) => (
                       <button
-                        key={option.yuan}
+                        key={option.id}
                         type="button"
-                        onClick={() => setSelectedCoins(option.coins)}
+                        onClick={() => setSelectedPackageId(option.id)}
                         className={`rounded-[22px] border px-5 py-5 text-left transition ${
-                          selectedCoins === option.coins
+                          selectedPackage?.id === option.id
                             ? "border-[#8e96ff] bg-[#f1f2ff] shadow-[0_12px_28px_rgba(98,92,255,0.14)]"
                             : "border-[#e4eaff] bg-[#fbfcff]"
                         }`}
                       >
                         <p className="text-xs font-black tracking-[0.14em] text-[#7b88ac]">
-                          {option.yuan} 元
+                          {formatMoney(option.price)}
                         </p>
                         <p className="mt-2 text-2xl font-black text-[#17213f]">
                           {option.coins}
                         </p>
-                        <p className="mt-1 text-sm text-[#687394]">魔法币</p>
+                        <p className="mt-1 text-sm text-[#687394]">{option.name}</p>
                       </button>
                     ))}
                   </div>
@@ -796,12 +787,13 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-[22px] bg-[#f8faff] px-5 py-4">
                     <div>
                       <p className="text-sm font-black text-[#17213f]">
-                        本次到账 {selectedCoins} 魔法币
+                        本次到账 {selectedPackage?.coins ?? 0} 魔法币
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => void handleCreateCoinOrder()}
+                      disabled={!selectedPackage}
                       className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white"
                     >
                       {coinOrderState === "saving"

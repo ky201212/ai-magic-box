@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
 import {
   getMagicCoinRate,
+  listCoinRechargePackages,
   listSubscriptionPlans,
   listUserPaymentOrders,
   listUserSubscriptions,
@@ -16,10 +17,11 @@ export default async function BillingPage() {
     redirect("/login?redirect=/billing");
   }
 
-  const [credits, creditLogs, rate, plans, orders, subscriptions] = await Promise.all([
+  const [credits, creditLogs, rate, packages, plans, orders, subscriptions] = await Promise.all([
     ensureUserCredits(currentUser.user_id),
     listUserCreditLogs(currentUser.user_id, 12),
     getMagicCoinRate(),
+    listCoinRechargePackages(),
     listSubscriptionPlans(),
     listUserPaymentOrders(currentUser.user_id),
     listUserSubscriptions(currentUser.user_id),
@@ -30,6 +32,7 @@ export default async function BillingPage() {
   const initialData: BillingPayload = {
     credits,
     rate,
+    packages,
     plans,
     orders,
     subscriptions,

@@ -3,7 +3,11 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createCreditLogEntry } from "@/lib/credits";
 import type { CreditLogRow } from "@/lib/credits";
-import type { UserSubscription } from "@/lib/payments";
+import {
+  listAdminUserPaymentOrders,
+  type PaymentOrder,
+  type UserSubscription,
+} from "@/lib/payments";
 import { sendUserNotification } from "@/lib/user-notifications";
 import { isBootstrapAdminPhone } from "@/lib/admin";
 import {
@@ -143,6 +147,7 @@ export type AdminUserRecord = {
   totalCreditsSpent: number;
   lastCreditChangeAt: string | null;
   subscriptions: UserSubscription[];
+  paymentOrders: PaymentOrder[];
   creditLogs: CreditLogRow[];
 };
 
@@ -797,6 +802,7 @@ type AdminUserBaseRow = Omit<
   | "totalCreditsSpent"
   | "lastCreditChangeAt"
   | "subscriptions"
+  | "paymentOrders"
   | "creditLogs"
 >;
 
@@ -1025,17 +1031,24 @@ export async function listAdminUsers(input?: {
   }
 
   const creditLogsByUser = new Map<string, CreditLogRow[]>();
+  const paymentOrdersByUser = new Map<string, PaymentOrder[]>();
 
   if (input?.includeCreditLogs === true) {
-    const creditLogsEntries = await Promise.all(
-      (users ?? []).map(async (user): Promise<[string, CreditLogRow[]]> => [
-        user.id,
-        await listAdminCreditLogsForUser(user.id, 30),
-      ]),
+    const detailEntries = await Promise.all(
+      (users ?? []).map(
+        async (
+          user,
+        ): Promise<[string, CreditLogRow[], PaymentOrder[]]> => [
+          user.id,
+          await listAdminCreditLogsForUser(user.id, 30),
+          await listAdminUserPaymentOrders(user.id, 30),
+        ],
+      ),
     );
 
-    for (const [userId, logs] of creditLogsEntries) {
+    for (const [userId, logs, orders] of detailEntries) {
       creditLogsByUser.set(userId, logs);
+      paymentOrdersByUser.set(userId, orders);
     }
   }
 
@@ -1050,6 +1063,7 @@ export async function listAdminUsers(input?: {
       latestPostAt: null,
     };
     const creditLogs = creditLogsByUser.get(user.id) ?? [];
+    const paymentOrders = paymentOrdersByUser.get(user.id) ?? [];
     const totalCreditsAdded = creditLogs.reduce(
       (total, item) => total + Math.max(0, item.change_amount),
       0,
@@ -1069,6 +1083,7 @@ export async function listAdminUsers(input?: {
       totalCreditsSpent,
       lastCreditChangeAt: creditLogs[0]?.created_at ?? null,
       subscriptions: subscriptionsByUser.get(user.id) ?? [],
+      paymentOrders,
       creditLogs,
     };
   });

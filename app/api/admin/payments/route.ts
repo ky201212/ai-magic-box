@@ -4,17 +4,21 @@ import {
   requirePermission,
 } from "@/lib/admin";
 import { appendAdminAuditLog } from "@/lib/admin-audit";
+import { appendSecurityEventLog } from "@/lib/security-audit";
 import {
   createActivationCodeBatch,
+  deleteCoinRechargePackage,
   deleteSubscriptionPlan,
   getMagicCoinRate,
   listActivationCodeBatches,
   listActivationCodesByBatch,
+  listCoinRechargePackages,
   listAdminPaymentOrders,
   listSubscriptionPlans,
   refundPaymentOrder,
   syncPaymentOrderFromGateway,
   updateMagicCoinRate,
+  upsertCoinRechargePackage,
   upsertSubscriptionPlan,
 } from "@/lib/payments";
 
@@ -39,8 +43,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ codes });
     }
 
-    const [rate, plans, orders, batches] = await Promise.all([
+    const [rate, packages, plans, orders, batches] = await Promise.all([
       getMagicCoinRate(),
+      listCoinRechargePackages({ includeInactive: true }),
       listSubscriptionPlans({ includeInactive: true }),
       listAdminPaymentOrders(),
       listActivationCodeBatches(),
@@ -48,6 +53,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       rate,
+      packages,
       plans,
       orders,
       batches,
@@ -79,6 +85,21 @@ export async function POST(request: Request) {
       | {
           action: "update_rate";
           coinPerYuan: number;
+        }
+      | {
+          action: "upsert_coin_package";
+          package: {
+            id?: string;
+            name: string;
+            coins: number;
+            price: number;
+            sortOrder: number;
+            isActive: boolean;
+          };
+        }
+      | {
+          action: "delete_coin_package";
+          packageId: string;
         }
       | {
           action: "upsert_plan";
@@ -131,7 +152,93 @@ export async function POST(request: Request) {
         },
       });
 
+      await appendSecurityEventLog({
+        request,
+        userId: adminContext.userId,
+        eventType: "admin_payment",
+        action: "update_magic_coin_rate",
+        accountIdentifier: adminContext.phone,
+        detail: {
+          coinPerYuan: rate.coin_per_yuan,
+        },
+      }).catch((auditError) => {
+        console.error("【支付汇率安全日志写入失败】:", auditError);
+      });
+
       return NextResponse.json({ success: true, rate });
+    }
+
+    if (body.action === "upsert_coin_package") {
+      const packageRecord = await upsertCoinRechargePackage(body.package);
+
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "coin_recharge_package_upsert",
+        targetType: "coin_recharge_package",
+        targetId: packageRecord.id,
+        detail: {
+          name: packageRecord.name,
+          coins: packageRecord.coins,
+          price: packageRecord.price,
+          isActive: packageRecord.is_active,
+        },
+      });
+
+      await appendSecurityEventLog({
+        request,
+        userId: adminContext.userId,
+        eventType: "admin_payment",
+        action: "upsert_coin_recharge_package",
+        accountIdentifier: adminContext.phone,
+        detail: {
+          packageId: packageRecord.id,
+          coins: packageRecord.coins,
+          price: packageRecord.price,
+        },
+      }).catch((auditError) => {
+        console.error("【充值档位安全日志写入失败】:", auditError);
+      });
+
+      return NextResponse.json({
+        success: true,
+        package: packageRecord,
+      });
+    }
+
+    if (body.action === "delete_coin_package") {
+      const packageRecord = await deleteCoinRechargePackage(body.packageId);
+
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "coin_recharge_package_delete",
+        targetType: "coin_recharge_package",
+        targetId: packageRecord.id,
+        detail: {
+          name: packageRecord.name,
+        },
+      });
+
+      await appendSecurityEventLog({
+        request,
+        userId: adminContext.userId,
+        eventType: "admin_payment",
+        action: "delete_coin_recharge_package",
+        accountIdentifier: adminContext.phone,
+        detail: {
+          packageId: packageRecord.id,
+        },
+      }).catch((auditError) => {
+        console.error("【删除充值档位安全日志写入失败】:", auditError);
+      });
+
+      return NextResponse.json({
+        success: true,
+        package: packageRecord,
+      });
     }
 
     if (body.action === "upsert_plan") {

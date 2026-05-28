@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { appendSecurityEventLog } from "@/lib/security-audit";
 import {
   createCoinPurchaseOrder,
   createSubscriptionOrder,
@@ -16,16 +17,31 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as {
       orderType?: "coin_purchase" | "subscription";
-      coins?: number;
+      packageId?: string;
       planId?: string;
       paymentMethod?: PaymentMethod;
     };
 
-    if (body.orderType === "coin_purchase") {
+    if (body.orderType === "coin_purchase" && body.packageId) {
       const result = await createCoinPurchaseOrder({
         userId: currentUser.user_id,
-        coins: Number(body.coins ?? 0),
+        packageId: body.packageId,
         paymentMethod: body.paymentMethod ?? "mock",
+      });
+
+      await appendSecurityEventLog({
+        request,
+        userId: currentUser.user_id,
+        eventType: "payment",
+        action: "create_coin_purchase_order",
+        accountIdentifier: currentUser.user_id,
+        detail: {
+          orderId: result.order.order_id,
+          packageId: body.packageId,
+          paymentMethod: body.paymentMethod ?? "mock",
+        },
+      }).catch((auditError) => {
+        console.error("【创建充值订单安全日志写入失败】:", auditError);
       });
 
       return NextResponse.json(result);
@@ -36,6 +52,21 @@ export async function POST(request: Request) {
         userId: currentUser.user_id,
         planId: body.planId,
         paymentMethod: body.paymentMethod ?? "mock",
+      });
+
+      await appendSecurityEventLog({
+        request,
+        userId: currentUser.user_id,
+        eventType: "payment",
+        action: "create_subscription_order",
+        accountIdentifier: currentUser.user_id,
+        detail: {
+          orderId: result.order.order_id,
+          planId: body.planId,
+          paymentMethod: body.paymentMethod ?? "mock",
+        },
+      }).catch((auditError) => {
+        console.error("【创建订阅订单安全日志写入失败】:", auditError);
       });
 
       return NextResponse.json(result);

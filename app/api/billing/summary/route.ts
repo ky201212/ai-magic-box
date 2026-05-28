@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
 import {
   getMagicCoinRate,
+  listCoinRechargePackages,
   listSubscriptionPlans,
   listUserPaymentOrders,
   listUserSubscriptions,
@@ -16,11 +17,12 @@ export async function GET() {
       return NextResponse.json({ error: "请先登录后再查看钱包。" }, { status: 401 });
     }
 
-    const [credits, creditLogs, rate, plans, orders, subscriptions] =
+    const [credits, creditLogs, rate, packages, plans, orders, subscriptions] =
       await Promise.all([
         ensureUserCredits(currentUser.user_id),
         listUserCreditLogs(currentUser.user_id, 12),
         getMagicCoinRate(),
+        listCoinRechargePackages(),
         listSubscriptionPlans(),
         listUserPaymentOrders(currentUser.user_id),
         listUserSubscriptions(currentUser.user_id),
@@ -30,6 +32,7 @@ export async function GET() {
       credits,
       creditLogs,
       rate,
+      packages,
       plans,
       orders,
       subscriptions,

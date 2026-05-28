@@ -5,14 +5,16 @@ import {
   getMagicCoinRate,
   listActivationCodeBatches,
   listAdminPaymentOrders,
+  listCoinRechargePackages,
   listSubscriptionPlans,
 } from "@/lib/payments";
 
 export default async function AdminPaymentsPage() {
   await assertAdminPagePermission("site_settings");
 
-  const [rate, plans, orders, batches] = await Promise.all([
+  const [rate, packages, plans, orders, batches] = await Promise.all([
     getMagicCoinRate(),
+    listCoinRechargePackages({ includeInactive: true }),
     listSubscriptionPlans({ includeInactive: true }),
     listAdminPaymentOrders(),
     listActivationCodeBatches(),
@@ -27,6 +29,7 @@ export default async function AdminPaymentsPage() {
       />
       <PaymentsConsole
         initialRate={rate}
+        initialPackages={packages}
         initialPlans={plans}
         initialOrders={orders}
         initialBatches={batches}

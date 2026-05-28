@@ -21,6 +21,17 @@ create table if not exists public.subscription_plans (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.coin_recharge_packages (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  coins integer not null check (coins > 0),
+  price integer not null check (price >= 0),
+  sort_order integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.payment_orders (
   order_id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
@@ -44,6 +55,25 @@ create table if not exists public.payment_orders (
   closed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists public.security_event_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.users(id) on delete set null,
+  event_type text not null,
+  action text not null,
+  account_identifier text,
+  source_ip text,
+  target_url text,
+  source_port text,
+  user_agent text,
+  client_fingerprint text,
+  request_method text,
+  request_path text,
+  outcome text not null default 'success',
+  detail jsonb not null default '{}'::jsonb,
+  retention_until timestamptz not null default (now() + interval '6 months'),
+  created_at timestamptz not null default now()
 );
 
 alter table public.payment_orders
@@ -135,6 +165,15 @@ create index if not exists payment_orders_user_created_idx
 create index if not exists payment_orders_status_created_idx
   on public.payment_orders (status, created_at desc);
 
+create index if not exists coin_recharge_packages_active_sort_idx
+  on public.coin_recharge_packages (is_active, sort_order asc, price asc);
+
+create index if not exists security_event_logs_user_created_idx
+  on public.security_event_logs (user_id, created_at desc);
+
+create index if not exists security_event_logs_type_created_idx
+  on public.security_event_logs (event_type, created_at desc);
+
 create index if not exists coin_transactions_user_created_idx
   on public.coin_transactions (user_id, created_at desc);
 
@@ -161,6 +200,21 @@ values
   ('进阶季卡', 500, 90, '06:00:00', 4900, true)
 on conflict do nothing;
 
+insert into public.coin_recharge_packages (
+  name,
+  coins,
+  price,
+  sort_order,
+  is_active
+)
+values
+  ('10 元魔法币包', 100, 1000, 10, true),
+  ('30 元魔法币包', 300, 3000, 30, true),
+  ('50 元魔法币包', 500, 5000, 50, true),
+  ('100 元魔法币包', 1000, 10000, 100, true),
+  ('200 元魔法币包', 2000, 20000, 200, true)
+on conflict do nothing;
+
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
@@ -180,6 +234,12 @@ execute function public.touch_updated_at();
 drop trigger if exists trg_subscription_plans_updated_at on public.subscription_plans;
 create trigger trg_subscription_plans_updated_at
 before update on public.subscription_plans
+for each row
+execute function public.touch_updated_at();
+
+drop trigger if exists trg_coin_recharge_packages_updated_at on public.coin_recharge_packages;
+create trigger trg_coin_recharge_packages_updated_at
+before update on public.coin_recharge_packages
 for each row
 execute function public.touch_updated_at();
 

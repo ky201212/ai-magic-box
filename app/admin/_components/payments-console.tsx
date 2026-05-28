@@ -6,6 +6,14 @@ type PaymentsConsoleProps = {
   initialRate: {
     coin_per_yuan: number;
   };
+  initialPackages: Array<{
+    id: string;
+    name: string;
+    coins: number;
+    price: number;
+    sort_order: number;
+    is_active: boolean;
+  }>;
   initialPlans: Array<{
     id: string;
     name: string;
@@ -86,6 +94,36 @@ type PlanFormState = {
   price: number;
   isActive: boolean;
 };
+
+type CoinPackageFormState = {
+  name: string;
+  coins: number;
+  price: number;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+function createDefaultCoinPackageDraft(): CoinPackageFormState {
+  return {
+    name: "",
+    coins: 100,
+    price: 1000,
+    sortOrder: 10,
+    isActive: true,
+  };
+}
+
+function createCoinPackageDraftFromPackage(
+  packageRecord: PaymentsConsoleProps["initialPackages"][number],
+): CoinPackageFormState {
+  return {
+    name: packageRecord.name,
+    coins: packageRecord.coins,
+    price: packageRecord.price,
+    sortOrder: packageRecord.sort_order,
+    isActive: packageRecord.is_active,
+  };
+}
 
 function createDefaultPlanDraft(): PlanFormState {
   return {
@@ -237,26 +275,39 @@ function getActivationCodeStatusTone(status: ActivationCodeDetail["status"]) {
 
 export function PaymentsConsole({
   initialRate,
+  initialPackages,
   initialPlans,
   initialOrders,
   initialBatches,
 }: PaymentsConsoleProps) {
   const [coinPerYuan, setCoinPerYuan] = useState(initialRate.coin_per_yuan);
+  const [coinPackages, setCoinPackages] = useState(initialPackages);
   const [plans, setPlans] = useState(initialPlans);
   const [orders, setOrders] = useState(initialOrders);
   const [batches, setBatches] = useState(initialBatches);
   const [rateState, setRateState] = useState<SaveState>("idle");
   const [planState, setPlanState] = useState<SaveState>("idle");
   const [batchState, setBatchState] = useState<SaveState>("idle");
+  const [coinPackageState, setCoinPackageState] = useState<SaveState>("idle");
   const [orderActionState, setOrderActionState] = useState<
     Record<string, "syncing" | "refunding" | undefined>
   >({});
   const [orderMessage, setOrderMessage] = useState("");
   const [plainCodes, setPlainCodes] = useState<string[]>([]);
   const [planDraft, setPlanDraft] = useState<PlanFormState>(createDefaultPlanDraft);
+  const [coinPackageDraft, setCoinPackageDraft] = useState<CoinPackageFormState>(
+    createDefaultCoinPackageDraft,
+  );
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [editingCoinPackageId, setEditingCoinPackageId] = useState<string | null>(
+    null,
+  );
   const [planMessage, setPlanMessage] = useState("");
+  const [coinPackageMessage, setCoinPackageMessage] = useState("");
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [deletingCoinPackageId, setDeletingCoinPackageId] = useState<string | null>(
+    null,
+  );
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [batchCodeDetails, setBatchCodeDetails] = useState<
@@ -271,9 +322,9 @@ export function PaymentsConsole({
     expireAt: "",
   });
 
-  const activePlansCount = useMemo(
-    () => plans.filter((plan) => plan.is_active).length,
-    [plans],
+  const activeCoinPackagesCount = useMemo(
+    () => coinPackages.filter((packageRecord) => packageRecord.is_active).length,
+    [coinPackages],
   );
 
   const pendingOrdersCount = useMemo(
@@ -292,9 +343,25 @@ export function PaymentsConsole({
             ? "保存修改"
             : "创建套餐";
 
+  const coinPackageSubmitLabel =
+    coinPackageState === "saving"
+      ? "保存中"
+      : coinPackageState === "success"
+        ? "已保存"
+        : coinPackageState === "error"
+          ? "保存失败"
+          : editingCoinPackageId
+            ? "保存修改"
+            : "创建档位";
+
   const resetPlanEditor = () => {
     setPlanDraft(createDefaultPlanDraft());
     setEditingPlanId(null);
+  };
+
+  const resetCoinPackageEditor = () => {
+    setCoinPackageDraft(createDefaultCoinPackageDraft());
+    setEditingCoinPackageId(null);
   };
 
   const handleSaveRate = async () => {
@@ -364,6 +431,112 @@ export function PaymentsConsole({
       setPlanState("error");
     } finally {
       window.setTimeout(() => setPlanState("idle"), 1800);
+    }
+  };
+
+  const handleSaveCoinPackage = async () => {
+    setCoinPackageState("saving");
+    setCoinPackageMessage("");
+
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "upsert_coin_package",
+          package: {
+            id: editingCoinPackageId ?? undefined,
+            ...coinPackageDraft,
+          },
+        }),
+      });
+      const payload = (await response.json()) as {
+        package?: PaymentsConsoleProps["initialPackages"][number];
+        error?: string;
+      };
+
+      if (!response.ok || !payload.package) {
+        throw new Error(payload.error ?? "充值档位保存失败");
+      }
+
+      setCoinPackages((current) => {
+        const next = current.filter((item) => item.id !== payload.package!.id);
+        return [payload.package!, ...next].sort(
+          (left, right) => left.sort_order - right.sort_order || left.price - right.price,
+        );
+      });
+      resetCoinPackageEditor();
+      setCoinPackageMessage(editingCoinPackageId ? "充值档位已更新。" : "充值档位已创建。");
+      setCoinPackageState("success");
+    } catch (error) {
+      setCoinPackageMessage(
+        error instanceof Error ? error.message : "充值档位保存失败。",
+      );
+      setCoinPackageState("error");
+    } finally {
+      window.setTimeout(() => setCoinPackageState("idle"), 1800);
+    }
+  };
+
+  const handleEditCoinPackage = (
+    packageRecord: PaymentsConsoleProps["initialPackages"][number],
+  ) => {
+    setEditingCoinPackageId(packageRecord.id);
+    setCoinPackageDraft(createCoinPackageDraftFromPackage(packageRecord));
+    setCoinPackageMessage("");
+    setCoinPackageState("idle");
+  };
+
+  const handleDeleteCoinPackage = async (
+    packageRecord: PaymentsConsoleProps["initialPackages"][number],
+  ) => {
+    const confirmed = window.confirm(`确定删除充值档位“${packageRecord.name}”吗？`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingCoinPackageId(packageRecord.id);
+    setCoinPackageMessage("");
+
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "delete_coin_package",
+          packageId: packageRecord.id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error ?? "充值档位删除失败");
+      }
+
+      setCoinPackages((current) =>
+        current.filter((item) => item.id !== packageRecord.id),
+      );
+      if (editingCoinPackageId === packageRecord.id) {
+        resetCoinPackageEditor();
+      }
+      setCoinPackageMessage(`充值档位“${packageRecord.name}”已删除。`);
+      setCoinPackageState("success");
+    } catch (error) {
+      setCoinPackageMessage(
+        error instanceof Error ? error.message : "充值档位删除失败。",
+      );
+      setCoinPackageState("error");
+    } finally {
+      setDeletingCoinPackageId(null);
+      window.setTimeout(() => setCoinPackageState("idle"), 1800);
     }
   };
 
@@ -683,9 +856,11 @@ export function PaymentsConsole({
           <p className="mt-2 text-sm text-slate-500">1 元对应魔法币</p>
         </div>
         <div className="rounded-[28px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
-          <p className="text-xs font-bold tracking-[0.14em] text-slate-400">生效套餐</p>
-          <p className="mt-3 text-4xl font-black text-slate-900">{activePlansCount}</p>
-          <p className="mt-2 text-sm text-slate-500">当前上架订阅数</p>
+          <p className="text-xs font-bold tracking-[0.14em] text-slate-400">充值档位</p>
+          <p className="mt-3 text-4xl font-black text-slate-900">
+            {activeCoinPackagesCount}
+          </p>
+          <p className="mt-2 text-sm text-slate-500">当前上架充值包</p>
         </div>
         <div className="rounded-[28px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
           <p className="text-xs font-bold tracking-[0.14em] text-slate-400">激活码批次</p>
@@ -697,6 +872,168 @@ export function PaymentsConsole({
           <p className="mt-3 text-4xl font-black text-slate-900">{pendingOrdersCount}</p>
           <p className="mt-2 text-sm text-slate-500">待完成或待排查的订单</p>
         </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <article className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+          <p className="text-lg font-black text-slate-800">
+            {editingCoinPackageId ? "编辑充值档位" : "新建充值档位"}
+          </p>
+          <p className="mt-2 text-sm leading-7 text-slate-500">
+            前台充值只会使用这里配置的档位 ID，下单时服务器重新读取金额和魔法币数量。
+          </p>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <label className="block text-sm font-bold text-slate-600">
+              档位名称
+              <input
+                value={coinPackageDraft.name}
+                onChange={(event) =>
+                  setCoinPackageDraft((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+              />
+            </label>
+            <label className="block text-sm font-bold text-slate-600">
+              到账魔法币
+              <input
+                type="number"
+                min={1}
+                value={coinPackageDraft.coins}
+                onChange={(event) =>
+                  setCoinPackageDraft((current) => ({
+                    ...current,
+                    coins: Number(event.target.value),
+                  }))
+                }
+                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+              />
+            </label>
+            <label className="block text-sm font-bold text-slate-600">
+              售价（分）
+              <input
+                type="number"
+                min={1}
+                value={coinPackageDraft.price}
+                onChange={(event) =>
+                  setCoinPackageDraft((current) => ({
+                    ...current,
+                    price: Number(event.target.value),
+                  }))
+                }
+                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+              />
+            </label>
+            <label className="block text-sm font-bold text-slate-600">
+              排序
+              <input
+                type="number"
+                min={0}
+                value={coinPackageDraft.sortOrder}
+                onChange={(event) =>
+                  setCoinPackageDraft((current) => ({
+                    ...current,
+                    sortOrder: Number(event.target.value),
+                  }))
+                }
+                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+              />
+            </label>
+            <label className="block text-sm font-bold text-slate-600">
+              上架状态
+              <select
+                value={coinPackageDraft.isActive ? "active" : "inactive"}
+                onChange={(event) =>
+                  setCoinPackageDraft((current) => ({
+                    ...current,
+                    isActive: event.target.value === "active",
+                  }))
+                }
+                className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+              >
+                <option value="active">上架</option>
+                <option value="inactive">下架</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleSaveCoinPackage()}
+              className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
+            >
+              {coinPackageSubmitLabel}
+            </button>
+            {editingCoinPackageId ? (
+              <button
+                type="button"
+                onClick={resetCoinPackageEditor}
+                className="rounded-full border border-slate-200 px-5 py-3 text-sm font-black text-slate-600"
+              >
+                取消编辑
+              </button>
+            ) : null}
+          </div>
+          {coinPackageMessage ? (
+            <p
+              className={`mt-4 text-sm ${
+                coinPackageState === "error" ? "text-rose-500" : "text-slate-500"
+              }`}
+            >
+              {coinPackageMessage}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+          <p className="text-lg font-black text-slate-800">充值档位列表</p>
+          <div className="mt-5 space-y-3">
+            {coinPackages.map((packageRecord) => (
+              <div
+                key={packageRecord.id}
+                className="rounded-[22px] border border-slate-100 bg-slate-50 px-5 py-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-base font-black text-slate-800">
+                      {packageRecord.name}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      到账 {packageRecord.coins} 魔法币 / 排序 {packageRecord.sort_order}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-black text-slate-900">
+                      {formatPrice(packageRecord.price)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {packageRecord.is_active ? "已上架" : "已下架"}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEditCoinPackage(packageRecord)}
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-black text-slate-600"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteCoinPackage(packageRecord)}
+                    disabled={deletingCoinPackageId === packageRecord.id}
+                    className="rounded-full border border-rose-200 px-4 py-2 text-sm font-black text-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deletingCoinPackageId === packageRecord.id ? "删除中" : "删除"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">

@@ -56,6 +56,58 @@ function formatPrice(price: number) {
   return `¥${(price / 100).toFixed(2)}`;
 }
 
+function formatPaymentMethod(method: string) {
+  if (method === "alipay_pc") {
+    return "支付宝";
+  }
+
+  if (method === "wechat_pc") {
+    return "微信支付";
+  }
+
+  return "Mock 支付";
+}
+
+function formatOrderType(orderType: "coin_purchase" | "subscription") {
+  return orderType === "coin_purchase" ? "魔法币充值" : "订阅购买";
+}
+
+function formatOrderStatus(status: string) {
+  if (status === "pending") {
+    return "待支付";
+  }
+
+  if (status === "paid") {
+    return "已支付";
+  }
+
+  if (status === "cancelled") {
+    return "支付失败/已关闭";
+  }
+
+  if (status === "refunded") {
+    return "已退款";
+  }
+
+  return status;
+}
+
+function getOrderStatusTone(status: string) {
+  if (status === "paid") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "pending") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (status === "refunded") {
+    return "bg-sky-50 text-sky-700";
+  }
+
+  return "bg-rose-50 text-rose-700";
+}
+
 function getSubscriptionStatusLabel(status: "active" | "expired" | "cancelled") {
   if (status === "active") {
     return "订阅中";
@@ -171,6 +223,12 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
         user.phone,
         user.nickname ?? "",
         user.notes ?? "",
+        ...user.paymentOrders.map(
+          (order) =>
+            `${order.order_id} ${order.trade_no ?? ""} ${order.status} ${formatOrderType(
+              order.order_type,
+            )}`,
+        ),
         ...user.creditLogs.map((log) => `${log.reason_label} ${log.note ?? ""}`),
       ].some((value) => value.includes(normalizedKeyword)),
     );
@@ -817,6 +875,76 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                         ) : (
                           <div className="rounded-[20px] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
                             这个用户暂时没有订阅套餐。
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="rounded-[24px] bg-slate-50 p-5 xl:col-span-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">支付订单记录</p>
+                          <p className="mt-2 text-sm leading-7 text-slate-500">
+                            包含成功、待支付、失败关闭和退款订单，客服追账时优先看这里。
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500">
+                          共 {user.paymentOrders.length} 条
+                        </span>
+                      </div>
+
+                      <div className="mt-5 max-h-[360px] space-y-3 overflow-y-auto pr-1">
+                        {user.paymentOrders.length ? (
+                          user.paymentOrders.map((order) => (
+                            <div
+                              key={order.order_id}
+                              className="grid gap-3 rounded-[20px] bg-white px-4 py-4 lg:grid-cols-[1fr_auto]"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-black text-slate-800">
+                                    {formatOrderType(order.order_type)}
+                                  </p>
+                                  <span
+                                    className={`rounded-full px-2.5 py-1 text-xs font-bold ${getOrderStatusTone(
+                                      order.status,
+                                    )}`}
+                                  >
+                                    {formatOrderStatus(order.status)}
+                                  </span>
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">
+                                    {formatPaymentMethod(order.payment_method)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 text-xs leading-6 text-slate-500">
+                                  订单号：{order.order_id}
+                                </p>
+                                <p className="text-xs leading-6 text-slate-500">
+                                  支付流水：{order.trade_no ?? "暂无"}
+                                </p>
+                                <p className="text-xs leading-6 text-slate-500">
+                                  失败原因：{order.failure_reason ?? "暂无"}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  创建于 {formatDateTime(order.created_at)}
+                                  {order.paid_at
+                                    ? ` / 支付于 ${formatDateTime(order.paid_at)}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="text-left lg:text-right">
+                                <p className="text-lg font-black text-slate-900">
+                                  {formatPrice(order.amount)}
+                                </p>
+                                <p className="mt-2 text-xs text-slate-400">
+                                  回调：{order.notify_status ?? "暂无"}
+                                </p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-[20px] border border-dashed border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">
+                            这个用户暂时没有支付订单记录。
                           </div>
                         )}
                       </div>

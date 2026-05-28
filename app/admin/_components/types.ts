@@ -146,6 +146,30 @@ export type AdminUserRecord = {
       price: number;
     } | null;
   }>;
+  paymentOrders: Array<{
+    order_id: string;
+    user_id: string;
+    order_type: "coin_purchase" | "subscription";
+    amount: number;
+    status: "pending" | "paid" | "cancelled" | "refunded";
+    payment_method: "mock" | "wechat_pc" | "alipay_pc";
+    trade_no: string | null;
+    provider_name: string | null;
+    buyer_account: string | null;
+    buyer_id: string | null;
+    notify_status: string | null;
+    failure_reason: string | null;
+    detail: Record<string, unknown>;
+    payment_request: Record<string, unknown>;
+    payment_response: Record<string, unknown>;
+    notify_payload: Record<string, unknown> | null;
+    refund_payload: Record<string, unknown> | null;
+    paid_at: string | null;
+    refunded_at: string | null;
+    closed_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
   creditLogs: Array<{
     id: string;
     user_id: string;

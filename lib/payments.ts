@@ -32,6 +32,17 @@ export type SubscriptionPlan = {
   updated_at: string;
 };
 
+export type CoinRechargePackage = {
+  id: string;
+  name: string;
+  coins: number;
+  price: number;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PaymentOrder = {
   order_id: string;
   user_id: string;
@@ -144,6 +155,7 @@ function isMissingPaymentInfrastructure(error: unknown) {
     code === "42P01" ||
     code === "42703" ||
     message.includes("payment_orders") ||
+    message.includes("coin_recharge_packages") ||
     message.includes("subscription_plans") ||
     message.includes("magic_coin_rate") ||
     message.includes("user_subscriptions") ||
@@ -400,6 +412,109 @@ export async function listSubscriptionPlans(options?: { includeInactive?: boolea
   }
 
   return data ?? [];
+}
+
+export async function listCoinRechargePackages(options?: {
+  includeInactive?: boolean;
+}) {
+  const supabase = getSupabaseAdmin();
+  let query = supabase
+    .from("coin_recharge_packages")
+    .select("id, name, coins, price, sort_order, is_active, created_at, updated_at")
+    .order("sort_order", { ascending: true })
+    .order("price", { ascending: true });
+
+  if (!options?.includeInactive) {
+    query = query.eq("is_active", true);
+  }
+
+  const { data, error } = await query.returns<CoinRechargePackage[]>();
+
+  if (error) {
+    if (isMissingPaymentInfrastructure(error)) {
+      console.warn("充值档位表暂不可用，已回退到默认档位。", error);
+      const rate = await getMagicCoinRate();
+      return [10, 30, 50, 100, 200].map((yuan) => ({
+        id: `fallback-${yuan}`,
+        name: `${yuan} 元魔法币包`,
+        coins: yuan * rate.coin_per_yuan,
+        price: yuan * 100,
+        sort_order: yuan,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+    }
+
+    throw error;
+  }
+
+  return data ?? [];
+}
+
+export async function upsertCoinRechargePackage(input: {
+  id?: string;
+  name: string;
+  coins: number;
+  price: number;
+  sortOrder: number;
+  isActive: boolean;
+}) {
+  const supabase = getSupabaseAdmin();
+  const payload = {
+    ...(input.id ? { id: input.id } : {}),
+    name: input.name.trim() || "魔法币充值包",
+    coins: Math.max(1, Math.floor(input.coins)),
+    price: Math.max(1, Math.floor(input.price)),
+    sort_order: Math.max(0, Math.floor(input.sortOrder)),
+    is_active: input.isActive,
+  };
+
+  const { data, error } = await supabase
+    .from("coin_recharge_packages")
+    .upsert(payload as never)
+    .select("id, name, coins, price, sort_order, is_active, created_at, updated_at")
+    .single<CoinRechargePackage>();
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return data;
+}
+
+export async function deleteCoinRechargePackage(packageId: string) {
+  const supabase = getSupabaseAdmin();
+  const normalizedPackageId = packageId.trim();
+
+  if (!normalizedPackageId) {
+    throw new Error("缺少要删除的充值档位 ID。");
+  }
+
+  const { data: packageRecord, error: fetchError } = await supabase
+    .from("coin_recharge_packages")
+    .select("id, name")
+    .eq("id", normalizedPackageId)
+    .maybeSingle<{ id: string; name: string }>();
+
+  if (fetchError) {
+    throw asPaymentInfrastructureError(fetchError);
+  }
+
+  if (!packageRecord) {
+    throw new Error("没有找到这个充值档位。");
+  }
+
+  const { error } = await supabase
+    .from("coin_recharge_packages")
+    .delete()
+    .eq("id", normalizedPackageId);
+
+  if (error) {
+    throw asPaymentInfrastructureError(error);
+  }
+
+  return packageRecord;
 }
 
 export async function upsertSubscriptionPlan(input: {
@@ -663,14 +778,21 @@ async function insertPaymentOrder(input: {
 
 export async function createCoinPurchaseOrder(input: {
   userId: string;
-  coins: number;
+  packageId: string;
   paymentMethod?: PaymentMethod;
 }) {
-  const rate = await getMagicCoinRate();
+  const supabase = getSupabaseAdmin();
   const paymentMethod = input.paymentMethod ?? "mock";
-  const coins = Math.max(rate.coin_per_yuan, Math.floor(input.coins));
-  const yuan = Math.ceil(coins / rate.coin_per_yuan);
-  const amount = yuan * 100;
+  const { data: packageRecord, error: packageError } = await supabase
+    .from("coin_recharge_packages")
+    .select("id, name, coins, price, sort_order, is_active, created_at, updated_at")
+    .eq("id", input.packageId)
+    .eq("is_active", true)
+    .single<CoinRechargePackage>();
+
+  if (packageError) {
+    throw asPaymentInfrastructureError(packageError);
+  }
 
   await cancelPendingOrdersForUser({
     userId: input.userId,
@@ -680,23 +802,24 @@ export async function createCoinPurchaseOrder(input: {
   const order = await insertPaymentOrder({
     userId: input.userId,
     orderType: "coin_purchase",
-    amount,
+    amount: packageRecord.price,
     paymentMethod,
     detail: {
-      coins,
-      coinPerYuan: rate.coin_per_yuan,
+      packageId: packageRecord.id,
+      packageName: packageRecord.name,
+      coins: packageRecord.coins,
     },
   });
 
   const payment = await PaymentService.createPayment(order, {
-    title: "魔法币充值",
+    title: packageRecord.name,
     detail: order.detail,
   });
 
   const paymentRequest = {
-    title: "魔法币充值",
+    title: packageRecord.name,
     orderType: order.order_type,
-    itemSummary: `${coins} 魔法币`,
+    itemSummary: `${packageRecord.coins} 魔法币`,
     amount: order.amount,
     detail: order.detail,
     ...(payment.requestPayload ?? {}),
@@ -796,10 +919,11 @@ async function markOrderPaid(orderId: string, userId: string, payload: PaymentNo
       notify_payload: payload.raw,
       failure_reason: null,
       paid_at: payload.paidAt,
+      closed_at: null,
     } as never)
     .eq("order_id", orderId)
     .eq("user_id", userId)
-    .eq("status", "pending")
+    .in("status", ["pending", "cancelled"])
     .select(PAYMENT_ORDER_SELECT)
     .single<PaymentOrder>();
 
@@ -941,7 +1065,7 @@ export async function handlePaymentNotification(method: PaymentMethod, request: 
     }
   }
 
-  if (order.status === "paid") {
+  if (order.status === "paid" || order.status === "refunded") {
     return order;
   }
 
@@ -985,7 +1109,10 @@ export async function syncPaymentOrderFromGateway(orderId: string) {
     });
   }
 
-  if (order.status === "pending" && isPaidGatewayStatus(result.status)) {
+  if (
+    (order.status === "pending" || order.status === "cancelled") &&
+    isPaidGatewayStatus(result.status)
+  ) {
     return markOrderPaidFromQuery(order, result);
   }
 
@@ -1291,6 +1418,10 @@ export async function listUserPaymentOrders(userId: string, limit = 20) {
   }
 
   return data ?? [];
+}
+
+export async function listAdminUserPaymentOrders(userId: string, limit = 30) {
+  return listUserPaymentOrders(userId, limit);
 }
 
 export async function getPaymentOrderById(orderId: string) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminUserById, updateAdminUser } from "@/lib/admin-data";
 import { appendAdminAuditLog } from "@/lib/admin-audit";
+import { appendSecurityEventLog } from "@/lib/security-audit";
 import {
   requireAdminContext,
   requirePermission,
@@ -91,6 +92,20 @@ export async function PATCH(request: Request, context: RouteContext) {
         },
       });
 
+      await appendSecurityEventLog({
+        request,
+        userId: adminContext.userId,
+        eventType: "admin_user",
+        action: "cancel_user_subscription",
+        accountIdentifier: adminContext.phone,
+        detail: {
+          targetUserId: userId,
+          subscriptionId: body.subscriptionId,
+        },
+      }).catch((auditError) => {
+        console.error("【取消订阅安全日志写入失败】:", auditError);
+      });
+
       const user = await getAdminUserById(userId);
 
       return NextResponse.json({
@@ -100,6 +115,19 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     await updateAdminUser(userId, body);
+    await appendSecurityEventLog({
+      request,
+      userId: adminContext.userId,
+      eventType: "admin_user",
+      action: "update_user",
+      accountIdentifier: adminContext.phone,
+      detail: {
+        targetUserId: userId,
+        fields: Object.keys(body).filter((key) => key !== "creditLogNote"),
+      },
+    }).catch((auditError) => {
+      console.error("【更新用户安全日志写入失败】:", auditError);
+    });
     const user = await getAdminUserById(userId);
 
     return NextResponse.json({
