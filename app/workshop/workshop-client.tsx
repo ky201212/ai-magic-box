@@ -1711,6 +1711,7 @@ function WorkshopContent() {
   const [drawingError, setDrawingError] = useState("");
   const [speechError, setSpeechError] = useState("");
   const [videoError, setVideoError] = useState("");
+  const [codingTaskMessage, setCodingTaskMessage] = useState("");
   const [videoTaskMessage, setVideoTaskMessage] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [writingLoadingMessageIndex, setWritingLoadingMessageIndex] = useState(0);
@@ -2967,35 +2968,99 @@ function WorkshopContent() {
     setShareMessage("");
     setShareFeedback(null);
     setGeneratedCode("");
+    setCodingTaskMessage("正在准备创作任务，请稍等。");
     setLoadingMessageIndex(0);
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: promptText,
-          mode: "coding",
-        }),
-      });
+      const requestCodingResult = async (body: {
+        prompt?: string;
+        taskId?: string;
+        mode?: "coding";
+      }) => {
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
 
-      const { data, rawText } = await parseApiResponse<{
+        const parsed = await parseApiResponse<{
+          code?: string;
+          error?: string;
+          message?: string;
+          remainingCredits?: number;
+          degraded?: boolean;
+          degradedReason?: string;
+          requestId?: string;
+          taskId?: string;
+          status?: string;
+        }>(response);
+
+        return {
+          response,
+          ...parsed,
+        };
+      };
+
+      let result = await requestCodingResult({
+        prompt: promptText,
+        mode: "coding",
+      });
+      let response = result.response;
+      let data = result.data;
+      let rawText = result.rawText;
+
+      if (response.status === 202 && data?.taskId) {
+        const startedAt = Date.now();
+        const maxClientWaitMs = 5 * 60 * 1000;
+        setCodingTaskMessage(
+          data.message ?? "这次内容比较复杂，已经切换到后台继续生成。",
+        );
+
+        while (response.status === 202 && Date.now() - startedAt < maxClientWaitMs) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 2500);
+          });
+
+          if (!data?.taskId) {
+            break;
+          }
+
+          result = await requestCodingResult({
+            taskId: data.taskId,
+            mode: "coding",
+          });
+          response = result.response;
+          data = result.data;
+          rawText = result.rawText;
+
+          if (data?.message) {
+            setCodingTaskMessage(data.message);
+          } else {
+            setCodingTaskMessage("作品还在后台生成中，请继续等待。");
+          }
+        }
+      }
+
+      const normalizedData = data as {
         code?: string;
         error?: string;
+        message?: string;
         remainingCredits?: number;
         degraded?: boolean;
         degradedReason?: string;
         requestId?: string;
-      }>(response);
+        taskId?: string;
+      } | null;
+
       if (response.status === 401) {
-        if (isUpstreamCredentialError(data?.error)) {
+        if (isUpstreamCredentialError(normalizedData?.error)) {
           setGeneratedCode(
             createMessagePreviewHtml(
               "模型密钥需要检查",
-              data?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
+              normalizedData?.error ?? "模型密钥无效，请检查后台 AI 配置里的 key。",
             ),
           );
           return;
@@ -3013,18 +3078,28 @@ function WorkshopContent() {
         return;
       }
 
-      if (typeof data?.remainingCredits === "number") {
-        setMagicCredits(data.remainingCredits);
+      if (typeof normalizedData?.remainingCredits === "number") {
+        setMagicCredits(normalizedData.remainingCredits);
       }
 
-      if (!response.ok || !data?.code) {
+      if (response.status === 202 && normalizedData?.taskId) {
+        setGeneratedCode(
+          createMessagePreviewHtml(
+            "仍在生成中",
+            "这次内容比较复杂，系统已经切换到后台继续生成。请继续等待，作品完成后会自动返回结果。",
+          ),
+        );
+        return;
+      }
+
+      if (!response.ok || !normalizedData?.code) {
         setGeneratedCode(
           createMessagePreviewHtml(
             "生成未完成",
             toReadableApiError(
               response,
               "这次创作没有成功，我们再试一次。",
-              data?.error,
+              normalizedData?.error,
               rawText,
             ),
           ),
@@ -3032,19 +3107,21 @@ function WorkshopContent() {
         return;
       }
 
-      setGeneratedCode(ensurePreviewHtmlDocument(data.code));
+      setGeneratedCode(ensurePreviewHtmlDocument(normalizedData.code));
+      setCodingTaskMessage("");
 
-      if (data.requestId) {
-        window.console.info("AI 编程请求号：", data.requestId);
+      if (normalizedData.requestId) {
+        window.console.info("AI 编程请求号：", normalizedData.requestId);
       }
 
-      if (data.degraded && data.degradedReason) {
+      if (normalizedData.degraded && normalizedData.degradedReason) {
         window.console.warn("AI 编程已切换兜底生成：", {
-          requestId: data.requestId ?? null,
-          reason: data.degradedReason,
+          requestId: normalizedData.requestId ?? null,
+          reason: normalizedData.degradedReason,
         });
       }
     } catch {
+      setCodingTaskMessage("");
       setGeneratedCode(
         createMessagePreviewHtml(
           "连接中断",
@@ -4055,7 +4132,7 @@ function WorkshopContent() {
                           </p>
                           <p className="mt-2 text-sm font-black text-slate-700">
                             {isLoading
-                              ? "小程序正在生成"
+                              ? codingTaskMessage || "小程序正在生成"
                               : hasGeneratedCode
                                 ? "可继续调整后重新生成"
                                 : "等待开始生成"}
@@ -4066,7 +4143,9 @@ function WorkshopContent() {
                             展示建议
                           </p>
                           <p className="mt-2 text-sm font-black text-slate-700">
-                            生成完成后可在右侧放大查看细节
+                            {isLoading && codingTaskMessage
+                              ? "已自动切到后台稳态生成，完成后会直接回到预览区。"
+                              : "生成完成后可在右侧放大查看细节"}
                           </p>
                         </div>
                       </div>

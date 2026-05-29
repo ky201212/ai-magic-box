@@ -6,10 +6,63 @@ import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { addCredits, consumeCredits } from "@/lib/credits";
 import { getAiSecret } from "@/lib/ai-secrets";
+import {
+  readCodingGenerationTask,
+  updateCodingGenerationTask,
+  writeCodingGenerationTask,
+  type CodingGenerationTaskRecord,
+} from "@/lib/coding-generation-tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
+  const taskId = requestUrl.searchParams.get("taskId")?.trim();
+
+  if (!taskId) {
+    return NextResponse.json({ error: "缺少 taskId 参数。" }, { status: 400 });
+  }
+
+  const task = await readCodingGenerationTask(taskId);
+
+  if (!task) {
+    return NextResponse.json({ error: "没有找到对应的生成任务。" }, { status: 404 });
+  }
+
+  if (task.status === "succeeded" && task.code) {
+    return NextResponse.json({
+      taskId,
+      status: "succeeded",
+      code: task.code,
+      remainingCredits: task.remainingCredits,
+      degraded: task.degraded ?? false,
+      degradedReason: task.degradedReason,
+    });
+  }
+
+  if (task.status === "failed") {
+    return NextResponse.json(
+      {
+        taskId,
+        status: "failed",
+        error: task.error ?? "生成任务失败了，请稍后再试。",
+        remainingCredits: task.remainingCredits,
+      },
+      { status: task.httpStatus && task.httpStatus >= 400 ? task.httpStatus : 500 },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      taskId,
+      status: task.status,
+      message: "作品还在生成中，请继续等待。",
+    },
+    { status: 202 },
+  );
+}
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -48,11 +101,104 @@ type GenerateTraceContext = {
   promptPreview?: string;
 };
 
+type PreparedCodingPrompt = {
+  prompt: string;
+  shortened: boolean;
+  originalLength: number;
+  finalLength: number;
+};
+
+type GenerateRunResult =
+  | {
+      ok: true;
+      code: string;
+      remainingCredits?: number;
+      degraded?: boolean;
+      degradedReason?: string;
+    }
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      remainingCredits?: number;
+    };
+
 function buildPromptPreview(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
   return normalized.length > 120
     ? `${normalized.slice(0, 120)}...`
     : normalized;
+}
+
+function buildCodingPromptForModel(rawPrompt: string): PreparedCodingPrompt {
+  const trimmedPrompt = rawPrompt.trim();
+  const normalizedPrompt = trimmedPrompt.replace(/\r/g, "");
+  const originalLength = normalizedPrompt.length;
+  const rawLines = normalizedPrompt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (originalLength <= 1600 && rawLines.length <= 12) {
+    return {
+      prompt: trimmedPrompt,
+      shortened: false,
+      originalLength,
+      finalLength: originalLength,
+    };
+  }
+
+  const normalizedLines = rawLines
+    .map((line) =>
+      line
+        .replace(/^[\d一二三四五六七八九十]+[、.)．]\s*/u, "")
+        .replace(/^[-*•]\s*/u, "")
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const dedupedLines: string[] = [];
+
+  for (const line of normalizedLines) {
+    const comparableLine = line.replace(/\s+/g, "");
+
+    if (
+      dedupedLines.some(
+        (existingLine) =>
+          existingLine.replace(/\s+/g, "") === comparableLine ||
+          existingLine.includes(line) ||
+          line.includes(existingLine),
+      )
+    ) {
+      continue;
+    }
+
+    dedupedLines.push(line);
+
+    if (dedupedLines.length >= 10) {
+      break;
+    }
+  }
+
+  const title = (dedupedLines[0] || rawLines[0] || "儿童互动科普小程序").slice(0, 80);
+  const requirementLines = dedupedLines
+    .slice(0, 8)
+    .map((line, index) => `${index + 1}. ${line.slice(0, 120)}`)
+    .join("\n");
+
+  const shortenedPrompt = [
+    `主题：${title}`,
+    "请根据下面整理后的需求生成一个可直接运行的单文件 HTML 儿童互动作品：",
+    requirementLines || "1. 内容要适合儿童，界面清晰，交互明确。",
+    "输出要求：只返回完整 HTML；必须内含 CSS、JavaScript，并通过 CDN 引入 Tailwind CSS；不要解释，不要 Markdown。",
+  ].join("\n");
+
+  return {
+    prompt: shortenedPrompt,
+    shortened: true,
+    originalLength,
+    finalLength: shortenedPrompt.length,
+  };
 }
 
 function traceGenerate(
@@ -77,6 +223,84 @@ function traceGenerate(
       ...(extra ?? {}),
     }),
   );
+}
+
+async function startDeferredCodingGenerationTask(input: {
+  taskId: string;
+  requestPrompt: string;
+  traceContext: GenerateTraceContext;
+  run: () => Promise<GenerateRunResult>;
+  refundCredits?: () => Promise<number | undefined>;
+}) {
+  try {
+    await updateCodingGenerationTask(input.taskId, {
+      status: "processing",
+      startedAt: new Date().toISOString(),
+    });
+
+    const result = await input.run();
+
+    if (result.ok) {
+      await updateCodingGenerationTask(input.taskId, {
+        status: "succeeded",
+        completedAt: new Date().toISOString(),
+        code: result.code,
+        remainingCredits: result.remainingCredits,
+        degraded: result.degraded,
+        degradedReason: result.degradedReason,
+        httpStatus: 200,
+      });
+
+      traceGenerate("log", "deferred_task_succeeded", input.traceContext, {
+        taskId: input.taskId,
+        degraded: result.degraded ?? false,
+      });
+
+      return;
+    }
+
+    if (input.refundCredits) {
+      const refundedCredits = await input.refundCredits();
+
+      if (typeof refundedCredits === "number") {
+        result.remainingCredits = refundedCredits;
+      }
+    }
+
+    await updateCodingGenerationTask(input.taskId, {
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: result.error,
+      remainingCredits: result.remainingCredits,
+      httpStatus: result.status,
+    });
+
+    traceGenerate("warn", "deferred_task_failed_result", input.traceContext, {
+      taskId: input.taskId,
+      errorMessage: result.error,
+      status: result.status,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let refundedCredits: number | undefined;
+
+    if (input.refundCredits) {
+      refundedCredits = await input.refundCredits();
+    }
+
+    await updateCodingGenerationTask(input.taskId, {
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: errorMessage,
+      remainingCredits: refundedCredits,
+      httpStatus: isAiUpstreamTimeoutError(error) ? 504 : 500,
+    });
+
+    traceGenerate("error", "deferred_task_failed", input.traceContext, {
+      taskId: input.taskId,
+      errorMessage,
+    });
+  }
 }
 
 function escapeHtml(input: string) {
@@ -671,15 +895,30 @@ function mapUpstreamStatusToGatewayStatus(status: number) {
   return status;
 }
 
-function resolveAiRequestTimeoutMs() {
+function resolveAiRequestTimeoutMs(mode: "coding" | "writing") {
   const rawValue = process.env.AI_REQUEST_TIMEOUT_MS;
   const parsedValue = Number(rawValue);
+  const defaultTimeoutMs = mode === "coding" ? 45_000 : 240_000;
+  const maxTimeoutMs = mode === "coding" ? 55_000 : 240_000;
 
   if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
-    return 240_000;
+    return defaultTimeoutMs;
   }
 
-  return Math.max(10_000, Math.floor(parsedValue));
+  return Math.min(maxTimeoutMs, Math.max(10_000, Math.floor(parsedValue)));
+}
+
+function resolveDeferredAiRequestTimeoutMs(mode: "coding" | "writing") {
+  const rawValue = process.env.AI_DEFERRED_REQUEST_TIMEOUT_MS;
+  const parsedValue = Number(rawValue);
+  const defaultTimeoutMs = mode === "coding" ? 180_000 : 240_000;
+  const maxTimeoutMs = mode === "coding" ? 240_000 : 300_000;
+
+  if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
+    return defaultTimeoutMs;
+  }
+
+  return Math.min(maxTimeoutMs, Math.max(10_000, Math.floor(parsedValue)));
 }
 
 function resolveSafeMaxCompletionTokens(
@@ -779,6 +1018,194 @@ async function requestUpstreamJsonWithRetry(input: {
     : new Error("Upstream request failed");
 }
 
+async function runGenerateRequest(input: {
+  resolvedMode: "coding" | "writing";
+  requestPrompt: string;
+  upstreamPrompt: string;
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>;
+  apiKey: string;
+  remainingCredits?: number;
+  traceContext: GenerateTraceContext;
+  requestTimeoutMsOverride?: number;
+}) {
+  const useResponsesApi = shouldUseResponsesApi(
+    input.aiConfig.endpointUrl,
+    input.aiConfig.model,
+  );
+  const requestEndpoint = resolveGenerationEndpoint(
+    input.aiConfig.endpointUrl,
+    useResponsesApi,
+  );
+  const requestTimeoutMs =
+    input.requestTimeoutMsOverride ??
+    resolveAiRequestTimeoutMs(input.resolvedMode);
+  const effectiveMaxCompletionTokens = resolveSafeMaxCompletionTokens(
+    input.resolvedMode,
+    input.aiConfig.extraPayload.maxCompletionTokens,
+  );
+  const upstreamPayload = JSON.stringify(
+    useResponsesApi
+      ? {
+          model: input.aiConfig.model,
+          ...(typeof input.aiConfig.extraPayload.reasoningEffort === "string"
+            ? {
+                reasoning: {
+                  effort: input.aiConfig.extraPayload.reasoningEffort,
+                },
+              }
+            : {}),
+          max_output_tokens: effectiveMaxCompletionTokens,
+          input: [
+            {
+              role: "system",
+              content: input.aiConfig.systemPrompt,
+            },
+            {
+              role: "user",
+              content: input.upstreamPrompt,
+            },
+          ],
+        }
+      : {
+          model: input.aiConfig.model,
+          max_tokens: effectiveMaxCompletionTokens,
+          messages: [
+            {
+              role: "system",
+              content: input.aiConfig.systemPrompt,
+            },
+            {
+              role: "user",
+              content: input.upstreamPrompt,
+            },
+          ],
+        },
+  );
+  const upstreamResponse = await requestUpstreamJsonWithRetry({
+    endpoint: requestEndpoint,
+    apiKey: input.apiKey,
+    body: upstreamPayload,
+    timeoutMs: requestTimeoutMs,
+    retries: input.resolvedMode === "coding" ? 2 : 1,
+  });
+
+  traceGenerate("log", "upstream_response", input.traceContext, {
+    upstreamStatus: upstreamResponse.status,
+    responseBytes: upstreamResponse.text.length,
+  });
+
+  const upstreamText = upstreamResponse.text;
+  const upstreamData = parsePossibleJson(upstreamText);
+
+  if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
+    traceGenerate("error", "upstream_error_status", input.traceContext, {
+      upstreamStatus: upstreamResponse.status,
+      upstreamBodyPreview:
+        upstreamText.length > 500
+          ? `${upstreamText.slice(0, 500)}...`
+          : upstreamText,
+    });
+
+    const upstreamErrorMessage =
+      upstreamData?.error?.message ||
+      (looksLikeHtml(upstreamText)
+        ? buildNonJsonResponseMessage(input.aiConfig.endpointUrl)
+        : upstreamText.trim()) ||
+      "上游大模型接口请求失败，请稍后再试。";
+
+    if (input.resolvedMode === "coding") {
+      traceGenerate("warn", "coding_degraded_upstream_status", input.traceContext, {
+        upstreamStatus: upstreamResponse.status,
+        degradedReason: upstreamErrorMessage,
+      });
+
+      return {
+        ok: true,
+        code: buildCodingFallbackHtml(input.requestPrompt),
+        remainingCredits: input.remainingCredits,
+        degraded: true,
+        degradedReason: upstreamErrorMessage,
+      } satisfies GenerateRunResult;
+    }
+
+    return {
+      ok: false,
+      status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status),
+      error: upstreamErrorMessage,
+      remainingCredits: input.remainingCredits,
+    } satisfies GenerateRunResult;
+  }
+
+  if (!upstreamData) {
+    traceGenerate("error", "upstream_non_json", input.traceContext, {
+      upstreamBodyPreview:
+        upstreamText.length > 500
+          ? `${upstreamText.slice(0, 500)}...`
+          : upstreamText,
+    });
+
+    const nonJsonMessage = buildNonJsonResponseMessage(input.aiConfig.endpointUrl);
+
+    if (input.resolvedMode === "coding") {
+      traceGenerate("warn", "coding_degraded_non_json", input.traceContext, {
+        degradedReason: nonJsonMessage,
+      });
+
+      return {
+        ok: true,
+        code: buildCodingFallbackHtml(input.requestPrompt),
+        remainingCredits: input.remainingCredits,
+        degraded: true,
+        degradedReason: nonJsonMessage,
+      } satisfies GenerateRunResult;
+    }
+
+    return {
+      ok: false,
+      status: 502,
+      error: nonJsonMessage,
+      remainingCredits: input.remainingCredits,
+    } satisfies GenerateRunResult;
+  }
+
+  const generatedContent = sanitizeGeneratedContent(
+    extractGeneratedContent(upstreamData),
+  );
+
+  if (!generatedContent) {
+    if (input.resolvedMode === "coding") {
+      traceGenerate("warn", "coding_degraded_empty_content", input.traceContext, {
+        degradedReason: "模型没有返回可用内容。",
+      });
+
+      return {
+        ok: true,
+        code: buildCodingFallbackHtml(input.requestPrompt),
+        remainingCredits: input.remainingCredits,
+        degraded: true,
+        degradedReason: "模型没有返回可用内容。",
+      } satisfies GenerateRunResult;
+    }
+
+    return {
+      ok: false,
+      status: 502,
+      error: "模型没有返回可用的内容。",
+      remainingCredits: input.remainingCredits,
+    } satisfies GenerateRunResult;
+  }
+
+  traceGenerate("log", "request_succeeded", input.traceContext, {
+    generatedBytes: generatedContent.length,
+  });
+
+  return {
+    ok: true,
+    code: generatedContent,
+    remainingCredits: input.remainingCredits,
+  } satisfies GenerateRunResult;
+}
+
 export async function POST(request: Request) {
   const requestId =
     request.headers.get("x-request-id")?.trim() || randomUUID();
@@ -788,6 +1215,7 @@ export async function POST(request: Request) {
   let remainingCredits: number | undefined;
   let chargedUserId: string | null = null;
   let requestPrompt = "";
+  let upstreamPrompt = "";
   let traceContext: GenerateTraceContext = {
     requestId,
     mode: "coding",
@@ -809,10 +1237,66 @@ export async function POST(request: Request) {
   };
 
   try {
-    const { prompt, mode } = (await request.json()) as {
+    const { prompt, mode, taskId: existingTaskId } = (await request.json()) as {
       prompt?: string;
       mode?: "coding" | "writing";
+      taskId?: string;
     };
+
+    if (existingTaskId?.trim()) {
+      const existingTask = await readCodingGenerationTask(existingTaskId.trim());
+
+      if (!existingTask) {
+        return NextResponse.json(
+          { error: "没有找到对应的生成任务。", requestId },
+          { status: 404 },
+        );
+      }
+
+      if (existingTask.status === "succeeded" && existingTask.code) {
+        const response = NextResponse.json({
+          code: existingTask.code,
+          remainingCredits: existingTask.remainingCredits,
+          degraded: existingTask.degraded ?? false,
+          degradedReason: existingTask.degradedReason,
+          requestId,
+          taskId: existingTask.id,
+        });
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
+      }
+
+      if (existingTask.status === "failed") {
+        const response = NextResponse.json(
+          {
+            error: existingTask.error ?? "生成任务失败了，请稍后再试。",
+            remainingCredits: existingTask.remainingCredits,
+            requestId,
+            taskId: existingTask.id,
+          },
+          {
+            status:
+              existingTask.httpStatus && existingTask.httpStatus >= 400
+                ? existingTask.httpStatus
+                : 500,
+          },
+        );
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
+      }
+
+      const response = NextResponse.json(
+        {
+          message: "作品还在生成中，请继续等待。",
+          requestId,
+          taskId: existingTask.id,
+          status: existingTask.status,
+        },
+        { status: 202 },
+      );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
+    }
 
     if (!prompt?.trim()) {
       return NextResponse.json(
@@ -823,6 +1307,10 @@ export async function POST(request: Request) {
 
     requestPrompt = prompt.trim();
     resolvedMode = mode === "writing" ? "writing" : "coding";
+    upstreamPrompt =
+      resolvedMode === "coding"
+        ? buildCodingPromptForModel(requestPrompt).prompt
+        : requestPrompt;
     const aiConfig = await resolveAiModeConfig(resolvedMode);
     const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
     const creditPolicy = resolveModeCreditPolicy(aiConfig.extraPayload);
@@ -875,15 +1363,18 @@ export async function POST(request: Request) {
       chargedUserId = currentUser.user_id;
     }
 
-    const useResponsesApi = shouldUseResponsesApi(
-      aiConfig.endpointUrl,
-      aiConfig.model,
-    );
-    const requestEndpoint = resolveGenerationEndpoint(
-      aiConfig.endpointUrl,
-      useResponsesApi,
-    );
-    const requestTimeoutMs = resolveAiRequestTimeoutMs();
+    const useResponsesApi = shouldUseResponsesApi(aiConfig.endpointUrl, aiConfig.model);
+    const requestEndpoint = resolveGenerationEndpoint(aiConfig.endpointUrl, useResponsesApi);
+    const preparedCodingPrompt =
+      resolvedMode === "coding"
+        ? buildCodingPromptForModel(requestPrompt)
+        : null;
+
+    if (preparedCodingPrompt) {
+      upstreamPrompt = preparedCodingPrompt.prompt;
+    }
+
+    const requestTimeoutMs = resolveAiRequestTimeoutMs(resolvedMode);
     const configuredMaxCompletionTokens =
       typeof aiConfig.extraPayload.maxCompletionTokens === "number"
         ? aiConfig.extraPayload.maxCompletionTokens
@@ -908,202 +1399,98 @@ export async function POST(request: Request) {
       creditEnabled: shouldCharge,
       configuredMaxCompletionTokens,
       effectiveMaxCompletionTokens,
+      promptLength: requestPrompt.length,
+      upstreamPromptLength: upstreamPrompt.length,
+      promptShortened: preparedCodingPrompt?.shortened ?? false,
+      originalPromptLength: preparedCodingPrompt?.originalLength ?? requestPrompt.length,
+      finalPromptLength: preparedCodingPrompt?.finalLength ?? upstreamPrompt.length,
       tokenClampApplied:
         configuredMaxCompletionTokens !== null &&
         configuredMaxCompletionTokens !== effectiveMaxCompletionTokens,
     });
-
-    const upstreamPayload = JSON.stringify(
-      useResponsesApi
-        ? {
-            model: aiConfig.model,
-            ...(typeof aiConfig.extraPayload.reasoningEffort === "string"
-              ? {
-                  reasoning: {
-                    effort: aiConfig.extraPayload.reasoningEffort,
-                  },
-                }
-              : {}),
-            max_output_tokens: effectiveMaxCompletionTokens,
-            input: [
-              {
-                role: "system",
-                content: aiConfig.systemPrompt,
-              },
-              {
-                role: "user",
-                content: requestPrompt,
-              },
-            ],
-          }
-        : {
-            model: aiConfig.model,
-            max_tokens: effectiveMaxCompletionTokens,
-            messages: [
-              {
-                role: "system",
-                content: aiConfig.systemPrompt,
-              },
-              {
-                role: "user",
-                content: requestPrompt,
-              },
-            ],
-          },
-    );
-    const upstreamResponse = await requestUpstreamJsonWithRetry({
-      endpoint: requestEndpoint,
+    const runResult = await runGenerateRequest({
+      resolvedMode,
+      requestPrompt,
+      upstreamPrompt,
+      aiConfig,
       apiKey,
-      body: upstreamPayload,
-      timeoutMs: requestTimeoutMs,
-      retries: resolvedMode === "coding" ? 2 : 1,
-    });
-
-    traceGenerate("log", "upstream_response", traceContext, {
-      upstreamStatus: upstreamResponse.status,
-      responseBytes: upstreamResponse.text.length,
-    });
-
-    const upstreamText = upstreamResponse.text;
-    const upstreamData = parsePossibleJson(upstreamText);
-
-    if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
-      traceGenerate("error", "upstream_error_status", traceContext, {
-        upstreamStatus: upstreamResponse.status,
-        upstreamBodyPreview:
-          upstreamText.length > 500
-            ? `${upstreamText.slice(0, 500)}...`
-            : upstreamText,
-      });
-
-      await refundCredits(
-        resolvedMode === "writing"
-          ? `AI 写作生成失败，退回 ${creditCost} 个魔法币。`
-          : `AI 编程生成失败，退回 ${creditCost} 个魔法币。`,
-      );
-
-      const upstreamErrorMessage =
-        upstreamData?.error?.message ||
-        (looksLikeHtml(upstreamText)
-          ? buildNonJsonResponseMessage(aiConfig.endpointUrl)
-          : upstreamText.trim()) ||
-        "上游大模型接口请求失败，请稍后再试。";
-
-      if (resolvedMode === "coding") {
-        traceGenerate("warn", "coding_degraded_upstream_status", traceContext, {
-          upstreamStatus: upstreamResponse.status,
-          degradedReason: upstreamErrorMessage,
-        });
-
-        const response = NextResponse.json({
-          code: buildCodingFallbackHtml(requestPrompt),
-          remainingCredits,
-          degraded: true,
-          degradedReason: upstreamErrorMessage,
-          requestId,
-        });
-        response.headers.set("x-ai-request-id", requestId);
-        return response;
-      }
-
-      const response = NextResponse.json(
-        {
-          error: upstreamErrorMessage,
-          remainingCredits,
-          requestId,
-        },
-        { status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status) },
-      );
-      response.headers.set("x-ai-request-id", requestId);
-      return response;
-    }
-
-    if (!upstreamData) {
-      traceGenerate("error", "upstream_non_json", traceContext, {
-        upstreamBodyPreview:
-          upstreamText.length > 500
-            ? `${upstreamText.slice(0, 500)}...`
-            : upstreamText,
-      });
-
-      await refundCredits(
-        resolvedMode === "writing"
-          ? `AI 写作未返回有效数据，退回 ${creditCost} 个魔法币。`
-          : `AI 编程未返回有效数据，退回 ${creditCost} 个魔法币。`,
-      );
-
-      if (resolvedMode === "coding") {
-        traceGenerate("warn", "coding_degraded_non_json", traceContext, {
-          degradedReason: buildNonJsonResponseMessage(aiConfig.endpointUrl),
-        });
-
-        const response = NextResponse.json({
-          code: buildCodingFallbackHtml(requestPrompt),
-          remainingCredits,
-          degraded: true,
-          degradedReason: buildNonJsonResponseMessage(aiConfig.endpointUrl),
-          requestId,
-        });
-        response.headers.set("x-ai-request-id", requestId);
-        return response;
-      }
-
-      const response = NextResponse.json(
-        {
-          error: buildNonJsonResponseMessage(aiConfig.endpointUrl),
-          remainingCredits,
-          requestId,
-        },
-        { status: 502 },
-      );
-      response.headers.set("x-ai-request-id", requestId);
-      return response;
-    }
-
-    const generatedContent = sanitizeGeneratedContent(
-      extractGeneratedContent(upstreamData),
-    );
-
-    if (!generatedContent) {
-      await refundCredits(
-        resolvedMode === "writing"
-          ? `AI 写作未返回有效内容，退回 ${creditCost} 个魔法币。`
-          : `AI 编程未返回有效内容，退回 ${creditCost} 个魔法币。`,
-      );
-
-      if (resolvedMode === "coding") {
-        traceGenerate("warn", "coding_degraded_empty_content", traceContext, {
-          degradedReason: "模型没有返回可用内容。",
-        });
-
-        const response = NextResponse.json({
-          code: buildCodingFallbackHtml(requestPrompt),
-          remainingCredits,
-          degraded: true,
-          degradedReason: "模型没有返回可用内容。",
-          requestId,
-        });
-        response.headers.set("x-ai-request-id", requestId);
-        return response;
-      }
-
-      const response = NextResponse.json(
-        { error: "模型没有返回可用的内容。", remainingCredits, requestId },
-        { status: 502 },
-      );
-      response.headers.set("x-ai-request-id", requestId);
-      return response;
-    }
-
-    traceGenerate("log", "request_succeeded", traceContext, {
-      generatedBytes: generatedContent.length,
-    });
-
-    const response = NextResponse.json({
-      code: generatedContent,
       remainingCredits,
-      requestId,
+      traceContext,
     });
+
+    if (runResult.ok) {
+      const response = NextResponse.json({
+        code: runResult.code,
+        remainingCredits: runResult.remainingCredits,
+        degraded: runResult.degraded,
+        degradedReason: runResult.degradedReason,
+        requestId,
+      });
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
+    }
+
+    const isCodingTimeoutLike =
+      resolvedMode === "coding" &&
+      (runResult.status === 502 || runResult.status === 504);
+
+    if (isCodingTimeoutLike) {
+      const taskId = randomUUID();
+      const queuedTask: CodingGenerationTaskRecord = {
+        id: taskId,
+        status: "queued",
+        promptPreview: buildPromptPreview(requestPrompt),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await writeCodingGenerationTask(queuedTask);
+
+      void startDeferredCodingGenerationTask({
+        taskId,
+        requestPrompt,
+        traceContext,
+        run: () =>
+          runGenerateRequest({
+            resolvedMode,
+            requestPrompt,
+            upstreamPrompt,
+            aiConfig,
+            apiKey,
+            remainingCredits,
+            traceContext,
+            requestTimeoutMsOverride: resolveDeferredAiRequestTimeoutMs(resolvedMode),
+          }),
+        refundCredits: () =>
+          refundCredits(
+            resolvedMode === "writing"
+              ? `AI 写作后台生成失败，退回 ${creditCost} 个魔法币。`
+              : `AI 编程后台生成失败，退回 ${creditCost} 个魔法币。`,
+          ),
+      });
+
+      const response = NextResponse.json(
+        {
+          requestId,
+          taskId,
+          status: "queued",
+          message: "内容有点复杂，已经切换到后台继续生成，请稍等几秒自动返回结果。",
+          remainingCredits,
+        },
+        { status: 202 },
+      );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
+    }
+
+    const response = NextResponse.json(
+      {
+        error: runResult.error,
+        remainingCredits: runResult.remainingCredits,
+        requestId,
+      },
+      { status: runResult.status },
+    );
     response.headers.set("x-ai-request-id", requestId);
     return response;
   } catch (error) {
