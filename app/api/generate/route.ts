@@ -610,6 +610,28 @@ function sanitizeGeneratedContent(rawText: string) {
     .replace(/<\|[^>]+?\|>/g, "")
     .trim();
 
+  const wrappedByQuotes =
+    (normalizedText.startsWith('"') && normalizedText.endsWith('"')) ||
+    (normalizedText.startsWith("'") && normalizedText.endsWith("'"));
+  const serializedEscapeCount =
+    normalizedText.match(/\\(?:r|n|t|"|'|\\|u[0-9a-fA-F]{4})/g)?.length ?? 0;
+
+  if (wrappedByQuotes || serializedEscapeCount >= 3) {
+    normalizedText = normalizedText
+      .replace(/^['"]|['"]$/g, "")
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\u003[cC]/g, "<")
+      .replace(/\\u003[eE]/g, ">")
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, "\\")
+      .trim();
+  }
+
   const htmlStartIndex = normalizedText.search(/<!doctype html|<html\b/i);
 
   if (htmlStartIndex > 0) {

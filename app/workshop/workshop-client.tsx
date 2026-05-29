@@ -1581,6 +1581,28 @@ const ensurePreviewHtmlDocument = (rawHtml: string) => {
     .replace(/<\|[^>]+?\|>/g, "")
     .trim();
 
+  const wrappedByQuotes =
+    (cleanedHtml.startsWith('"') && cleanedHtml.endsWith('"')) ||
+    (cleanedHtml.startsWith("'") && cleanedHtml.endsWith("'"));
+  const serializedEscapeCount =
+    cleanedHtml.match(/\\(?:r|n|t|"|'|\\|u[0-9a-fA-F]{4})/g)?.length ?? 0;
+
+  if (wrappedByQuotes || serializedEscapeCount >= 3) {
+    cleanedHtml = cleanedHtml
+      .replace(/^['"]|['"]$/g, "")
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\u003[cC]/g, "<")
+      .replace(/\\u003[eE]/g, ">")
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, "\\")
+      .trim();
+  }
+
   const htmlStartIndex = cleanedHtml.search(/<!doctype html|<html\b/i);
 
   if (htmlStartIndex > 0) {

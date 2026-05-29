@@ -17,8 +17,8 @@ const allowedDevOrigins = Array.from(
 
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com",
-  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
+  "style-src 'self' 'unsafe-inline' https:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob: data: https:",
   "font-src 'self' data: https:",
