@@ -2952,6 +2952,8 @@ function WorkshopContent() {
         code?: string;
         error?: string;
         remainingCredits?: number;
+        degraded?: boolean;
+        degradedReason?: string;
       }>(response);
       if (response.status === 401) {
         if (isUpstreamCredentialError(data?.error)) {
@@ -2996,6 +2998,10 @@ function WorkshopContent() {
       }
 
       setGeneratedCode(ensurePreviewHtmlDocument(data.code));
+
+      if (data.degraded && data.degradedReason) {
+        window.console.warn("AI 编程已切换兜底生成：", data.degradedReason);
+      }
     } catch {
       setGeneratedCode(
         createMessagePreviewHtml(

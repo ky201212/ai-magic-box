@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import "./globals.css";
+import { LandscapeDesktopStage } from "./_components/landscape-desktop-stage";
 import { LandscapeDesktopViewportScript } from "./_components/landscape-desktop-viewport-script";
 import { SiteFooter } from "./_components/site-footer";
 
@@ -35,8 +36,10 @@ export default async function RootLayout({
     <html lang="zh-CN" className="h-full antialiased">
       <body className="flex min-h-full flex-col overflow-x-hidden bg-[#12061f]">
         <LandscapeDesktopViewportScript />
-        <main className="min-w-0 flex-1">{children}</main>
-        <SiteFooter />
+        <LandscapeDesktopStage>
+          <main className="min-w-0 flex-1">{children}</main>
+          <SiteFooter />
+        </LandscapeDesktopStage>
       </body>
     </html>
   );
