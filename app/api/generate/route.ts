@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import https from "node:https";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
@@ -35,6 +36,48 @@ type ChatCompletionResponse = {
     message?: string;
   };
 };
+
+type GenerateTraceContext = {
+  requestId: string;
+  mode: "coding" | "writing";
+  endpoint?: string;
+  model?: string;
+  timeoutMs?: number;
+  useResponsesApi?: boolean;
+  maxCompletionTokens?: number | null;
+  promptPreview?: string;
+};
+
+function buildPromptPreview(input: string) {
+  const normalized = input.replace(/\s+/g, " ").trim();
+  return normalized.length > 120
+    ? `${normalized.slice(0, 120)}...`
+    : normalized;
+}
+
+function traceGenerate(
+  level: "log" | "warn" | "error",
+  event: string,
+  context: GenerateTraceContext,
+  extra?: Record<string, unknown>,
+) {
+  console[level](
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      scope: "ai-generate",
+      event,
+      requestId: context.requestId,
+      mode: context.mode,
+      model: context.model ?? null,
+      endpoint: context.endpoint ?? null,
+      timeoutMs: context.timeoutMs ?? null,
+      useResponsesApi: context.useResponsesApi ?? null,
+      maxCompletionTokens: context.maxCompletionTokens ?? null,
+      promptPreview: context.promptPreview ?? null,
+      ...(extra ?? {}),
+    }),
+  );
+}
 
 function escapeHtml(input: string) {
   return input
@@ -559,11 +602,21 @@ function sanitizeGeneratedContent(rawText: string) {
     /^```(?:html|htm|xml)?\s*([\s\S]*?)\s*```$/i,
   );
 
-  if (fencedMatch?.[1]) {
-    return fencedMatch[1].trim();
+  let normalizedText = fencedMatch?.[1]?.trim() ?? trimmedText;
+
+  normalizedText = normalizedText
+    .replace(/^\uFEFF/, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\|[^>]+?\|>/g, "")
+    .trim();
+
+  const htmlStartIndex = normalizedText.search(/<!doctype html|<html\b/i);
+
+  if (htmlStartIndex > 0) {
+    normalizedText = normalizedText.slice(htmlStartIndex).trim();
   }
 
-  return trimmedText;
+  return normalizedText;
 }
 
 function parsePossibleJson(rawText: string) {
@@ -605,6 +658,21 @@ function resolveAiRequestTimeoutMs() {
   }
 
   return Math.max(10_000, Math.floor(parsedValue));
+}
+
+function resolveSafeMaxCompletionTokens(
+  mode: "coding" | "writing",
+  rawValue: unknown,
+) {
+  const fallbackValue = mode === "coding" ? 1400 : 800;
+  const hardCap = mode === "coding" ? 12000 : 4000;
+
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+    return fallbackValue;
+  }
+
+  const normalizedValue = Math.max(1, Math.floor(rawValue));
+  return Math.min(normalizedValue, hardCap);
 }
 
 function isAiUpstreamTimeoutError(error: unknown) {
@@ -690,12 +758,18 @@ async function requestUpstreamJsonWithRetry(input: {
 }
 
 export async function POST(request: Request) {
+  const requestId =
+    request.headers.get("x-request-id")?.trim() || randomUUID();
   let shouldCharge = false;
   let creditCost = 0;
   let resolvedMode: "coding" | "writing" = "coding";
   let remainingCredits: number | undefined;
   let chargedUserId: string | null = null;
   let requestPrompt = "";
+  let traceContext: GenerateTraceContext = {
+    requestId,
+    mode: "coding",
+  };
 
   const refundCredits = async (message: string) => {
     if (!shouldCharge || !chargedUserId || creditCost <= 0) {
@@ -788,6 +862,35 @@ export async function POST(request: Request) {
       useResponsesApi,
     );
     const requestTimeoutMs = resolveAiRequestTimeoutMs();
+    const configuredMaxCompletionTokens =
+      typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+        ? aiConfig.extraPayload.maxCompletionTokens
+        : null;
+    const effectiveMaxCompletionTokens = resolveSafeMaxCompletionTokens(
+      resolvedMode,
+      aiConfig.extraPayload.maxCompletionTokens,
+    );
+    traceContext = {
+      requestId,
+      mode: resolvedMode,
+      endpoint: requestEndpoint,
+      model: aiConfig.model,
+      timeoutMs: requestTimeoutMs,
+      useResponsesApi,
+      maxCompletionTokens: effectiveMaxCompletionTokens,
+      promptPreview: buildPromptPreview(requestPrompt),
+    };
+
+    traceGenerate("log", "request_started", traceContext, {
+      creditCost,
+      creditEnabled: shouldCharge,
+      configuredMaxCompletionTokens,
+      effectiveMaxCompletionTokens,
+      tokenClampApplied:
+        configuredMaxCompletionTokens !== null &&
+        configuredMaxCompletionTokens !== effectiveMaxCompletionTokens,
+    });
+
     const upstreamPayload = JSON.stringify(
       useResponsesApi
         ? {
@@ -799,11 +902,7 @@ export async function POST(request: Request) {
                   },
                 }
               : {}),
-            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
-              ? {
-                  max_output_tokens: aiConfig.extraPayload.maxCompletionTokens,
-                }
-              : {}),
+            max_output_tokens: effectiveMaxCompletionTokens,
             input: [
               {
                 role: "system",
@@ -817,11 +916,7 @@ export async function POST(request: Request) {
           }
         : {
             model: aiConfig.model,
-            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
-              ? {
-                  max_tokens: aiConfig.extraPayload.maxCompletionTokens,
-                }
-              : {}),
+            max_tokens: effectiveMaxCompletionTokens,
             messages: [
               {
                 role: "system",
@@ -842,14 +937,21 @@ export async function POST(request: Request) {
       retries: resolvedMode === "coding" ? 2 : 1,
     });
 
+    traceGenerate("log", "upstream_response", traceContext, {
+      upstreamStatus: upstreamResponse.status,
+      responseBytes: upstreamResponse.text.length,
+    });
+
     const upstreamText = upstreamResponse.text;
     const upstreamData = parsePossibleJson(upstreamText);
 
     if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
-      console.error("【AI 上游接口报错】:", {
-        status: upstreamResponse.status,
-        endpoint: requestEndpoint,
-        body: upstreamText,
+      traceGenerate("error", "upstream_error_status", traceContext, {
+        upstreamStatus: upstreamResponse.status,
+        upstreamBodyPreview:
+          upstreamText.length > 500
+            ? `${upstreamText.slice(0, 500)}...`
+            : upstreamText,
       });
 
       await refundCredits(
@@ -866,32 +968,40 @@ export async function POST(request: Request) {
         "上游大模型接口请求失败，请稍后再试。";
 
       if (resolvedMode === "coding") {
-        console.warn("【AI 编程兜底生效：上游返回失败状态】", {
-          status: upstreamResponse.status,
-          endpoint: requestEndpoint,
+        traceGenerate("warn", "coding_degraded_upstream_status", traceContext, {
+          upstreamStatus: upstreamResponse.status,
+          degradedReason: upstreamErrorMessage,
         });
 
-        return NextResponse.json({
+        const response = NextResponse.json({
           code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: upstreamErrorMessage,
+          requestId,
         });
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
       }
 
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           error: upstreamErrorMessage,
           remainingCredits,
+          requestId,
         },
         { status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status) },
       );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
     }
 
     if (!upstreamData) {
-      console.error("【AI 上游接口返回非 JSON】:", {
-        endpoint: requestEndpoint,
-        body: upstreamText,
+      traceGenerate("error", "upstream_non_json", traceContext, {
+        upstreamBodyPreview:
+          upstreamText.length > 500
+            ? `${upstreamText.slice(0, 500)}...`
+            : upstreamText,
       });
 
       await refundCredits(
@@ -901,25 +1011,31 @@ export async function POST(request: Request) {
       );
 
       if (resolvedMode === "coding") {
-        console.warn("【AI 编程兜底生效：上游返回非 JSON】", {
-          endpoint: requestEndpoint,
+        traceGenerate("warn", "coding_degraded_non_json", traceContext, {
+          degradedReason: buildNonJsonResponseMessage(aiConfig.endpointUrl),
         });
 
-        return NextResponse.json({
+        const response = NextResponse.json({
           code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: buildNonJsonResponseMessage(aiConfig.endpointUrl),
+          requestId,
         });
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
       }
 
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           error: buildNonJsonResponseMessage(aiConfig.endpointUrl),
           remainingCredits,
+          requestId,
         },
         { status: 502 },
       );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
     }
 
     const generatedContent = sanitizeGeneratedContent(
@@ -934,28 +1050,40 @@ export async function POST(request: Request) {
       );
 
       if (resolvedMode === "coding") {
-        console.warn("【AI 编程兜底生效：上游未返回有效内容】", {
-          endpoint: requestEndpoint,
+        traceGenerate("warn", "coding_degraded_empty_content", traceContext, {
+          degradedReason: "模型没有返回可用内容。",
         });
 
-        return NextResponse.json({
+        const response = NextResponse.json({
           code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: "模型没有返回可用内容。",
+          requestId,
         });
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
       }
 
-      return NextResponse.json(
-        { error: "模型没有返回可用的内容。", remainingCredits },
+      const response = NextResponse.json(
+        { error: "模型没有返回可用的内容。", remainingCredits, requestId },
         { status: 502 },
       );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
     }
 
-    return NextResponse.json({
+    traceGenerate("log", "request_succeeded", traceContext, {
+      generatedBytes: generatedContent.length,
+    });
+
+    const response = NextResponse.json({
       code: generatedContent,
       remainingCredits,
+      requestId,
     });
+    response.headers.set("x-ai-request-id", requestId);
+    return response;
   } catch (error) {
     await refundCredits(
       resolvedMode === "writing"
@@ -963,34 +1091,45 @@ export async function POST(request: Request) {
         : `AI 编程生成过程中发生异常，退回 ${creditCost} 个魔法币。`,
     );
 
-    console.error("【生成接口异常】:", error);
+    traceGenerate("error", "request_exception", traceContext, {
+      isTimeoutError: isAiUpstreamTimeoutError(error),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     const isTimeoutError = isAiUpstreamTimeoutError(error);
 
     if (resolvedMode === "coding") {
-      console.warn("【AI 编程兜底生效：生成接口异常】", {
+      traceGenerate("warn", "coding_degraded_exception", traceContext, {
         isTimeoutError,
-        message: error instanceof Error ? error.message : String(error),
+        degradedReason: isTimeoutError
+          ? "服务器与上游模型连接超时，已自动切换到站内兜底生成。"
+          : "生成链路发生异常，已自动切换到站内兜底生成。",
       });
 
-      return NextResponse.json({
+      const response = NextResponse.json({
         code: buildCodingFallbackHtml(requestPrompt),
         remainingCredits,
         degraded: true,
         degradedReason: isTimeoutError
           ? "服务器与上游模型连接超时，已自动切换到站内兜底生成。"
           : "生成链路发生异常，已自动切换到站内兜底生成。",
+        requestId,
       });
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error:
           isTimeoutError
             ? "服务器等待 AI 接口返回超时了。若本地能生成、线上部署后总是失败，通常是服务器到模型渠道的网络不通，或者 Nginx / CDN 在 AI 返回前先超时断开了。请优先检查服务器出网连通性，并把 /api/generate 的反向代理超时调大到 300 秒左右。"
             : "生成接口暂时出了点小状况。已经自动检查并退回本次失败消耗的魔法币，请稍后再试，或检查后台 AI 接口地址是否填写正确。",
         remainingCredits,
+        requestId,
       },
       { status: isTimeoutError ? 504 : 500 },
     );
+    response.headers.set("x-ai-request-id", requestId);
+    return response;
   }
 }

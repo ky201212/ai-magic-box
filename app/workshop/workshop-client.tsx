@@ -1570,10 +1570,22 @@ const createMessagePreviewHtml = (title: string, message: string) => `
 `;
 
 const ensurePreviewHtmlDocument = (rawHtml: string) => {
-  const cleanedHtml = rawHtml
+  let cleanedHtml = rawHtml
     .replace(/```(?:html|htm|xml)?/gi, "")
     .replace(/```/g, "")
     .trim();
+
+  cleanedHtml = cleanedHtml
+    .replace(/^\uFEFF/, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\|[^>]+?\|>/g, "")
+    .trim();
+
+  const htmlStartIndex = cleanedHtml.search(/<!doctype html|<html\b/i);
+
+  if (htmlStartIndex > 0) {
+    cleanedHtml = cleanedHtml.slice(htmlStartIndex).trim();
+  }
 
   if (!cleanedHtml) {
     return defaultPreviewHtml;
@@ -2954,6 +2966,7 @@ function WorkshopContent() {
         remainingCredits?: number;
         degraded?: boolean;
         degradedReason?: string;
+        requestId?: string;
       }>(response);
       if (response.status === 401) {
         if (isUpstreamCredentialError(data?.error)) {
@@ -2999,8 +3012,15 @@ function WorkshopContent() {
 
       setGeneratedCode(ensurePreviewHtmlDocument(data.code));
 
+      if (data.requestId) {
+        window.console.info("AI 编程请求号：", data.requestId);
+      }
+
       if (data.degraded && data.degradedReason) {
-        window.console.warn("AI 编程已切换兜底生成：", data.degradedReason);
+        window.console.warn("AI 编程已切换兜底生成：", {
+          requestId: data.requestId ?? null,
+          reason: data.degradedReason,
+        });
       }
     } catch {
       setGeneratedCode(

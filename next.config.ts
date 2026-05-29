@@ -2,6 +2,18 @@ import type { NextConfig } from "next";
 
 const shouldUpgradeInsecureRequests =
   process.env.ENABLE_UPGRADE_INSECURE_REQUESTS === "true";
+const extraAllowedDevOrigins =
+  process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean) ?? [];
+const allowedDevOrigins = Array.from(
+  new Set([
+    "localhost",
+    "127.0.0.1",
+    "192.168.101.162",
+    ...extraAllowedDevOrigins,
+  ]),
+);
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -20,6 +32,7 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins,
   async headers() {
     return [
       {
