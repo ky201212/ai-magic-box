@@ -695,6 +695,7 @@ export async function POST(request: Request) {
   let resolvedMode: "coding" | "writing" = "coding";
   let remainingCredits: number | undefined;
   let chargedUserId: string | null = null;
+  let requestPrompt = "";
 
   const refundCredits = async (message: string) => {
     if (!shouldCharge || !chargedUserId || creditCost <= 0) {
@@ -724,6 +725,7 @@ export async function POST(request: Request) {
       );
     }
 
+    requestPrompt = prompt.trim();
     resolvedMode = mode === "writing" ? "writing" : "coding";
     const aiConfig = await resolveAiModeConfig(resolvedMode);
     const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
@@ -809,7 +811,7 @@ export async function POST(request: Request) {
               },
               {
                 role: "user",
-                content: prompt,
+                content: requestPrompt,
               },
             ],
           }
@@ -827,7 +829,7 @@ export async function POST(request: Request) {
               },
               {
                 role: "user",
-                content: prompt,
+                content: requestPrompt,
               },
             ],
           },
@@ -870,7 +872,7 @@ export async function POST(request: Request) {
         });
 
         return NextResponse.json({
-          code: buildCodingFallbackHtml(prompt),
+          code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: upstreamErrorMessage,
@@ -904,7 +906,7 @@ export async function POST(request: Request) {
         });
 
         return NextResponse.json({
-          code: buildCodingFallbackHtml(prompt),
+          code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: buildNonJsonResponseMessage(aiConfig.endpointUrl),
@@ -937,7 +939,7 @@ export async function POST(request: Request) {
         });
 
         return NextResponse.json({
-          code: buildCodingFallbackHtml(prompt),
+          code: buildCodingFallbackHtml(requestPrompt),
           remainingCredits,
           degraded: true,
           degradedReason: "模型没有返回可用内容。",
@@ -971,7 +973,7 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
-        code: buildCodingFallbackHtml(prompt),
+        code: buildCodingFallbackHtml(requestPrompt),
         remainingCredits,
         degraded: true,
         degradedReason: isTimeoutError
