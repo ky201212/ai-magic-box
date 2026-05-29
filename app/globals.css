@@ -44,6 +44,11 @@ body {
     "Source Han Sans SC", sans-serif;
 }
 
+html.landscape-desktop-viewport,
+html.landscape-desktop-viewport body {
+  min-width: 1440px;
+}
+
 img,
 svg,
 video {
