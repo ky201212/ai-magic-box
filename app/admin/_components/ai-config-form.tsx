@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AiModeConfigRecord,
   AiModelPickerState,
@@ -256,6 +256,29 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     badge: "高阶优化",
   },
 ];
+
+function createEmptyModelChainStatsRecord(): AiModelChainStatsRecord {
+  return {
+    updatedAt: null,
+    models: (["A", "B", "C"] as const).map((slot) => ({
+      slot,
+      label: `${slot} 模型`,
+      provider: "",
+      model: "",
+      endpointUrl: "",
+      successCount: 0,
+      failureCount: 0,
+      timeoutCount: 0,
+      skipCount: 0,
+      consecutiveFailures: 0,
+      cooldownUntil: null,
+      lastStatus: null,
+      lastError: null,
+      lastUsedAt: null,
+    })),
+    recentEvents: [],
+  };
+}
 
 function normalizeConfigs(configs: AiModeConfigRecord[]): EditableAiConfig[] {
   return configs.map((config) => ({
@@ -606,9 +629,14 @@ export function AiConfigForm({
     useState<AiSecretSecuritySummary>(initialSecretSecurity);
   const [secretAuditLogs, setSecretAuditLogs] =
     useState<AiSecretAuditRecord[]>(initialSecretAuditLogs);
-  const [modelChainStats] = useState<Record<string, AiModelChainStatsRecord>>(
+  const [modelChainStats, setModelChainStats] = useState<
+    Record<string, AiModelChainStatsRecord>
+  >(
     initialModelChainStats,
   );
+  const [codingModelStatsState, setCodingModelStatsState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
   const [secretInputs, setSecretInputs] = useState<Record<string, string>>({});
   const [newSecretEnvName, setNewSecretEnvName] = useState("");
   const [expandedConfigKeys, setExpandedConfigKeys] = useState<string[]>([
@@ -646,6 +674,59 @@ export function AiConfigForm({
   const [codingModelHealthCheckResults, setCodingModelHealthCheckResults] = useState<
     CodingModelHealthCheckResult[]
   >([]);
+
+  const refreshCodingModelChainStats = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setCodingModelStatsState("loading");
+      }
+
+      try {
+        const response = await fetch("/api/admin/ai-coding-model-chain", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          stats?: AiModelChainStatsRecord;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(data.error || "接力统计刷新失败");
+        }
+
+        setModelChainStats((current) => ({
+          ...current,
+          coding: data.stats ?? createEmptyModelChainStatsRecord(),
+        }));
+        setCodingModelStatsState("success");
+      } catch (error) {
+        console.error("【AI 编程接力统计刷新失败】:", error);
+        setCodingModelStatsState("error");
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const codingExpandedSections = expandedCodingSections.coding ?? [];
+
+    if (!codingExpandedSections.includes("stats")) {
+      return;
+    }
+
+    const initialTimer = window.setTimeout(() => {
+      void refreshCodingModelChainStats();
+    }, 0);
+    const intervalId = window.setInterval(() => {
+      void refreshCodingModelChainStats({ silent: true });
+    }, 8000);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalId);
+    };
+  }, [expandedCodingSections, refreshCodingModelChainStats]);
 
   const allSecretEnvNames = useMemo(
     () =>
@@ -923,7 +1004,7 @@ export function AiConfigForm({
     slot: "A" | "B" | "C",
   ) => {
     try {
-      await fetch("/api/admin/ai-coding-model-chain", {
+      const response = await fetch("/api/admin/ai-coding-model-chain", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -934,7 +1015,15 @@ export function AiConfigForm({
           slot,
         }),
       });
-      window.location.reload();
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(data?.error || "解除熔断失败");
+      }
+
+      await refreshCodingModelChainStats();
     } catch {
       window.alert("解除熔断失败，请稍后再试。");
     }
@@ -2454,8 +2543,15 @@ export function AiConfigForm({
                                 最近接力统计
                               </p>
                               <p className="mt-1 text-sm text-slate-500">
-                              最近一次统计更新时间：
-                              {currentModelChainStats.updatedAt ?? " 暂无"}
+                                最近一次统计更新时间：
+                                {currentModelChainStats.updatedAt ?? " 暂无"}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {codingModelStatsState === "loading"
+                                  ? "正在刷新最新统计..."
+                                  : codingModelStatsState === "error"
+                                    ? "统计刷新失败，请稍后重试。"
+                                    : "统计展开后会自动刷新。"}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-3">
@@ -2467,6 +2563,13 @@ export function AiConfigForm({
                                 {expandedCodingSectionKeys.includes("stats")
                                   ? "收起统计"
                                   : "展开统计"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void refreshCodingModelChainStats()}
+                                className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700"
+                              >
+                                刷新统计
                               </button>
                               <button
                                 type="button"
