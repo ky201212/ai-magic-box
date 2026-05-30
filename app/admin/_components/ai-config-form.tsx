@@ -568,6 +568,29 @@ function formatDurationMs(value?: number) {
   return `${(value / 1000).toFixed(1)}s`;
 }
 
+function formatAdminDateTime(value?: string | null) {
+  if (!value) {
+    return "暂无";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 function buildCodingModelObservability(stats: AiModelChainStatsRecord) {
   const since = Date.now() - 24 * 60 * 60 * 1000;
 
@@ -1671,7 +1694,7 @@ export function AiConfigForm({
                       />
                       <p className="mt-2 text-xs leading-6 text-slate-400">
                         {status.updatedAt
-                          ? `后台最后更新：${status.updatedAt}`
+                          ? `后台最后更新：${formatAdminDateTime(status.updatedAt)}`
                           : "如果这里保存了新 key，将优先覆盖环境变量读取。"}
                       </p>
                     </div>
@@ -2544,7 +2567,7 @@ export function AiConfigForm({
                               </p>
                               <p className="mt-1 text-sm text-slate-500">
                                 最近一次统计更新时间：
-                                {currentModelChainStats.updatedAt ?? " 暂无"}
+                                {formatAdminDateTime(currentModelChainStats.updatedAt)}
                               </p>
                               <p className="mt-1 text-xs text-slate-400">
                                 {codingModelStatsState === "loading"
@@ -2645,7 +2668,7 @@ export function AiConfigForm({
                                         <p>平均响应：{formatDurationMs(item.avgLatencyMs ?? undefined)}</p>
                                         <p>样本数：{item.sampleCount}</p>
                                         <p>
-                                          最近错误时间：{item.latestErrorTime ?? "暂无"}
+                                          最近错误时间：{formatAdminDateTime(item.latestErrorTime)}
                                         </p>
                                       </div>
                                       <p className="mt-2 text-slate-500">
@@ -2702,7 +2725,7 @@ export function AiConfigForm({
                                     className="rounded-[14px] bg-white px-4 py-3 text-sm text-slate-600"
                                   >
                                     <p className="font-bold text-slate-800">
-                                      {event.createdAt} · {event.slot} · {event.label}
+                                      {formatAdminDateTime(event.createdAt)} · {event.slot} · {event.label}
                                     </p>
                                     <p className="mt-1">
                                       事件：{event.event}
