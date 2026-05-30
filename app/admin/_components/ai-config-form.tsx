@@ -477,8 +477,7 @@ function buildCodingFallbackModelChain(
 ) {
   return {
     ...currentExtraPayload,
-    modelChain: nextModels
-      .map((item) => ({
+    modelChain: nextModels.map((item) => ({
         slot: item.slot,
         label: item.label.trim() || `${item.slot} 备用模型`,
         provider: item.provider.trim(),
@@ -490,8 +489,7 @@ function buildCodingFallbackModelChain(
               timeoutMs: Math.max(10_000, Math.floor(item.timeoutMs)),
             }
           : {}),
-      }))
-      .filter((item) => item.endpointUrl && item.apiKeyEnv && item.model),
+      })),
   };
 }
 
