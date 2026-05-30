@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createCreditLogEntry } from "@/lib/credits";
@@ -92,6 +93,43 @@ export type AiSecretSecuritySummary = {
   masterKeySource: "dedicated" | "fallback" | "missing";
   storageEncryptionEnabled: boolean;
   warningMessage: string | null;
+};
+
+export type CodingModelChainStatsRecord = {
+  updatedAt: string | null;
+  models: Array<{
+    slot: "A" | "B" | "C";
+    label: string;
+    provider: string;
+    model: string;
+    endpointUrl: string;
+    successCount: number;
+    failureCount: number;
+    timeoutCount: number;
+    skipCount: number;
+    consecutiveFailures: number;
+    cooldownUntil: string | null;
+    lastStatus: string | null;
+    lastError: string | null;
+    lastUsedAt: string | null;
+  }>;
+  recentEvents: Array<{
+    id: string;
+    createdAt: string;
+    slot: "A" | "B" | "C";
+    label: string;
+    provider: string;
+    model: string;
+    event:
+      | "success"
+      | "failure"
+      | "timeout"
+      | "skipped_missing_key"
+      | "stopped";
+    status?: number;
+    latencyMs?: number;
+    message?: string;
+  }>;
 };
 
 export type DashboardStats = {
@@ -360,6 +398,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditCost: 0,
         reasoningEffort: "none",
         maxCompletionTokens: 1400,
+        modelChain: [],
       },
     },
     {
@@ -530,6 +569,160 @@ export async function getAiModelPresetsSetting() {
 
 export async function listAiModelPresets() {
   return getAiModelPresetsSetting();
+}
+
+function createDefaultCodingModelChainStats(): CodingModelChainStatsRecord {
+  return {
+    updatedAt: null,
+    models: (["A", "B", "C"] as const).map((slot) => ({
+      slot,
+      label: `${slot} 模型`,
+      provider: "",
+      model: "",
+      endpointUrl: "",
+      successCount: 0,
+      failureCount: 0,
+      timeoutCount: 0,
+      skipCount: 0,
+      consecutiveFailures: 0,
+      cooldownUntil: null,
+      lastStatus: null,
+      lastError: null,
+      lastUsedAt: null,
+    })),
+    recentEvents: [],
+  };
+}
+
+export async function getCodingModelChainStats() {
+  return getSiteSettingValue<CodingModelChainStatsRecord>(
+    "ai.coding-model-chain-stats",
+    createDefaultCodingModelChainStats(),
+  );
+}
+
+export async function recordCodingModelChainEvent(input: {
+  slot: "A" | "B" | "C";
+  label: string;
+  provider?: string;
+  model: string;
+  endpointUrl: string;
+  event: "success" | "failure" | "timeout" | "skipped_missing_key" | "stopped";
+  status?: number;
+  latencyMs?: number;
+  message?: string;
+  cooldownUntil?: string | null;
+}) {
+  const current = await getCodingModelChainStats();
+  const eventCreatedAt = new Date().toISOString();
+  const nextModels = current.models.map((item) => {
+    if (item.slot !== input.slot) {
+      return item;
+    }
+
+    const isFailureLike =
+      input.event === "failure" || input.event === "timeout";
+    const nextConsecutiveFailures = input.event === "success"
+      ? 0
+      : isFailureLike
+        ? item.consecutiveFailures + 1
+        : item.consecutiveFailures;
+
+    return {
+      ...item,
+      label: input.label.trim() || item.label,
+      provider: input.provider?.trim() || item.provider,
+      model: input.model.trim() || item.model,
+      endpointUrl: input.endpointUrl.trim() || item.endpointUrl,
+      successCount:
+        item.successCount + (input.event === "success" ? 1 : 0),
+      failureCount:
+        item.failureCount + (input.event === "failure" ? 1 : 0),
+      timeoutCount:
+        item.timeoutCount + (input.event === "timeout" ? 1 : 0),
+      skipCount:
+        item.skipCount + (input.event === "skipped_missing_key" ? 1 : 0),
+      consecutiveFailures: nextConsecutiveFailures,
+      cooldownUntil:
+        input.event === "success"
+          ? null
+          : input.cooldownUntil === undefined
+            ? item.cooldownUntil
+            : input.cooldownUntil,
+      lastStatus:
+        typeof input.status === "number" ? String(input.status) : input.event,
+      lastError: input.message?.trim() || null,
+      lastUsedAt: eventCreatedAt,
+    };
+  });
+
+  const nextStats: CodingModelChainStatsRecord = {
+    updatedAt: eventCreatedAt,
+    models: nextModels,
+    recentEvents: [
+      {
+        id: randomUUID(),
+        createdAt: eventCreatedAt,
+        slot: input.slot,
+        label: input.label.trim() || `${input.slot} 模型`,
+        provider: input.provider?.trim() || "",
+        model: input.model.trim(),
+        event: input.event,
+        status: input.status,
+        latencyMs:
+          typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)
+            ? Math.max(0, Math.round(input.latencyMs))
+            : undefined,
+        message: input.message?.trim() || undefined,
+      },
+      ...current.recentEvents,
+    ].slice(0, 120),
+  };
+
+  await upsertSiteSettings([
+    {
+      setting_key: "ai.coding-model-chain-stats",
+      setting_group: "ai",
+      label: "AI 编程模型接力统计",
+      value: nextStats,
+      description: "记录 AI 编程 A/B/C 模型接力的最近结果统计。",
+      updated_by: "system",
+    },
+  ]);
+
+  return nextStats;
+}
+
+export async function clearCodingModelCooldown(slot: "A" | "B" | "C") {
+  const current = await getCodingModelChainStats();
+  const nextStats: CodingModelChainStatsRecord = {
+    ...current,
+    updatedAt: new Date().toISOString(),
+    models: current.models.map((item) =>
+      item.slot === slot
+        ? {
+            ...item,
+            consecutiveFailures: 0,
+            cooldownUntil: null,
+            lastStatus: "manual_reset",
+            lastError: null,
+          }
+        : item,
+    ),
+  };
+
+  await upsertSiteSettings([
+    {
+      setting_key: "ai.coding-model-chain-stats",
+      setting_group: "ai",
+      label: "AI 编程模型接力统计",
+      value: nextStats,
+      description: "记录 AI 编程 A/B/C 模型接力的最近结果统计。",
+      updated_by: "system",
+    },
+  ]);
+
+  return nextStats;
 }
 
 export async function upsertAiModeConfigs(

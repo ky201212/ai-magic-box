@@ -3086,7 +3086,7 @@ function WorkshopContent() {
         setGeneratedCode(
           createMessagePreviewHtml(
             "仍在生成中",
-            "这次内容比较复杂，系统已经切换到后台继续生成。请继续等待，作品完成后会自动返回结果。",
+            "这次内容比较复杂，系统正在后台稳定生成。请继续等待，作品完成后会自动返回结果。",
           ),
         );
         return;

@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import https from "node:https";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  getCodingModelChainStats,
+  recordCodingModelChainEvent,
+} from "@/lib/admin-data";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { addCredits, consumeCredits } from "@/lib/credits";
 import { getAiSecret } from "@/lib/ai-secrets";
@@ -16,6 +20,29 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
+  return {
+    taskId: task.id,
+    status: "succeeded" as const,
+    code: task.code ?? buildCodingFallbackHtml(task.promptPreview),
+    remainingCredits: task.remainingCredits,
+    degraded: task.degraded ?? false,
+    degradedReason: task.degradedReason,
+  };
+}
+
+function createCodingTaskFailurePayload(task: CodingGenerationTaskRecord) {
+  return {
+    taskId: task.id,
+    status: "succeeded" as const,
+    code: buildCodingFallbackHtml(task.promptPreview),
+    remainingCredits: task.remainingCredits,
+    degraded: true,
+    degradedReason:
+      task.error ?? "后台生成没有拿到完整结果，已自动切换到站内兜底生成。",
+  };
+}
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -32,26 +59,11 @@ export async function GET(request: Request) {
   }
 
   if (task.status === "succeeded" && task.code) {
-    return NextResponse.json({
-      taskId,
-      status: "succeeded",
-      code: task.code,
-      remainingCredits: task.remainingCredits,
-      degraded: task.degraded ?? false,
-      degradedReason: task.degradedReason,
-    });
+    return NextResponse.json(createCodingTaskSuccessPayload(task));
   }
 
   if (task.status === "failed") {
-    return NextResponse.json(
-      {
-        taskId,
-        status: "failed",
-        error: task.error ?? "生成任务失败了，请稍后再试。",
-        remainingCredits: task.remainingCredits,
-      },
-      { status: task.httpStatus && task.httpStatus >= 400 ? task.httpStatus : 500 },
-    );
+    return NextResponse.json(createCodingTaskFailurePayload(task));
   }
 
   return NextResponse.json(
@@ -123,11 +135,219 @@ type GenerateRunResult =
       remainingCredits?: number;
     };
 
+type CodingModelCandidate = {
+  slot: "A" | "B" | "C";
+  label: string;
+  provider?: string;
+  endpointUrl: string;
+  apiKeyEnv: string;
+  model: string;
+  timeoutMs?: number;
+};
+
+type CodingModelChainPolicy = {
+  switchOnTimeout: boolean;
+  switchOnHttp5xx: boolean;
+  switchOnHttp429: boolean;
+  switchOnInvalidKey: boolean;
+  switchOnEmptyContent: boolean;
+  enableHealthOrdering: boolean;
+  circuitBreakerThreshold: number;
+  circuitBreakerCooldownMs: number;
+};
+
 function buildPromptPreview(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
   return normalized.length > 120
     ? `${normalized.slice(0, 120)}...`
     : normalized;
+}
+
+function resolveCodingModelCandidates(
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>,
+) {
+  const baseCandidate: CodingModelCandidate = {
+    slot: "A",
+    label: "A 主模型",
+    provider: aiConfig.extraPayload.providerLabel as string | undefined,
+    endpointUrl: aiConfig.endpointUrl,
+    apiKeyEnv: aiConfig.apiKeyEnv,
+    model: aiConfig.model,
+    timeoutMs:
+      typeof aiConfig.extraPayload.singleModelTimeoutMs === "number"
+        ? Math.max(10_000, Math.floor(aiConfig.extraPayload.singleModelTimeoutMs))
+        : undefined,
+  };
+  const rawModelChain = aiConfig.extraPayload.modelChain;
+  const extraCandidates: CodingModelCandidate[] = Array.isArray(rawModelChain)
+    ? rawModelChain
+        .map((item) => {
+          if (!item || typeof item !== "object") {
+            return null;
+          }
+
+          const rawEntry = item as Record<string, unknown>;
+          const slot = rawEntry.slot;
+          const endpointUrl =
+            typeof rawEntry.endpointUrl === "string"
+              ? rawEntry.endpointUrl.trim()
+              : typeof rawEntry.endpoint_url === "string"
+                ? rawEntry.endpoint_url.trim()
+                : "";
+          const apiKeyEnv =
+            typeof rawEntry.apiKeyEnv === "string"
+              ? rawEntry.apiKeyEnv.trim()
+              : typeof rawEntry.api_key_env === "string"
+                ? rawEntry.api_key_env.trim()
+                : "";
+          const model =
+            typeof rawEntry.model === "string" ? rawEntry.model.trim() : "";
+          const timeoutMs =
+            typeof rawEntry.timeoutMs === "number" && Number.isFinite(rawEntry.timeoutMs)
+              ? Math.max(10_000, Math.floor(rawEntry.timeoutMs))
+              : undefined;
+
+          if (
+            (slot !== "B" && slot !== "C") ||
+            !endpointUrl ||
+            !apiKeyEnv ||
+            !model
+          ) {
+            return null;
+          }
+
+          return {
+            slot,
+            label:
+              typeof rawEntry.label === "string" && rawEntry.label.trim()
+                ? rawEntry.label.trim()
+                : `${slot} 备用模型`,
+            provider:
+              typeof rawEntry.provider === "string" && rawEntry.provider.trim()
+                ? rawEntry.provider.trim()
+                : undefined,
+            endpointUrl,
+            apiKeyEnv,
+            model,
+            timeoutMs,
+          } satisfies CodingModelCandidate;
+        })
+        .filter((item) => item !== null)
+    : [];
+  const dedupedCandidates: CodingModelCandidate[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const candidate of [baseCandidate, ...extraCandidates]) {
+    const dedupeKey = [
+      candidate.endpointUrl.trim().toLowerCase(),
+      candidate.apiKeyEnv.trim().toLowerCase(),
+      candidate.model.trim().toLowerCase(),
+    ].join("::");
+
+    if (seenKeys.has(dedupeKey)) {
+      continue;
+    }
+
+    seenKeys.add(dedupeKey);
+    dedupedCandidates.push(candidate);
+  }
+
+  return dedupedCandidates;
+}
+
+function resolveCodingModelChainPolicy(
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>,
+) {
+  const rawPolicy = aiConfig.extraPayload.modelChainPolicy;
+
+  if (!rawPolicy || typeof rawPolicy !== "object") {
+    return {
+      switchOnTimeout: true,
+      switchOnHttp5xx: true,
+      switchOnHttp429: true,
+      switchOnInvalidKey: true,
+      switchOnEmptyContent: true,
+      enableHealthOrdering: true,
+      circuitBreakerThreshold: 3,
+      circuitBreakerCooldownMs: 5 * 60 * 1000,
+    } satisfies CodingModelChainPolicy;
+  }
+
+  const policy = rawPolicy as Record<string, unknown>;
+
+  return {
+    switchOnTimeout: policy.switchOnTimeout !== false,
+    switchOnHttp5xx: policy.switchOnHttp5xx !== false,
+    switchOnHttp429: policy.switchOnHttp429 !== false,
+    switchOnInvalidKey: policy.switchOnInvalidKey !== false,
+    switchOnEmptyContent: policy.switchOnEmptyContent !== false,
+    enableHealthOrdering: policy.enableHealthOrdering !== false,
+    circuitBreakerThreshold:
+      typeof policy.circuitBreakerThreshold === "number" &&
+      Number.isFinite(policy.circuitBreakerThreshold)
+        ? Math.max(1, Math.floor(policy.circuitBreakerThreshold))
+        : 3,
+    circuitBreakerCooldownMs:
+      typeof policy.circuitBreakerCooldownMs === "number" &&
+      Number.isFinite(policy.circuitBreakerCooldownMs)
+        ? Math.max(60_000, Math.floor(policy.circuitBreakerCooldownMs))
+        : 5 * 60 * 1000,
+  } satisfies CodingModelChainPolicy;
+}
+
+function scoreCodingModelHealth(input: {
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  consecutiveFailures: number;
+}) {
+  return (
+    input.successCount * 3 -
+    input.failureCount * 2 -
+    input.timeoutCount * 3 -
+    input.consecutiveFailures * 4
+  );
+}
+
+function shouldContinueCodingModelChain(
+  result: GenerateRunResult,
+  policy: CodingModelChainPolicy,
+) {
+  if (result.ok) {
+    return false;
+  }
+
+  const normalizedError = result.error.toLowerCase();
+
+  if (result.status === 504) {
+    return policy.switchOnTimeout;
+  }
+
+  if (result.status === 429) {
+    return policy.switchOnHttp429;
+  }
+
+  if (result.status >= 500) {
+    return policy.switchOnHttp5xx;
+  }
+
+  if (
+    normalizedError.includes("invalid api key") ||
+    normalizedError.includes("invalid key") ||
+    normalizedError.includes("密钥")
+  ) {
+    return policy.switchOnInvalidKey;
+  }
+
+  if (
+    normalizedError.includes("没有返回可用内容") ||
+    normalizedError.includes("没有返回可用的内容") ||
+    normalizedError.includes("模型没有返回可用内容")
+  ) {
+    return policy.switchOnEmptyContent;
+  }
+
+  return false;
 }
 
 function buildCodingPromptForModel(rawPrompt: string): PreparedCodingPrompt {
@@ -259,23 +479,18 @@ async function startDeferredCodingGenerationTask(input: {
       return;
     }
 
-    if (input.refundCredits) {
-      const refundedCredits = await input.refundCredits();
-
-      if (typeof refundedCredits === "number") {
-        result.remainingCredits = refundedCredits;
-      }
-    }
-
     await updateCodingGenerationTask(input.taskId, {
-      status: "failed",
+      status: "succeeded",
       completedAt: new Date().toISOString(),
+      code: buildCodingFallbackHtml(input.requestPrompt),
       error: result.error,
       remainingCredits: result.remainingCredits,
-      httpStatus: result.status,
+      degraded: true,
+      degradedReason: result.error,
+      httpStatus: 200,
     });
 
-    traceGenerate("warn", "deferred_task_failed_result", input.traceContext, {
+    traceGenerate("warn", "deferred_task_degraded_result", input.traceContext, {
       taskId: input.taskId,
       errorMessage: result.error,
       status: result.status,
@@ -289,18 +504,230 @@ async function startDeferredCodingGenerationTask(input: {
     }
 
     await updateCodingGenerationTask(input.taskId, {
-      status: "failed",
+      status: "succeeded",
       completedAt: new Date().toISOString(),
+      code: buildCodingFallbackHtml(input.requestPrompt),
       error: errorMessage,
       remainingCredits: refundedCredits,
-      httpStatus: isAiUpstreamTimeoutError(error) ? 504 : 500,
+      degraded: true,
+      degradedReason: isAiUpstreamTimeoutError(error)
+        ? "后台生成等待模型返回超时，已自动切换到站内兜底生成。"
+        : "后台生成链路出现波动，已自动切换到站内兜底生成。",
+      httpStatus: 200,
     });
 
-    traceGenerate("error", "deferred_task_failed", input.traceContext, {
+    traceGenerate("error", "deferred_task_degraded_exception", input.traceContext, {
       taskId: input.taskId,
       errorMessage,
     });
   }
+}
+
+async function runCodingGenerateRequestWithModelChain(input: {
+  requestPrompt: string;
+  upstreamPrompt: string;
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>;
+  remainingCredits?: number;
+  traceContext: GenerateTraceContext;
+  requestTimeoutMsOverride?: number;
+}) {
+  const policy = resolveCodingModelChainPolicy(input.aiConfig);
+  const modelStats = await getCodingModelChainStats().catch(() => null);
+  let candidates = resolveCodingModelCandidates(input.aiConfig);
+  let lastFailure: GenerateRunResult | null = null;
+
+  if (policy.enableHealthOrdering && modelStats?.models?.length) {
+    const statsBySlot = new Map(modelStats.models.map((item) => [item.slot, item]));
+    candidates = [...candidates].sort((left, right) => {
+      const leftStats = statsBySlot.get(left.slot);
+      const rightStats = statsBySlot.get(right.slot);
+      const leftScore = leftStats
+        ? scoreCodingModelHealth(leftStats)
+        : left.slot === "A"
+          ? 1
+          : 0;
+      const rightScore = rightStats
+        ? scoreCodingModelHealth(rightStats)
+        : right.slot === "A"
+          ? 1
+          : 0;
+
+      if (leftScore === rightScore) {
+        return left.slot.localeCompare(right.slot);
+      }
+
+      return rightScore - leftScore;
+    });
+  }
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const startedAt = Date.now();
+    const stats = modelStats?.models.find((item) => item.slot === candidate.slot);
+    const cooldownUntilTime =
+      stats?.cooldownUntil ? new Date(stats.cooldownUntil).getTime() : null;
+
+    if (cooldownUntilTime && cooldownUntilTime > Date.now()) {
+      lastFailure = {
+        ok: false,
+        status: 503,
+        error: `${candidate.label} 正在熔断冷却中，已自动跳过。`,
+        remainingCredits: input.remainingCredits,
+      } satisfies GenerateRunResult;
+
+      await recordCodingModelChainEvent({
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "stopped",
+        status: 503,
+        message: `熔断中，冷却截止到 ${stats?.cooldownUntil ?? ""}`,
+        cooldownUntil: stats?.cooldownUntil ?? null,
+      });
+      continue;
+    }
+
+    const candidateTraceContext: GenerateTraceContext = {
+      ...input.traceContext,
+      endpoint: candidate.endpointUrl,
+      model: candidate.model,
+      timeoutMs:
+        candidate.timeoutMs ??
+        input.requestTimeoutMsOverride ??
+        input.traceContext.timeoutMs,
+    };
+
+    traceGenerate("log", "model_chain_attempt_started", candidateTraceContext, {
+      slot: candidate.slot,
+      candidateLabel: candidate.label,
+      candidateProvider: candidate.provider ?? null,
+      attempt: index + 1,
+      totalAttempts: candidates.length,
+      apiKeyEnv: candidate.apiKeyEnv,
+    });
+
+    const candidateApiKey = await getAiSecret(candidate.apiKeyEnv);
+
+    if (!candidateApiKey) {
+      lastFailure = {
+        ok: false,
+        status: 500,
+        error: `${candidate.label} 缺少 ${candidate.apiKeyEnv} 密钥，已自动尝试下一条模型线路。`,
+        remainingCredits: input.remainingCredits,
+      } satisfies GenerateRunResult;
+
+      traceGenerate(
+        "warn",
+        "model_chain_attempt_skipped_missing_key",
+        candidateTraceContext,
+        {
+          slot: candidate.slot,
+          candidateLabel: candidate.label,
+          apiKeyEnv: candidate.apiKeyEnv,
+        },
+      );
+      await recordCodingModelChainEvent({
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "skipped_missing_key",
+        message: `缺少 ${candidate.apiKeyEnv} 密钥`,
+      });
+      continue;
+    }
+
+    const attemptResult = await runGenerateRequest({
+      resolvedMode: "coding",
+      requestPrompt: input.requestPrompt,
+      upstreamPrompt: input.upstreamPrompt,
+      aiConfig: {
+        ...input.aiConfig,
+        endpointUrl: candidate.endpointUrl,
+        apiKeyEnv: candidate.apiKeyEnv,
+        model: candidate.model,
+      },
+      apiKey: candidateApiKey,
+      remainingCredits: input.remainingCredits,
+      traceContext: candidateTraceContext,
+      requestTimeoutMsOverride:
+        candidate.timeoutMs ?? input.requestTimeoutMsOverride,
+      allowCodingDegradedFallback: false,
+    });
+
+    if (attemptResult.ok) {
+      traceGenerate("log", "model_chain_attempt_succeeded", candidateTraceContext, {
+        slot: candidate.slot,
+        candidateLabel: candidate.label,
+        attempt: index + 1,
+        totalAttempts: candidates.length,
+      });
+      await recordCodingModelChainEvent({
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "success",
+        latencyMs: Date.now() - startedAt,
+      });
+
+      return attemptResult;
+    }
+
+    lastFailure = attemptResult;
+    traceGenerate("warn", "model_chain_attempt_failed", candidateTraceContext, {
+      slot: candidate.slot,
+      candidateLabel: candidate.label,
+      attempt: index + 1,
+      totalAttempts: candidates.length,
+      status: attemptResult.status,
+      errorMessage: attemptResult.error,
+    });
+
+    await recordCodingModelChainEvent({
+      slot: candidate.slot,
+      label: candidate.label,
+      provider: candidate.provider,
+      model: candidate.model,
+      endpointUrl: candidate.endpointUrl,
+      event: attemptResult.status === 504 ? "timeout" : "failure",
+      status: attemptResult.status,
+      latencyMs: Date.now() - startedAt,
+      message: attemptResult.error,
+      cooldownUntil:
+        (attemptResult.status === 504 || attemptResult.status >= 500) &&
+        ((stats?.consecutiveFailures ?? 0) + 1) >= policy.circuitBreakerThreshold
+          ? new Date(Date.now() + policy.circuitBreakerCooldownMs).toISOString()
+          : undefined,
+    });
+
+    if (!shouldContinueCodingModelChain(attemptResult, policy)) {
+      await recordCodingModelChainEvent({
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "stopped",
+        status: attemptResult.status,
+        message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+      });
+      break;
+    }
+  }
+
+  return (
+    lastFailure ?? {
+      ok: false,
+      status: 502,
+      error: "A、B、C 三条模型线路都没有成功返回结果。",
+      remainingCredits: input.remainingCredits,
+    }
+  );
 }
 
 function escapeHtml(input: string) {
@@ -1027,6 +1454,7 @@ async function runGenerateRequest(input: {
   remainingCredits?: number;
   traceContext: GenerateTraceContext;
   requestTimeoutMsOverride?: number;
+  allowCodingDegradedFallback?: boolean;
 }) {
   const useResponsesApi = shouldUseResponsesApi(
     input.aiConfig.endpointUrl,
@@ -1081,13 +1509,34 @@ async function runGenerateRequest(input: {
           ],
         },
   );
-  const upstreamResponse = await requestUpstreamJsonWithRetry({
-    endpoint: requestEndpoint,
-    apiKey: input.apiKey,
-    body: upstreamPayload,
-    timeoutMs: requestTimeoutMs,
-    retries: input.resolvedMode === "coding" ? 2 : 1,
-  });
+  let upstreamResponse: Awaited<ReturnType<typeof requestUpstreamJsonWithRetry>>;
+
+  try {
+    upstreamResponse = await requestUpstreamJsonWithRetry({
+      endpoint: requestEndpoint,
+      apiKey: input.apiKey,
+      body: upstreamPayload,
+      timeoutMs: requestTimeoutMs,
+      retries: input.resolvedMode === "coding" ? 2 : 1,
+    });
+  } catch (error) {
+    const isTimeoutError = isAiUpstreamTimeoutError(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    traceGenerate("error", "upstream_request_exception", input.traceContext, {
+      isTimeoutError,
+      errorMessage,
+    });
+
+    return {
+      ok: false,
+      status: isTimeoutError ? 504 : 502,
+      error: isTimeoutError
+        ? "服务器等待 AI 接口返回超时了。"
+        : "连接 AI 生成接口时发生异常，请稍后再试。",
+      remainingCredits: input.remainingCredits,
+    } satisfies GenerateRunResult;
+  }
 
   traceGenerate("log", "upstream_response", input.traceContext, {
     upstreamStatus: upstreamResponse.status,
@@ -1113,7 +1562,10 @@ async function runGenerateRequest(input: {
         : upstreamText.trim()) ||
       "上游大模型接口请求失败，请稍后再试。";
 
-    if (input.resolvedMode === "coding") {
+    if (
+      input.resolvedMode === "coding" &&
+      input.allowCodingDegradedFallback === true
+    ) {
       traceGenerate("warn", "coding_degraded_upstream_status", input.traceContext, {
         upstreamStatus: upstreamResponse.status,
         degradedReason: upstreamErrorMessage,
@@ -1146,7 +1598,10 @@ async function runGenerateRequest(input: {
 
     const nonJsonMessage = buildNonJsonResponseMessage(input.aiConfig.endpointUrl);
 
-    if (input.resolvedMode === "coding") {
+    if (
+      input.resolvedMode === "coding" &&
+      input.allowCodingDegradedFallback === true
+    ) {
       traceGenerate("warn", "coding_degraded_non_json", input.traceContext, {
         degradedReason: nonJsonMessage,
       });
@@ -1173,7 +1628,10 @@ async function runGenerateRequest(input: {
   );
 
   if (!generatedContent) {
-    if (input.resolvedMode === "coding") {
+    if (
+      input.resolvedMode === "coding" &&
+      input.allowCodingDegradedFallback === true
+    ) {
       traceGenerate("warn", "coding_degraded_empty_content", input.traceContext, {
         degradedReason: "模型没有返回可用内容。",
       });
@@ -1312,7 +1770,6 @@ export async function POST(request: Request) {
         ? buildCodingPromptForModel(requestPrompt).prompt
         : requestPrompt;
     const aiConfig = await resolveAiModeConfig(resolvedMode);
-    const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
     const creditPolicy = resolveModeCreditPolicy(aiConfig.extraPayload);
     shouldCharge = creditPolicy.creditEnabled && creditPolicy.creditCost > 0;
     creditCost = creditPolicy.creditCost;
@@ -1324,7 +1781,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!apiKey) {
+    const apiKey =
+      resolvedMode === "coding" ? "" : await getAiSecret(aiConfig.apiKeyEnv);
+
+    if (resolvedMode !== "coding" && !apiKey) {
       return NextResponse.json(
         { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
         { status: 500 },
@@ -1408,6 +1868,53 @@ export async function POST(request: Request) {
         configuredMaxCompletionTokens !== null &&
         configuredMaxCompletionTokens !== effectiveMaxCompletionTokens,
     });
+    if (resolvedMode === "coding") {
+      const taskId = randomUUID();
+      const queuedTask: CodingGenerationTaskRecord = {
+        id: taskId,
+        status: "queued",
+        promptPreview: buildPromptPreview(requestPrompt),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await writeCodingGenerationTask(queuedTask);
+
+      void startDeferredCodingGenerationTask({
+        taskId,
+        requestPrompt,
+        traceContext,
+        run: () =>
+          runCodingGenerateRequestWithModelChain({
+            requestPrompt,
+            upstreamPrompt,
+            aiConfig,
+            remainingCredits,
+            traceContext,
+            requestTimeoutMsOverride: resolveDeferredAiRequestTimeoutMs(resolvedMode),
+          }),
+        refundCredits: () =>
+          refundCredits(
+            resolvedMode === "writing"
+              ? `AI 写作后台生成失败，退回 ${creditCost} 个魔法币。`
+              : `AI 编程后台生成失败，退回 ${creditCost} 个魔法币。`,
+          ),
+      });
+
+      const response = NextResponse.json(
+        {
+          requestId,
+          taskId,
+          status: "queued",
+          message: "创作任务已经提交，系统正在后台稳定生成，请稍等几秒自动返回结果。",
+          remainingCredits,
+        },
+        { status: 202 },
+      );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
+    }
+
     const runResult = await runGenerateRequest({
       resolvedMode,
       requestPrompt,
@@ -1426,59 +1933,6 @@ export async function POST(request: Request) {
         degradedReason: runResult.degradedReason,
         requestId,
       });
-      response.headers.set("x-ai-request-id", requestId);
-      return response;
-    }
-
-    const isCodingTimeoutLike =
-      resolvedMode === "coding" &&
-      (runResult.status === 502 || runResult.status === 504);
-
-    if (isCodingTimeoutLike) {
-      const taskId = randomUUID();
-      const queuedTask: CodingGenerationTaskRecord = {
-        id: taskId,
-        status: "queued",
-        promptPreview: buildPromptPreview(requestPrompt),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      await writeCodingGenerationTask(queuedTask);
-
-      void startDeferredCodingGenerationTask({
-        taskId,
-        requestPrompt,
-        traceContext,
-        run: () =>
-          runGenerateRequest({
-            resolvedMode,
-            requestPrompt,
-            upstreamPrompt,
-            aiConfig,
-            apiKey,
-            remainingCredits,
-            traceContext,
-            requestTimeoutMsOverride: resolveDeferredAiRequestTimeoutMs(resolvedMode),
-          }),
-        refundCredits: () =>
-          refundCredits(
-            resolvedMode === "writing"
-              ? `AI 写作后台生成失败，退回 ${creditCost} 个魔法币。`
-              : `AI 编程后台生成失败，退回 ${creditCost} 个魔法币。`,
-          ),
-      });
-
-      const response = NextResponse.json(
-        {
-          requestId,
-          taskId,
-          status: "queued",
-          message: "内容有点复杂，已经切换到后台继续生成，请稍等几秒自动返回结果。",
-          remainingCredits,
-        },
-        { status: 202 },
-      );
       response.headers.set("x-ai-request-id", requestId);
       return response;
     }
@@ -1519,8 +1973,8 @@ export async function POST(request: Request) {
         remainingCredits,
         degraded: true,
         degradedReason: isTimeoutError
-          ? "服务器与上游模型连接超时，已自动切换到站内兜底生成。"
-          : "生成链路发生异常，已自动切换到站内兜底生成。",
+          ? "任务提交时网络有点波动，已自动切换到站内兜底生成。"
+          : "任务提交时发生异常，已自动切换到站内兜底生成。",
         requestId,
       });
       response.headers.set("x-ai-request-id", requestId);

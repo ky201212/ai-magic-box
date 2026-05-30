@@ -27,6 +27,7 @@ const modeFallbacks: Record<
     extraPayload: {
       reasoningEffort: "none",
       maxCompletionTokens: 1400,
+      modelChain: [],
     },
   },
   writing: {

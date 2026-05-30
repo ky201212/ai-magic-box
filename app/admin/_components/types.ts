@@ -75,6 +75,43 @@ export type AiModelOptionsState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
+export type CodingModelChainStatsRecord = {
+  updatedAt: string | null;
+  models: Array<{
+    slot: "A" | "B" | "C";
+    label: string;
+    provider: string;
+    model: string;
+    endpointUrl: string;
+    successCount: number;
+    failureCount: number;
+    timeoutCount: number;
+    skipCount: number;
+    consecutiveFailures: number;
+    cooldownUntil: string | null;
+    lastStatus: string | null;
+    lastError: string | null;
+    lastUsedAt: string | null;
+  }>;
+  recentEvents: Array<{
+    id: string;
+    createdAt: string;
+    slot: "A" | "B" | "C";
+    label: string;
+    provider: string;
+    model: string;
+    event:
+      | "success"
+      | "failure"
+      | "timeout"
+      | "skipped_missing_key"
+      | "stopped";
+    status?: number;
+    latencyMs?: number;
+    message?: string;
+  }>;
+};
+
 export type CommunityReviewSettingRecord = {
   aiApprovalMode: "auto_publish" | "manual_review";
   aiModerationInstruction: string;
