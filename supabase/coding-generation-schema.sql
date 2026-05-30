@@ -10,9 +10,13 @@ create table if not exists public.coding_generation_tasks (
   error text null,
   degraded boolean not null default false,
   degraded_reason text null,
+  model_attempts jsonb null,
   remaining_credits integer null,
   http_status integer null
 );
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists model_attempts jsonb null;
 
 create index if not exists idx_coding_generation_tasks_status
   on public.coding_generation_tasks(status);

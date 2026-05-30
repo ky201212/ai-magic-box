@@ -376,6 +376,23 @@ function shouldContinueCodingModelChain(
     return policy.switchOnEmptyContent;
   }
 
+  if (
+    normalizedError.includes("param incorrect") ||
+    normalizedError.includes("max_tokens") ||
+    normalizedError.includes("max_completion_tokens") ||
+    normalizedError.includes("max_seq_len") ||
+    normalizedError.includes("context length") ||
+    normalizedError.includes("unsupported") ||
+    normalizedError.includes("not supported") ||
+    normalizedError.includes("model not found") ||
+    normalizedError.includes("does not exist") ||
+    normalizedError.includes("invalid model") ||
+    normalizedError.includes("接口地址") ||
+    normalizedError.includes("不是 json")
+  ) {
+    return true;
+  }
+
   return false;
 }
 

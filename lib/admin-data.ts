@@ -644,84 +644,97 @@ export async function recordAiModelChainEvent(input: {
   message?: string;
   cooldownUntil?: string | null;
 }) {
-  const current = await getAiModelChainStats(input.modeKey);
-  const eventCreatedAt = new Date().toISOString();
-  const nextModels = current.models.map((item) => {
-    if (item.slot !== input.slot) {
-      return item;
-    }
+  try {
+    const current = await getAiModelChainStats(input.modeKey);
+    const eventCreatedAt = new Date().toISOString();
+    const nextModels = current.models.map((item) => {
+      if (item.slot !== input.slot) {
+        return item;
+      }
 
-    const isFailureLike =
-      input.event === "failure" || input.event === "timeout";
-    const nextConsecutiveFailures = input.event === "success"
-      ? 0
-      : isFailureLike
-        ? item.consecutiveFailures + 1
-        : item.consecutiveFailures;
+      const isFailureLike =
+        input.event === "failure" || input.event === "timeout";
+      const nextConsecutiveFailures = input.event === "success"
+        ? 0
+        : isFailureLike
+          ? item.consecutiveFailures + 1
+          : item.consecutiveFailures;
 
-    return {
-      ...item,
-      label: input.label.trim() || item.label,
-      provider: input.provider?.trim() || item.provider,
-      model: input.model.trim() || item.model,
-      endpointUrl: input.endpointUrl.trim() || item.endpointUrl,
-      successCount:
-        item.successCount + (input.event === "success" ? 1 : 0),
-      failureCount:
-        item.failureCount + (input.event === "failure" ? 1 : 0),
-      timeoutCount:
-        item.timeoutCount + (input.event === "timeout" ? 1 : 0),
-      skipCount:
-        item.skipCount + (input.event === "skipped_missing_key" ? 1 : 0),
-      consecutiveFailures: nextConsecutiveFailures,
-      cooldownUntil:
-        input.event === "success"
-          ? null
-          : input.cooldownUntil === undefined
-            ? item.cooldownUntil
-            : input.cooldownUntil,
-      lastStatus:
-        typeof input.status === "number" ? String(input.status) : input.event,
-      lastError: input.message?.trim() || null,
-      lastUsedAt: eventCreatedAt,
+      return {
+        ...item,
+        label: input.label.trim() || item.label,
+        provider: input.provider?.trim() || item.provider,
+        model: input.model.trim() || item.model,
+        endpointUrl: input.endpointUrl.trim() || item.endpointUrl,
+        successCount:
+          item.successCount + (input.event === "success" ? 1 : 0),
+        failureCount:
+          item.failureCount + (input.event === "failure" ? 1 : 0),
+        timeoutCount:
+          item.timeoutCount + (input.event === "timeout" ? 1 : 0),
+        skipCount:
+          item.skipCount + (input.event === "skipped_missing_key" ? 1 : 0),
+        consecutiveFailures: nextConsecutiveFailures,
+        cooldownUntil:
+          input.event === "success"
+            ? null
+            : input.cooldownUntil === undefined
+              ? item.cooldownUntil
+              : input.cooldownUntil,
+        lastStatus:
+          typeof input.status === "number" ? String(input.status) : input.event,
+        lastError: input.message?.trim() || null,
+        lastUsedAt: eventCreatedAt,
+      };
+    });
+
+    const nextStats: AiModelChainStatsRecord = {
+      updatedAt: eventCreatedAt,
+      models: nextModels,
+      recentEvents: [
+        {
+          id: randomUUID(),
+          createdAt: eventCreatedAt,
+          slot: input.slot,
+          label: input.label.trim() || `${input.slot} 模型`,
+          provider: input.provider?.trim() || "",
+          model: input.model.trim(),
+          event: input.event,
+          status: input.status,
+          latencyMs:
+            typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)
+              ? Math.max(0, Math.round(input.latencyMs))
+              : undefined,
+          message: input.message?.trim() || undefined,
+        },
+        ...current.recentEvents,
+      ].slice(0, 120),
     };
-  });
 
-  const nextStats: AiModelChainStatsRecord = {
-    updatedAt: eventCreatedAt,
-    models: nextModels,
-    recentEvents: [
+    await upsertSiteSettings([
       {
-        id: randomUUID(),
-        createdAt: eventCreatedAt,
-        slot: input.slot,
-        label: input.label.trim() || `${input.slot} 模型`,
-        provider: input.provider?.trim() || "",
-        model: input.model.trim(),
-        event: input.event,
-        status: input.status,
-        latencyMs:
-          typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)
-            ? Math.max(0, Math.round(input.latencyMs))
-            : undefined,
-        message: input.message?.trim() || undefined,
+        setting_key: getAiModelChainStatsSettingKey(input.modeKey),
+        setting_group: "ai",
+        label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
+        value: nextStats,
+        description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
+        updated_by: "system",
       },
-      ...current.recentEvents,
-    ].slice(0, 120),
-  };
+    ]);
 
-  await upsertSiteSettings([
-    {
-      setting_key: getAiModelChainStatsSettingKey(input.modeKey),
-      setting_group: "ai",
-      label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
-      value: nextStats,
-      description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
-      updated_by: "system",
-    },
-  ]);
+    return nextStats;
+  } catch (error) {
+    console.error("【AI 模型接力统计写入失败】:", {
+      modeKey: input.modeKey,
+      slot: input.slot,
+      label: input.label,
+      model: input.model,
+      event: input.event,
+      error,
+    });
 
-  return nextStats;
+    return createDefaultAiModelChainStats();
+  }
 }
 
 export async function recordCodingModelChainEvent(
