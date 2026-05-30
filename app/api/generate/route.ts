@@ -401,18 +401,92 @@ function scoreCodingModelHealth(input: {
   timeoutCount: number;
   consecutiveFailures: number;
   streamSupport?: "supported" | "unsupported" | "unknown";
+  lastStatus?: string | null;
+  lastError?: string | null;
+  cooldownUntil?: string | null;
 }) {
+  const normalizedLastError = (input.lastError ?? "").toLowerCase();
+  const normalizedLastStatus = (input.lastStatus ?? "").toLowerCase();
+  const hasRecentConfigError = isLikelyConfigErrorMessage(normalizedLastError);
+  const hasRecentHtmlError = isLikelyHtmlGatewayErrorMessage(normalizedLastError);
+  const isCoolingDown =
+    typeof input.cooldownUntil === "string" &&
+    Number.isFinite(new Date(input.cooldownUntil).getTime()) &&
+    new Date(input.cooldownUntil).getTime() > Date.now();
+
   return (
+    (normalizedLastStatus === "success" ? 10 : 0) +
     (input.streamSupport === "supported"
       ? 6
       : input.streamSupport === "unsupported"
         ? -2
         : 0) +
+    (hasRecentHtmlError ? -28 : 0) +
+    (hasRecentConfigError ? -20 : 0) +
+    (isCoolingDown ? -40 : 0) +
     input.successCount * 3 -
     input.failureCount * 2 -
     input.timeoutCount * 3 -
     input.consecutiveFailures * 4
   );
+}
+
+function isLikelyHtmlGatewayErrorMessage(errorMessage: string) {
+  const normalizedError = errorMessage.toLowerCase();
+
+  return (
+    normalizedError.includes("不是 json") ||
+    normalizedError.includes("网页内容") ||
+    normalizedError.includes("html") ||
+    normalizedError.includes("cloudflare") ||
+    normalizedError.includes("access denied") ||
+    normalizedError.includes("nginx") ||
+    normalizedError.includes("接口地址")
+  );
+}
+
+function isLikelyConfigErrorMessage(errorMessage: string) {
+  const normalizedError = errorMessage.toLowerCase();
+
+  return (
+    isLikelyHtmlGatewayErrorMessage(normalizedError) ||
+    normalizedError.includes("invalid api key") ||
+    normalizedError.includes("invalid key") ||
+    normalizedError.includes("密钥") ||
+    normalizedError.includes("model not found") ||
+    normalizedError.includes("does not exist") ||
+    normalizedError.includes("invalid model") ||
+    normalizedError.includes("unsupported") ||
+    normalizedError.includes("not supported") ||
+    normalizedError.includes("param incorrect")
+  );
+}
+
+function resolveCodingAttemptCooldownUntil(input: {
+  attemptResult: GenerateRunFailure;
+  policy: CodingModelChainPolicy;
+  existingConsecutiveFailures: number;
+}) {
+  if (isLikelyHtmlGatewayErrorMessage(input.attemptResult.error)) {
+    return new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  }
+
+  if (
+    isLikelyConfigErrorMessage(input.attemptResult.error) ||
+    input.attemptResult.status === 401 ||
+    input.attemptResult.status === 403
+  ) {
+    return new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  }
+
+  if (
+    (input.attemptResult.status === 504 || input.attemptResult.status >= 500) &&
+    input.existingConsecutiveFailures + 1 >= input.policy.circuitBreakerThreshold
+  ) {
+    return new Date(Date.now() + input.policy.circuitBreakerCooldownMs).toISOString();
+  }
+
+  return undefined;
 }
 
 function shouldContinueCodingModelChain(
@@ -907,11 +981,11 @@ async function runCodingGenerateRequestWithModelChain(input: {
       status: attemptResult.status,
       latencyMs: Date.now() - startedAt,
       message: attemptResult.error,
-      cooldownUntil:
-        (attemptResult.status === 504 || attemptResult.status >= 500) &&
-        ((stats?.consecutiveFailures ?? 0) + 1) >= policy.circuitBreakerThreshold
-          ? new Date(Date.now() + policy.circuitBreakerCooldownMs).toISOString()
-          : undefined,
+      cooldownUntil: resolveCodingAttemptCooldownUntil({
+        attemptResult,
+        policy,
+        existingConsecutiveFailures: stats?.consecutiveFailures ?? 0,
+      }),
     });
     await input.onTaskUpdate?.({
       progressMessage:
@@ -1720,8 +1794,23 @@ function looksLikeHtml(rawText: string) {
   return trimmedText.startsWith("<!doctype html") || trimmedText.startsWith("<html");
 }
 
-function buildNonJsonResponseMessage(configuredEndpoint: string) {
-  return `模型接口返回的不是 JSON，而像是网页内容。请检查后台 AI 配置里的接口地址。当前填写的是 ${configuredEndpoint}。如果你填的是 OpenAI 兼容基地址 /v1，系统现在会自动补到 /v1/chat/completions；如果对方平台不是这个协议，就需要改成它真正的接口地址。`;
+function buildNonJsonResponseMessage(
+  configuredEndpoint: string,
+  requestEndpoint?: string,
+) {
+  const normalizedConfiguredEndpoint = configuredEndpoint.trim().toLowerCase();
+  const normalizedRequestEndpoint = requestEndpoint?.trim().toLowerCase() ?? "";
+  const endpointAlreadyLooksComplete =
+    normalizedConfiguredEndpoint.endsWith("/chat/completions") ||
+    normalizedConfiguredEndpoint.endsWith("/responses") ||
+    normalizedRequestEndpoint.endsWith("/chat/completions") ||
+    normalizedRequestEndpoint.endsWith("/responses");
+
+  if (endpointAlreadyLooksComplete) {
+    return `模型接口返回的不是 JSON，而像是网页内容。当前请求地址是 ${requestEndpoint ?? configuredEndpoint}。这通常不是普通的生成失败，而是上游网关、风控页、CDN 拦截页或错误网页返回。请优先检查这条模型线路在服务器环境里是否真的能直连，并确认提供方要求的真实协议、鉴权和域名没有被中间层改写。`;
+  }
+
+  return `模型接口返回的不是 JSON，而像是网页内容。请检查后台 AI 配置里的接口地址。当前填写的是 ${configuredEndpoint}，实际请求地址是 ${requestEndpoint ?? configuredEndpoint}。如果你填的是 OpenAI 兼容基地址 /v1，系统现在会自动补到 /v1/chat/completions；如果对方平台不是这个协议，就需要改成它真正的接口地址。`;
 }
 
 function mapUpstreamStatusToGatewayStatus(status: number) {
@@ -2024,7 +2113,10 @@ async function runGenerateRequest(input: {
     const upstreamErrorMessage =
       upstreamData?.error?.message ||
       (looksLikeHtml(upstreamText)
-        ? buildNonJsonResponseMessage(input.aiConfig.endpointUrl)
+        ? buildNonJsonResponseMessage(
+            input.aiConfig.endpointUrl,
+            requestEndpoint,
+          )
         : upstreamText.trim()) ||
       "上游大模型接口请求失败，请稍后再试。";
 
@@ -2080,7 +2172,10 @@ async function runGenerateRequest(input: {
           : upstreamText,
     });
 
-    const nonJsonMessage = buildNonJsonResponseMessage(input.aiConfig.endpointUrl);
+    const nonJsonMessage = buildNonJsonResponseMessage(
+      input.aiConfig.endpointUrl,
+      requestEndpoint,
+    );
 
     if (
       input.resolvedMode === "coding" &&
