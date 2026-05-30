@@ -2995,6 +2995,21 @@ function WorkshopContent() {
           remainingCredits?: number;
           degraded?: boolean;
           degradedReason?: string;
+          modelAttempts?: Array<{
+            slot: "A" | "B" | "C";
+            label: string;
+            model: string;
+            endpointUrl: string;
+            result:
+              | "success"
+              | "failure"
+              | "timeout"
+              | "skipped_missing_key"
+              | "stopped"
+              | "cooldown_skipped";
+            status?: number;
+            message?: string;
+          }>;
           requestId?: string;
           taskId?: string;
           status?: string;
@@ -3053,6 +3068,21 @@ function WorkshopContent() {
         remainingCredits?: number;
         degraded?: boolean;
         degradedReason?: string;
+        modelAttempts?: Array<{
+          slot: "A" | "B" | "C";
+          label: string;
+          model: string;
+          endpointUrl: string;
+          result:
+            | "success"
+            | "failure"
+            | "timeout"
+            | "skipped_missing_key"
+            | "stopped"
+            | "cooldown_skipped";
+          status?: number;
+          message?: string;
+        }>;
         requestId?: string;
         taskId?: string;
       } | null;
@@ -3116,10 +3146,15 @@ function WorkshopContent() {
         window.console.info("AI 编程请求号：", normalizedData.requestId);
       }
 
+      if (normalizedData.modelAttempts?.length) {
+        window.console.info("AI 编程模型接力明细：", normalizedData.modelAttempts);
+      }
+
       if (normalizedData.degraded && normalizedData.degradedReason) {
         window.console.warn("AI 编程已切换兜底生成：", {
           requestId: normalizedData.requestId ?? null,
           reason: normalizedData.degradedReason,
+          modelAttempts: normalizedData.modelAttempts ?? [],
         });
       }
     } catch {

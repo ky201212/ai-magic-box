@@ -35,6 +35,7 @@ function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
     remainingCredits: task.remainingCredits,
     degraded: task.degraded ?? false,
     degradedReason: task.degradedReason,
+    modelAttempts: task.modelAttempts ?? [],
   };
 }
 
@@ -47,6 +48,7 @@ function createCodingTaskFailurePayload(task: CodingGenerationTaskRecord) {
     degraded: true,
     degradedReason:
       task.error ?? "后台生成没有拿到完整结果，已自动切换到站内兜底生成。",
+    modelAttempts: task.modelAttempts ?? [],
   };
 }
 
@@ -133,13 +135,34 @@ type GenerateRunResult =
       remainingCredits?: number;
       degraded?: boolean;
       degradedReason?: string;
+      modelAttempts?: ModelAttemptRecord[];
     }
   | {
       ok: false;
       status: number;
       error: string;
       remainingCredits?: number;
+      modelAttempts?: ModelAttemptRecord[];
     };
+
+type ModelAttemptRecord = {
+  slot: "A" | "B" | "C";
+  label: string;
+  model: string;
+  endpointUrl: string;
+  result:
+    | "success"
+    | "failure"
+    | "timeout"
+    | "skipped_missing_key"
+    | "stopped"
+    | "cooldown_skipped";
+  status?: number;
+  message?: string;
+};
+
+type GenerateRunSuccess = Extract<GenerateRunResult, { ok: true }>;
+type GenerateRunFailure = Extract<GenerateRunResult, { ok: false }>;
 
 type CodingModelCandidate = {
   slot: "A" | "B" | "C";
@@ -474,6 +497,7 @@ async function startDeferredCodingGenerationTask(input: {
         remainingCredits: result.remainingCredits,
         degraded: result.degraded,
         degradedReason: result.degradedReason,
+        modelAttempts: result.modelAttempts,
         httpStatus: 200,
       });
 
@@ -493,6 +517,7 @@ async function startDeferredCodingGenerationTask(input: {
       remainingCredits: result.remainingCredits,
       degraded: true,
       degradedReason: result.error,
+      modelAttempts: result.modelAttempts,
       httpStatus: 200,
     });
 
@@ -519,6 +544,11 @@ async function startDeferredCodingGenerationTask(input: {
       degradedReason: isAiUpstreamTimeoutError(error)
         ? "后台生成等待模型返回超时，已自动切换到站内兜底生成。"
         : "后台生成链路出现波动，已自动切换到站内兜底生成。",
+      modelAttempts:
+        "modelAttempts" in (error as Record<string, unknown>)
+          ? ((error as { modelAttempts?: CodingGenerationTaskRecord["modelAttempts"] })
+              .modelAttempts ?? [])
+          : [],
       httpStatus: 200,
     });
 
@@ -540,7 +570,8 @@ async function runCodingGenerateRequestWithModelChain(input: {
   const policy = resolveCodingModelChainPolicy(input.aiConfig);
   const modelStats = await getCodingModelChainStats().catch(() => null);
   let candidates = resolveCodingModelCandidates(input.aiConfig);
-  let lastFailure: GenerateRunResult | null = null;
+  let lastFailure: GenerateRunFailure | null = null;
+  const modelAttempts: ModelAttemptRecord[] = [];
 
   if (policy.enableHealthOrdering && modelStats?.models?.length) {
     const statsBySlot = new Map(modelStats.models.map((item) => [item.slot, item]));
@@ -574,12 +605,22 @@ async function runCodingGenerateRequestWithModelChain(input: {
       stats?.cooldownUntil ? new Date(stats.cooldownUntil).getTime() : null;
 
     if (cooldownUntilTime && cooldownUntilTime > Date.now()) {
+      modelAttempts.push({
+        slot: candidate.slot,
+        label: candidate.label,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        result: "cooldown_skipped",
+        status: 503,
+        message: `熔断中，冷却截止到 ${stats?.cooldownUntil ?? ""}`,
+      });
       lastFailure = {
         ok: false,
         status: 503,
         error: `${candidate.label} 正在熔断冷却中，已自动跳过。`,
         remainingCredits: input.remainingCredits,
-      } satisfies GenerateRunResult;
+        modelAttempts: [...modelAttempts],
+      } satisfies GenerateRunFailure;
 
       await recordCodingModelChainEvent({
         slot: candidate.slot,
@@ -617,12 +658,21 @@ async function runCodingGenerateRequestWithModelChain(input: {
     const candidateApiKey = await getAiSecret(candidate.apiKeyEnv);
 
     if (!candidateApiKey) {
+      modelAttempts.push({
+        slot: candidate.slot,
+        label: candidate.label,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        result: "skipped_missing_key",
+        message: `缺少 ${candidate.apiKeyEnv} 密钥`,
+      });
       lastFailure = {
         ok: false,
         status: 500,
         error: `${candidate.label} 缺少 ${candidate.apiKeyEnv} 密钥，已自动尝试下一条模型线路。`,
         remainingCredits: input.remainingCredits,
-      } satisfies GenerateRunResult;
+        modelAttempts: [...modelAttempts],
+      } satisfies GenerateRunFailure;
 
       traceGenerate(
         "warn",
@@ -665,6 +715,13 @@ async function runCodingGenerateRequestWithModelChain(input: {
     });
 
     if (attemptResult.ok) {
+      modelAttempts.push({
+        slot: candidate.slot,
+        label: candidate.label,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        result: "success",
+      });
       traceGenerate("log", "model_chain_attempt_succeeded", candidateTraceContext, {
         slot: candidate.slot,
         candidateLabel: candidate.label,
@@ -681,9 +738,21 @@ async function runCodingGenerateRequestWithModelChain(input: {
         latencyMs: Date.now() - startedAt,
       });
 
-      return attemptResult;
+      return {
+        ...attemptResult,
+        modelAttempts: [...modelAttempts],
+      } satisfies GenerateRunSuccess;
     }
 
+    modelAttempts.push({
+      slot: candidate.slot,
+      label: candidate.label,
+      model: candidate.model,
+      endpointUrl: candidate.endpointUrl,
+      result: attemptResult.status === 504 ? "timeout" : "failure",
+      status: attemptResult.status,
+      message: attemptResult.error,
+    });
     lastFailure = attemptResult;
     traceGenerate("warn", "model_chain_attempt_failed", candidateTraceContext, {
       slot: candidate.slot,
@@ -712,6 +781,15 @@ async function runCodingGenerateRequestWithModelChain(input: {
     });
 
     if (!shouldContinueCodingModelChain(attemptResult, policy)) {
+      modelAttempts.push({
+        slot: candidate.slot,
+        label: candidate.label,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        result: "stopped",
+        status: attemptResult.status,
+        message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+      });
       await recordCodingModelChainEvent({
         slot: candidate.slot,
         label: candidate.label,
@@ -732,6 +810,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
       status: 502,
       error: "A、B、C 三条模型线路都没有成功返回结果。",
       remainingCredits: input.remainingCredits,
+      modelAttempts: [...modelAttempts],
     }
   );
 }
@@ -1614,7 +1693,7 @@ async function runGenerateRequest(input: {
   traceContext: GenerateTraceContext;
   requestTimeoutMsOverride?: number;
   allowCodingDegradedFallback?: boolean;
-}) {
+}): Promise<GenerateRunResult> {
   const useResponsesApi = shouldUseResponsesApi(
     input.aiConfig.endpointUrl,
     input.aiConfig.model,
@@ -1876,6 +1955,7 @@ export async function POST(request: Request) {
           remainingCredits: existingTask.remainingCredits,
           degraded: existingTask.degraded ?? false,
           degradedReason: existingTask.degradedReason,
+          modelAttempts: existingTask.modelAttempts ?? [],
           requestId,
           taskId: existingTask.id,
         });
@@ -2090,6 +2170,7 @@ export async function POST(request: Request) {
         remainingCredits: runResult.remainingCredits,
         degraded: runResult.degraded,
         degradedReason: runResult.degradedReason,
+        modelAttempts: runResult.modelAttempts ?? [],
         requestId,
       });
       response.headers.set("x-ai-request-id", requestId);

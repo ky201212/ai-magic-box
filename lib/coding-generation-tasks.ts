@@ -21,6 +21,21 @@ export type CodingGenerationTaskRecord = {
   error?: string;
   degraded?: boolean;
   degradedReason?: string;
+  modelAttempts?: Array<{
+    slot: "A" | "B" | "C";
+    label: string;
+    model: string;
+    endpointUrl: string;
+    result:
+      | "success"
+      | "failure"
+      | "timeout"
+      | "skipped_missing_key"
+      | "stopped"
+      | "cooldown_skipped";
+    status?: number;
+    message?: string;
+  }>;
   remainingCredits?: number;
   httpStatus?: number;
 };
@@ -48,6 +63,23 @@ function mapTaskRowToRecord(row: {
   error?: string | null;
   degraded?: boolean | null;
   degraded_reason?: string | null;
+  model_attempts?:
+    | Array<{
+        slot: "A" | "B" | "C";
+        label: string;
+        model: string;
+        endpointUrl: string;
+        result:
+          | "success"
+          | "failure"
+          | "timeout"
+          | "skipped_missing_key"
+          | "stopped"
+          | "cooldown_skipped";
+        status?: number;
+        message?: string;
+      }>
+    | null;
   remaining_credits?: number | null;
   http_status?: number | null;
 }) {
@@ -63,6 +95,7 @@ function mapTaskRowToRecord(row: {
     error: row.error ?? undefined,
     degraded: row.degraded ?? undefined,
     degradedReason: row.degraded_reason ?? undefined,
+    modelAttempts: row.model_attempts ?? undefined,
     remainingCredits: row.remaining_credits ?? undefined,
     httpStatus: row.http_status ?? undefined,
   } satisfies CodingGenerationTaskRecord;
@@ -81,6 +114,7 @@ function mapTaskRecordToRow(task: CodingGenerationTaskRecord) {
     error: task.error ?? null,
     degraded: task.degraded ?? false,
     degraded_reason: task.degradedReason ?? null,
+    model_attempts: task.modelAttempts ?? null,
     remaining_credits: task.remainingCredits ?? null,
     http_status: task.httpStatus ?? null,
   };
