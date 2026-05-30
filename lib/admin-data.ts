@@ -109,6 +109,7 @@ export type AiModelChainStatsRecord = {
     skipCount: number;
     consecutiveFailures: number;
     cooldownUntil: string | null;
+    streamSupport: "supported" | "unsupported" | "unknown";
     lastStatus: string | null;
     lastError: string | null;
     lastUsedAt: string | null;
@@ -126,6 +127,7 @@ export type AiModelChainStatsRecord = {
       | "timeout"
       | "skipped_missing_key"
       | "stopped";
+    streamSupport?: "supported" | "unsupported";
     status?: number;
     latencyMs?: number;
     message?: string;
@@ -598,6 +600,7 @@ function createDefaultAiModelChainStats(): AiModelChainStatsRecord {
       skipCount: 0,
       consecutiveFailures: 0,
       cooldownUntil: null,
+      streamSupport: "unknown",
       lastStatus: null,
       lastError: null,
       lastUsedAt: null,
@@ -643,6 +646,7 @@ export async function recordAiModelChainEvent(input: {
   model: string;
   endpointUrl: string;
   event: "success" | "failure" | "timeout" | "skipped_missing_key" | "stopped";
+  streamSupport?: "supported" | "unsupported";
   status?: number;
   latencyMs?: number;
   message?: string;
@@ -685,6 +689,7 @@ export async function recordAiModelChainEvent(input: {
             : input.cooldownUntil === undefined
               ? item.cooldownUntil
               : input.cooldownUntil,
+        streamSupport: input.streamSupport ?? item.streamSupport ?? "unknown",
         lastStatus:
           typeof input.status === "number" ? String(input.status) : input.event,
         lastError: input.message?.trim() || null,
@@ -704,6 +709,7 @@ export async function recordAiModelChainEvent(input: {
           provider: input.provider?.trim() || "",
           model: input.model.trim(),
           event: input.event,
+          streamSupport: input.streamSupport,
           status: input.status,
           latencyMs:
             typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)

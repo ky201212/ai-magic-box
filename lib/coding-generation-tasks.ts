@@ -17,6 +17,7 @@ export type CodingGenerationTaskRecord = {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  partialCode?: string;
   code?: string;
   error?: string;
   degraded?: boolean;
@@ -59,6 +60,7 @@ function mapTaskRowToRecord(row: {
   updated_at: string;
   started_at?: string | null;
   completed_at?: string | null;
+  partial_code?: string | null;
   code?: string | null;
   error?: string | null;
   degraded?: boolean | null;
@@ -91,6 +93,7 @@ function mapTaskRowToRecord(row: {
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    partialCode: row.partial_code ?? undefined,
     code: row.code ?? undefined,
     error: row.error ?? undefined,
     degraded: row.degraded ?? undefined,
@@ -110,6 +113,7 @@ function mapTaskRecordToRow(task: CodingGenerationTaskRecord) {
     updated_at: task.updatedAt,
     started_at: task.startedAt ?? null,
     completed_at: task.completedAt ?? null,
+    partial_code: task.partialCode ?? null,
     code: task.code ?? null,
     error: task.error ?? null,
     degraded: task.degraded ?? false,

@@ -31,6 +31,7 @@ function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
   return {
     taskId: task.id,
     status: "succeeded" as const,
+    partialCode: task.partialCode ?? "",
     code: task.code ?? buildCodingFallbackHtml(task.promptPreview),
     remainingCredits: task.remainingCredits,
     degraded: task.degraded ?? false,
@@ -43,6 +44,7 @@ function createCodingTaskFailurePayload(task: CodingGenerationTaskRecord) {
   return {
     taskId: task.id,
     status: "succeeded" as const,
+    partialCode: task.partialCode ?? "",
     code: buildCodingFallbackHtml(task.promptPreview),
     remainingCredits: task.remainingCredits,
     degraded: true,
@@ -79,6 +81,7 @@ export async function GET(request: Request) {
       taskId,
       status: task.status,
       message: "作品还在生成中，请继续等待。",
+      partialCode: task.partialCode ?? "",
     },
     { status: 202 },
   );
@@ -121,6 +124,11 @@ type GenerateTraceContext = {
   promptPreview?: string;
 };
 
+type PartialCodePersistence = {
+  taskId: string;
+  latestPersistedAt: number;
+};
+
 type PreparedCodingPrompt = {
   prompt: string;
   shortened: boolean;
@@ -132,6 +140,8 @@ type GenerateRunResult =
   | {
       ok: true;
       code: string;
+      partialCode?: string;
+      streamSupport?: "supported" | "unsupported";
       remainingCredits?: number;
       degraded?: boolean;
       degradedReason?: string;
@@ -141,6 +151,8 @@ type GenerateRunResult =
       ok: false;
       status: number;
       error: string;
+      partialCode?: string;
+      streamSupport?: "supported" | "unsupported";
       remainingCredits?: number;
       modelAttempts?: ModelAttemptRecord[];
     };
@@ -190,6 +202,61 @@ function buildPromptPreview(input: string) {
   return normalized.length > 120
     ? `${normalized.slice(0, 120)}...`
     : normalized;
+}
+
+function extractContentDeltaFromStreamChunk(rawLine: string) {
+  const trimmed = rawLine.trim();
+
+  if (!trimmed.startsWith("data:")) {
+    return "";
+  }
+
+  const payload = trimmed.slice(5).trim();
+
+  if (!payload || payload === "[DONE]") {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(payload) as {
+      choices?: Array<{
+        delta?: {
+          content?:
+            | string
+            | Array<{
+                type?: string;
+                text?: string;
+              }>;
+        };
+      }>;
+      output?: Array<{
+        content?: Array<{
+          text?: string;
+        }>;
+      }>;
+    };
+
+    const deltaContent = parsed.choices?.[0]?.delta?.content;
+
+    if (typeof deltaContent === "string") {
+      return deltaContent;
+    }
+
+    if (Array.isArray(deltaContent)) {
+      return deltaContent
+        .map((item) => (typeof item?.text === "string" ? item.text : ""))
+        .join("");
+    }
+
+    return (
+      parsed.output
+        ?.flatMap((item) => item.content ?? [])
+        .map((item) => (typeof item?.text === "string" ? item.text : ""))
+        .join("") ?? ""
+    );
+  } catch {
+    return "";
+  }
 }
 
 function resolveCodingModelCandidates(
@@ -329,8 +396,14 @@ function scoreCodingModelHealth(input: {
   failureCount: number;
   timeoutCount: number;
   consecutiveFailures: number;
+  streamSupport?: "supported" | "unsupported" | "unknown";
 }) {
   return (
+    (input.streamSupport === "supported"
+      ? 6
+      : input.streamSupport === "unsupported"
+        ? -2
+        : 0) +
     input.successCount * 3 -
     input.failureCount * 2 -
     input.timeoutCount * 3 -
@@ -510,6 +583,7 @@ async function startDeferredCodingGenerationTask(input: {
       await updateCodingGenerationTask(input.taskId, {
         status: "succeeded",
         completedAt: new Date().toISOString(),
+        partialCode: result.partialCode ?? result.code,
         code: result.code,
         remainingCredits: result.remainingCredits,
         degraded: result.degraded,
@@ -529,6 +603,7 @@ async function startDeferredCodingGenerationTask(input: {
     await updateCodingGenerationTask(input.taskId, {
       status: "succeeded",
       completedAt: new Date().toISOString(),
+      partialCode: result.partialCode ?? "",
       code: buildCodingFallbackHtml(input.requestPrompt),
       error: result.error,
       remainingCredits: result.remainingCredits,
@@ -554,6 +629,10 @@ async function startDeferredCodingGenerationTask(input: {
     await updateCodingGenerationTask(input.taskId, {
       status: "succeeded",
       completedAt: new Date().toISOString(),
+      partialCode:
+        "partialCode" in (error as Record<string, unknown>)
+          ? ((error as { partialCode?: string }).partialCode ?? "")
+          : "",
       code: buildCodingFallbackHtml(input.requestPrompt),
       error: errorMessage,
       remainingCredits: refundedCredits,
@@ -583,6 +662,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
   remainingCredits?: number;
   traceContext: GenerateTraceContext;
   requestTimeoutMsOverride?: number;
+  onPartialCode?: (partialCode: string) => Promise<void> | void;
 }) {
   const policy = resolveCodingModelChainPolicy(input.aiConfig);
   const modelStats = await getCodingModelChainStats().catch(() => null);
@@ -729,6 +809,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
       requestTimeoutMsOverride:
         candidate.timeoutMs ?? input.requestTimeoutMsOverride,
       allowCodingDegradedFallback: false,
+      onPartialCode: input.onPartialCode,
     });
 
     if (attemptResult.ok) {
@@ -752,6 +833,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
         model: candidate.model,
         endpointUrl: candidate.endpointUrl,
         event: "success",
+        streamSupport: attemptResult.streamSupport,
         latencyMs: Date.now() - startedAt,
       });
 
@@ -787,6 +869,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
       model: candidate.model,
       endpointUrl: candidate.endpointUrl,
       event: attemptResult.status === 504 ? "timeout" : "failure",
+      streamSupport: attemptResult.streamSupport,
       status: attemptResult.status,
       latencyMs: Date.now() - startedAt,
       message: attemptResult.error,
@@ -814,6 +897,7 @@ async function runCodingGenerateRequestWithModelChain(input: {
         model: candidate.model,
         endpointUrl: candidate.endpointUrl,
         event: "stopped",
+        streamSupport: attemptResult.streamSupport,
         status: attemptResult.status,
         message: "当前错误类型不在自动切换规则里，已停止继续切换。",
       });
@@ -1367,6 +1451,7 @@ function requestUpstreamJson(input: {
   apiKey: string;
   body: string;
   timeoutMs: number | null;
+  onDelta?: (delta: string) => void;
 }) {
   const targetUrl = new URL(input.endpoint);
   const transport = targetUrl.protocol === "http:" ? http : https;
@@ -1391,16 +1476,43 @@ function requestUpstreamJson(input: {
           "Content-Length": Buffer.byteLength(input.body),
           Authorization: `Bearer ${input.apiKey}`,
           Connection: "close",
+          ...(input.onDelta ? { Accept: "text/event-stream" } : {}),
         },
       },
       (response) => {
         const chunks: Buffer[] = [];
+        let streamBuffer = "";
 
         response.on("data", (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          chunks.push(bufferChunk);
+
+          if (!input.onDelta) {
+            return;
+          }
+
+          streamBuffer += bufferChunk.toString("utf8");
+          const lines = streamBuffer.split(/\r?\n/);
+          streamBuffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const delta = extractContentDeltaFromStreamChunk(line);
+
+            if (delta) {
+              input.onDelta(delta);
+            }
+          }
         });
 
         response.on("end", () => {
+          if (input.onDelta && streamBuffer.trim()) {
+            const delta = extractContentDeltaFromStreamChunk(streamBuffer);
+
+            if (delta) {
+              input.onDelta(delta);
+            }
+          }
+
           resolve({
             status: response.statusCode ?? 500,
             text: Buffer.concat(chunks).toString("utf8"),
@@ -1663,6 +1775,7 @@ async function requestUpstreamJsonWithRetry(input: {
   body: string;
   timeoutMs: number;
   retries: number;
+  onDelta?: (delta: string) => void;
 }) {
   let lastError: unknown = null;
 
@@ -1673,6 +1786,7 @@ async function requestUpstreamJsonWithRetry(input: {
         apiKey: input.apiKey,
         body: input.body,
         timeoutMs: input.timeoutMs,
+        onDelta: input.onDelta,
       });
 
       if (
@@ -1710,6 +1824,7 @@ async function runGenerateRequest(input: {
   traceContext: GenerateTraceContext;
   requestTimeoutMsOverride?: number;
   allowCodingDegradedFallback?: boolean;
+  onPartialCode?: (partialCode: string) => Promise<void> | void;
 }): Promise<GenerateRunResult> {
   const useResponsesApi = shouldUseResponsesApi(
     input.aiConfig.endpointUrl,
@@ -1737,6 +1852,9 @@ async function runGenerateRequest(input: {
                 },
               }
             : {}),
+          ...(input.resolvedMode === "coding" && input.onPartialCode
+            ? { stream: true }
+            : {}),
           max_output_tokens: effectiveMaxCompletionTokens,
           input: [
             {
@@ -1751,6 +1869,9 @@ async function runGenerateRequest(input: {
         }
       : {
           model: input.aiConfig.model,
+          ...(input.resolvedMode === "coding" && input.onPartialCode
+            ? { stream: true }
+            : {}),
           max_tokens: effectiveMaxCompletionTokens,
           messages: [
             {
@@ -1765,6 +1886,10 @@ async function runGenerateRequest(input: {
         },
   );
   let upstreamResponse: Awaited<ReturnType<typeof requestUpstreamJsonWithRetry>>;
+  let accumulatedPartialCode = "";
+  let streamChunkCount = 0;
+  let streamStartedAt = 0;
+  let streamFirstDeltaAt = 0;
 
   try {
     upstreamResponse = await requestUpstreamJsonWithRetry({
@@ -1773,6 +1898,28 @@ async function runGenerateRequest(input: {
       body: upstreamPayload,
       timeoutMs: requestTimeoutMs,
       retries: input.resolvedMode === "coding" ? 2 : 1,
+      onDelta:
+        input.resolvedMode === "coding" && input.onPartialCode
+          ? (delta) => {
+              if (streamStartedAt === 0) {
+                streamStartedAt = Date.now();
+              }
+
+              streamChunkCount += 1;
+              accumulatedPartialCode += delta;
+
+              if (streamFirstDeltaAt === 0) {
+                streamFirstDeltaAt = Date.now();
+                traceGenerate("log", "upstream_stream_first_delta", input.traceContext, {
+                  chunkCount: streamChunkCount,
+                  accumulatedChars: accumulatedPartialCode.length,
+                  firstDeltaLatencyMs: streamFirstDeltaAt - streamStartedAt,
+                });
+              }
+
+              void input.onPartialCode?.(accumulatedPartialCode);
+            }
+          : undefined,
     });
   } catch (error) {
     const isTimeoutError = isAiUpstreamTimeoutError(error);
@@ -1789,13 +1936,30 @@ async function runGenerateRequest(input: {
       error: isTimeoutError
         ? "服务器等待 AI 接口返回超时了。"
         : "连接 AI 生成接口时发生异常，请稍后再试。",
+      ...(input.resolvedMode === "coding" && input.onPartialCode
+        ? {
+            streamSupport: accumulatedPartialCode
+              ? ("supported" as const)
+              : ("unsupported" as const),
+          }
+        : {}),
       remainingCredits: input.remainingCredits,
+      ...(accumulatedPartialCode
+        ? { partialCode: accumulatedPartialCode }
+        : {}),
     } satisfies GenerateRunResult;
   }
 
   traceGenerate("log", "upstream_response", input.traceContext, {
     upstreamStatus: upstreamResponse.status,
     responseBytes: upstreamResponse.text.length,
+    streamEnabled: input.resolvedMode === "coding" && Boolean(input.onPartialCode),
+    streamChunkCount,
+    streamedChars: accumulatedPartialCode.length,
+    firstDeltaLatencyMs:
+      streamStartedAt !== 0 && streamFirstDeltaAt !== 0
+        ? streamFirstDeltaAt - streamStartedAt
+        : null,
   });
 
   const upstreamText = upstreamResponse.text;
@@ -1829,6 +1993,14 @@ async function runGenerateRequest(input: {
       return {
         ok: true,
         code: buildCodingFallbackHtml(input.requestPrompt),
+        partialCode: accumulatedPartialCode,
+        ...(input.resolvedMode === "coding" && input.onPartialCode
+          ? {
+              streamSupport: accumulatedPartialCode
+                ? ("supported" as const)
+                : ("unsupported" as const),
+            }
+          : {}),
         remainingCredits: input.remainingCredits,
         degraded: true,
         degradedReason: upstreamErrorMessage,
@@ -1839,7 +2011,17 @@ async function runGenerateRequest(input: {
       ok: false,
       status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status),
       error: upstreamErrorMessage,
+      ...(input.resolvedMode === "coding" && input.onPartialCode
+        ? {
+            streamSupport: accumulatedPartialCode
+              ? ("supported" as const)
+              : ("unsupported" as const),
+          }
+        : {}),
       remainingCredits: input.remainingCredits,
+      ...(accumulatedPartialCode
+        ? { partialCode: accumulatedPartialCode }
+        : {}),
     } satisfies GenerateRunResult;
   }
 
@@ -1864,6 +2046,14 @@ async function runGenerateRequest(input: {
       return {
         ok: true,
         code: buildCodingFallbackHtml(input.requestPrompt),
+        partialCode: accumulatedPartialCode,
+        ...(input.resolvedMode === "coding" && input.onPartialCode
+          ? {
+              streamSupport: accumulatedPartialCode
+                ? ("supported" as const)
+                : ("unsupported" as const),
+            }
+          : {}),
         remainingCredits: input.remainingCredits,
         degraded: true,
         degradedReason: nonJsonMessage,
@@ -1874,7 +2064,17 @@ async function runGenerateRequest(input: {
       ok: false,
       status: 502,
       error: nonJsonMessage,
+      ...(input.resolvedMode === "coding" && input.onPartialCode
+        ? {
+            streamSupport: accumulatedPartialCode
+              ? ("supported" as const)
+              : ("unsupported" as const),
+          }
+        : {}),
       remainingCredits: input.remainingCredits,
+      ...(accumulatedPartialCode
+        ? { partialCode: accumulatedPartialCode }
+        : {}),
     } satisfies GenerateRunResult;
   }
 
@@ -1894,6 +2094,14 @@ async function runGenerateRequest(input: {
       return {
         ok: true,
         code: buildCodingFallbackHtml(input.requestPrompt),
+        partialCode: accumulatedPartialCode,
+        ...(input.resolvedMode === "coding" && input.onPartialCode
+          ? {
+              streamSupport: accumulatedPartialCode
+                ? ("supported" as const)
+                : ("unsupported" as const),
+            }
+          : {}),
         remainingCredits: input.remainingCredits,
         degraded: true,
         degradedReason: "模型没有返回可用内容。",
@@ -1904,7 +2112,17 @@ async function runGenerateRequest(input: {
       ok: false,
       status: 502,
       error: "模型没有返回可用的内容。",
+      ...(input.resolvedMode === "coding" && input.onPartialCode
+        ? {
+            streamSupport: accumulatedPartialCode
+              ? ("supported" as const)
+              : ("unsupported" as const),
+          }
+        : {}),
       remainingCredits: input.remainingCredits,
+      ...(accumulatedPartialCode
+        ? { partialCode: accumulatedPartialCode }
+        : {}),
     } satisfies GenerateRunResult;
   }
 
@@ -1915,6 +2133,14 @@ async function runGenerateRequest(input: {
   return {
     ok: true,
     code: generatedContent,
+    partialCode: accumulatedPartialCode || generatedContent,
+    ...(input.resolvedMode === "coding" && input.onPartialCode
+      ? {
+          streamSupport: accumulatedPartialCode
+            ? ("supported" as const)
+            : ("unsupported" as const),
+        }
+      : {}),
     remainingCredits: input.remainingCredits,
   } satisfies GenerateRunResult;
 }
@@ -2126,6 +2352,11 @@ export async function POST(request: Request) {
 
       await writeCodingGenerationTask(queuedTask);
 
+      const partialCodePersistence: PartialCodePersistence = {
+        taskId,
+        latestPersistedAt: 0,
+      };
+
       void startDeferredCodingGenerationTask({
         taskId,
         requestPrompt,
@@ -2138,6 +2369,23 @@ export async function POST(request: Request) {
             remainingCredits,
             traceContext,
             requestTimeoutMsOverride: resolveDeferredAiRequestTimeoutMs(resolvedMode),
+            onPartialCode: async (partialCode) => {
+              const now = Date.now();
+
+              if (
+                partialCodePersistence.latestPersistedAt !== 0 &&
+                now - partialCodePersistence.latestPersistedAt < 700 &&
+                partialCode.length < 1200
+              ) {
+                return;
+              }
+
+              partialCodePersistence.latestPersistedAt = now;
+              await updateCodingGenerationTask(partialCodePersistence.taskId, {
+                status: "processing",
+                partialCode,
+              });
+            },
           }),
         refundCredits: () =>
           refundCredits(

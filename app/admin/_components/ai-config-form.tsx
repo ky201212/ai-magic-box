@@ -272,12 +272,27 @@ function createEmptyModelChainStatsRecord(): AiModelChainStatsRecord {
       skipCount: 0,
       consecutiveFailures: 0,
       cooldownUntil: null,
+      streamSupport: "unknown",
       lastStatus: null,
       lastError: null,
       lastUsedAt: null,
     })),
     recentEvents: [],
   };
+}
+
+function getStreamSupportLabel(
+  streamSupport: "supported" | "unsupported" | "unknown" | undefined,
+) {
+  if (streamSupport === "supported") {
+    return "支持";
+  }
+
+  if (streamSupport === "unsupported") {
+    return "不支持";
+  }
+
+  return "待判断";
 }
 
 function normalizeConfigs(configs: AiModeConfigRecord[]): EditableAiConfig[] {
@@ -1812,11 +1827,8 @@ export function AiConfigForm({
             : null;
           const expandedCodingSectionKeys =
             expandedCodingSections[config.mode_key] ?? ["chain", "stats"];
-          const currentModelChainStats = modelChainStats[config.mode_key] ?? {
-            updatedAt: null,
-            models: [],
-            recentEvents: [],
-          };
+          const currentModelChainStats =
+            modelChainStats[config.mode_key] ?? createEmptyModelChainStatsRecord();
           const codingObservability = buildCodingModelObservability(
             currentModelChainStats,
           );
@@ -2628,6 +2640,10 @@ export function AiConfigForm({
                                       <p>超时：{item.timeoutCount}</p>
                                       <p>跳过：{item.skipCount}</p>
                                       <p>连续失败：{item.consecutiveFailures}</p>
+                                      <p>
+                                        流式能力：
+                                        {getStreamSupportLabel(item.streamSupport)}
+                                      </p>
                                       <p>最近状态：{item.lastStatus ?? "暂无"}</p>
                                       <p>熔断到：{item.cooldownUntil ?? "未熔断"}</p>
                                     </div>
@@ -2734,6 +2750,9 @@ export function AiConfigForm({
                                         : ""}
                                       {typeof event.latencyMs === "number"
                                         ? ` · ${event.latencyMs}ms`
+                                        : ""}
+                                      {event.streamSupport
+                                        ? ` · 流式${getStreamSupportLabel(event.streamSupport)}`
                                         : ""}
                                     </p>
                                     {event.message ? (

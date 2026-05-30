@@ -1451,6 +1451,12 @@ const writingLoadingMessages = [
   "文章马上就写好了",
 ];
 
+const codingCompileMessages = [
+  "正在为你整理代码结构",
+  "正在检查页面样式和脚本",
+  "正在把代码编译成可运行预览",
+];
+
 const defaultPreviewHtml = `
   <!DOCTYPE html>
   <html lang="zh-CN">
@@ -1659,6 +1665,134 @@ const ensurePreviewHtmlDocument = (rawHtml: string) => {
 </html>`;
 };
 
+const buildStreamingCodePreviewHtml = (rawCode: string) => {
+  const escapedCode = rawCode
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; min-height: 100vh; margin: 0; }
+      body {
+        font-family: Consolas, "SFMono-Regular", Monaco, "Courier New", monospace;
+        background: linear-gradient(180deg, #f8fbff 0%, #fff7fb 48%, #edf6ff 100%);
+        color: #334155;
+      }
+      .shell {
+        min-height: 100vh;
+        padding: 20px;
+      }
+      .card {
+        min-height: calc(100vh - 40px);
+        border-radius: 24px;
+        border: 1px solid #dbe7ff;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 18px 40px rgba(148,163,184,0.10);
+        overflow: hidden;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid #e5edff;
+        background: rgba(248,251,255,0.95);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        background: #eef4ff;
+        color: #4b6fcc;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #7d8cff;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .hint {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      pre {
+        margin: 0;
+        min-height: calc(100vh - 90px);
+        padding: 20px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: 13px/1.75 Consolas, "SFMono-Regular", Monaco, "Courier New", monospace;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.35; transform: scale(0.92); }
+        50% { opacity: 1; transform: scale(1); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card">
+        <header class="header">
+          <div class="badge"><span class="dot"></span> AI 正在生成代码</div>
+          <div class="hint">代码写完后会自动切换到可运行预览</div>
+        </header>
+        <pre>${escapedCode}</pre>
+      </section>
+    </main>
+  </body>
+</html>`;
+};
+
+async function playStreamingCodePreview(input: {
+  rawCode: string;
+  setStreamingCodePreview: (value: string) => void;
+  setCodingTaskMessage: (value: string) => void;
+}) {
+  const source = input.rawCode.trim();
+
+  if (!source) {
+    input.setStreamingCodePreview("");
+    return;
+  }
+
+  const maxAnimatedLength = 18000;
+  const animationSource =
+    source.length > maxAnimatedLength
+      ? `${source.slice(0, maxAnimatedLength)}\n\n<!-- 代码较长，剩余部分正在继续整理 -->`
+      : source;
+
+  const step =
+    animationSource.length > 12000
+      ? 360
+      : animationSource.length > 6000
+        ? 220
+        : 120;
+
+  let cursor = 0;
+
+  while (cursor < animationSource.length) {
+    cursor = Math.min(animationSource.length, cursor + step);
+    input.setStreamingCodePreview(
+      buildStreamingCodePreviewHtml(animationSource.slice(0, cursor)),
+    );
+    input.setCodingTaskMessage("代码已经生成完成，正在为你整理并编译预览。");
+    await new Promise((resolve) => window.setTimeout(resolve, 36));
+  }
+}
+
 function WorkshopContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -1691,6 +1825,7 @@ function WorkshopContent() {
   const [isVideoTaskLookupOpen, setIsVideoTaskLookupOpen] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilitiesMap>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isCodingCompiling, setIsCodingCompiling] = useState(false);
   const [isWritingLoading, setIsWritingLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSpeechGenerating, setIsSpeechGenerating] = useState(false);
@@ -1704,6 +1839,7 @@ function WorkshopContent() {
   const [optimizeError, setOptimizeError] = useState("");
   const [writingError, setWritingError] = useState("");
   const [generatedCode, setGeneratedCode] = useState(defaultPreviewHtml);
+  const [streamingCodePreview, setStreamingCodePreview] = useState("");
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
   const [generatedSpeechUrl, setGeneratedSpeechUrl] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
@@ -1714,6 +1850,7 @@ function WorkshopContent() {
   const [codingTaskMessage, setCodingTaskMessage] = useState("");
   const [videoTaskMessage, setVideoTaskMessage] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const [codingCompileMessageIndex, setCodingCompileMessageIndex] = useState(0);
   const [writingLoadingMessageIndex, setWritingLoadingMessageIndex] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
   const [shareMessage, setShareMessage] = useState("");
@@ -1782,6 +1919,7 @@ function WorkshopContent() {
   const hasGeneratedCode =
     Boolean(generatedCode.trim()) && generatedCode !== defaultPreviewHtml;
   const codingPreviewDoc = hasGeneratedCode ? generatedCode : defaultPreviewHtml;
+  const hasStreamingCodePreview = Boolean(streamingCodePreview.trim());
   const codeGuideRows = useMemo(
     () => buildCodeGuideRows(codingPreviewDoc),
     [codingPreviewDoc],
@@ -2312,6 +2450,22 @@ function WorkshopContent() {
       window.clearInterval(intervalId);
     };
   }, [isWritingLoading]);
+
+  useEffect(() => {
+    if (!isCodingCompiling) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCodingCompileMessageIndex(
+        (currentIndex) => (currentIndex + 1) % codingCompileMessages.length,
+      );
+    }, 1600);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isCodingCompiling]);
 
   useEffect(() => {
     return () => {
@@ -2970,6 +3124,9 @@ function WorkshopContent() {
     setShareMessage("");
     setShareFeedback(null);
     setGeneratedCode("");
+    setStreamingCodePreview("");
+    setIsCodingCompiling(false);
+    setCodingCompileMessageIndex(0);
     setCodingTaskMessage("正在准备创作任务，请稍等。");
     setLoadingMessageIndex(0);
     setIsLoading(true);
@@ -2990,6 +3147,7 @@ function WorkshopContent() {
 
         const parsed = await parseApiResponse<{
           code?: string;
+          partialCode?: string;
           error?: string;
           message?: string;
           remainingCredits?: number;
@@ -3053,6 +3211,12 @@ function WorkshopContent() {
           data = result.data;
           rawText = result.rawText;
 
+          if (typeof data?.partialCode === "string" && data.partialCode.trim()) {
+            setStreamingCodePreview(
+              buildStreamingCodePreviewHtml(data.partialCode),
+            );
+          }
+
           if (data?.message) {
             setCodingTaskMessage(data.message);
           } else {
@@ -3063,6 +3227,7 @@ function WorkshopContent() {
 
       const normalizedData = data as {
         code?: string;
+        partialCode?: string;
         error?: string;
         message?: string;
         remainingCredits?: number;
@@ -3115,12 +3280,14 @@ function WorkshopContent() {
       }
 
       if (response.status === 202 && normalizedData?.taskId) {
-        setGeneratedCode(
-          createMessagePreviewHtml(
-            "仍在生成中",
-            "这次内容比较复杂，系统正在后台稳定生成。请继续等待，作品完成后会自动返回结果。",
-          ),
-        );
+        if (!normalizedData.partialCode?.trim()) {
+          setGeneratedCode(
+            createMessagePreviewHtml(
+              "仍在生成中",
+              "这次内容比较复杂，系统正在后台稳定生成。请继续等待，作品完成后会自动返回结果。",
+            ),
+          );
+        }
         return;
       }
 
@@ -3139,7 +3306,19 @@ function WorkshopContent() {
         return;
       }
 
-      setGeneratedCode(ensurePreviewHtmlDocument(normalizedData.code));
+      const finalPreviewDoc = ensurePreviewHtmlDocument(normalizedData.code);
+      await playStreamingCodePreview({
+        rawCode: normalizedData.code,
+        setStreamingCodePreview,
+        setCodingTaskMessage,
+      });
+      setIsLoading(false);
+      setIsCodingCompiling(true);
+      setCodingTaskMessage("正在为你编译并装载可运行预览。");
+      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      setGeneratedCode(finalPreviewDoc);
+      setStreamingCodePreview("");
+      setIsCodingCompiling(false);
       setCodingTaskMessage("");
 
       if (normalizedData.requestId) {
@@ -3159,6 +3338,8 @@ function WorkshopContent() {
       }
     } catch {
       setCodingTaskMessage("");
+      setStreamingCodePreview("");
+      setIsCodingCompiling(false);
       setGeneratedCode(
         createMessagePreviewHtml(
           "连接中断",
@@ -3167,6 +3348,7 @@ function WorkshopContent() {
       );
     } finally {
       setIsLoading(false);
+      setIsCodingCompiling(false);
     }
   };
 
@@ -5060,7 +5242,7 @@ function WorkshopContent() {
                           ref={previewShellRef}
                           className="workshop-preview-shell relative flex min-h-[74vh] flex-1 overflow-hidden rounded-[20px] border border-[#dce8ff] bg-white 2xl:min-h-[78vh]"
                         >
-                          {isLoading ? (
+                          {isLoading && !hasStreamingCodePreview ? (
                             <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-b from-[#fff3d2] via-[#fff7fb] to-[#edf6ff] px-6 text-center">
                               <div className="relative flex h-28 w-28 items-center justify-center">
                                 <div className="absolute inset-0 rounded-full border-4 border-dashed border-[#ffd5e2] animate-spin" />
@@ -5077,6 +5259,37 @@ function WorkshopContent() {
                               <p className="mt-5 min-h-[64px] max-w-[320px] text-base font-black leading-7 text-slate-600 sm:text-lg sm:leading-8">
                                 {loadingMessages[loadingMessageIndex]}
                               </p>
+                            </div>
+                          ) : isLoading && hasStreamingCodePreview ? (
+                            <iframe
+                              title="代码实时草稿预览"
+                              className="block h-full min-h-0 w-full bg-white"
+                              srcDoc={streamingCodePreview}
+                              scrolling="yes"
+                            />
+                          ) : isCodingCompiling ? (
+                            <div className="relative h-full w-full bg-white">
+                              {hasStreamingCodePreview ? (
+                                <iframe
+                                  title="代码生成草稿预览"
+                                  className="block h-full min-h-0 w-full bg-white"
+                                  srcDoc={streamingCodePreview}
+                                  scrolling="yes"
+                                />
+                              ) : null}
+                              <div className="absolute inset-0 flex items-center justify-center bg-[rgba(248,251,255,0.72)] backdrop-blur-[3px]">
+                                <div className="mx-6 w-full max-w-md rounded-[28px] border border-white/80 bg-white/92 px-6 py-7 text-center shadow-[0_22px_50px_rgba(148,163,184,0.16)]">
+                                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[linear-gradient(135deg,#eaf4ff_0%,#f8f0ff_100%)] shadow-[0_14px_28px_rgba(125,140,180,0.14)]">
+                                    <div className="h-8 w-8 rounded-[14px] border-2 border-dashed border-[#7d8cff] animate-spin" />
+                                  </div>
+                                  <p className="mt-5 text-lg font-black text-slate-700">
+                                    正在为你编译可运行预览
+                                  </p>
+                                  <p className="mt-2 text-sm font-bold text-slate-500">
+                                    {codingCompileMessages[codingCompileMessageIndex]}
+                                  </p>
+                                </div>
+                              </div>
                             </div>
                           ) : (
                             <iframe

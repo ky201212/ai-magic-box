@@ -6,6 +6,7 @@ create table if not exists public.coding_generation_tasks (
   updated_at timestamptz not null default timezone('utc'::text, now()),
   started_at timestamptz null,
   completed_at timestamptz null,
+  partial_code text null,
   code text null,
   error text null,
   degraded boolean not null default false,
@@ -14,6 +15,9 @@ create table if not exists public.coding_generation_tasks (
   remaining_credits integer null,
   http_status integer null
 );
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists partial_code text null;
 
 alter table if exists public.coding_generation_tasks
   add column if not exists model_attempts jsonb null;

@@ -93,6 +93,7 @@ export type AiModelChainStatsRecord = {
     skipCount: number;
     consecutiveFailures: number;
     cooldownUntil: string | null;
+    streamSupport: "supported" | "unsupported" | "unknown";
     lastStatus: string | null;
     lastError: string | null;
     lastUsedAt: string | null;
@@ -110,6 +111,7 @@ export type AiModelChainStatsRecord = {
       | "timeout"
       | "skipped_missing_key"
       | "stopped";
+    streamSupport?: "supported" | "unsupported";
     status?: number;
     latencyMs?: number;
     message?: string;
