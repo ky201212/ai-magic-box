@@ -75,7 +75,11 @@ export type AiModelOptionsState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
-export type CodingModelChainStatsRecord = {
+export type AiModelPickerState = AiModelOptionsState & {
+  lastFetchedAt?: string;
+};
+
+export type AiModelChainStatsRecord = {
   updatedAt: string | null;
   models: Array<{
     slot: "A" | "B" | "C";
@@ -111,6 +115,8 @@ export type CodingModelChainStatsRecord = {
     message?: string;
   }>;
 };
+
+export type CodingModelChainStatsRecord = AiModelChainStatsRecord;
 
 export type CommunityReviewSettingRecord = {
   aiApprovalMode: "auto_publish" | "manual_review";

@@ -5,6 +5,12 @@ import { getCurrentUser } from "@/lib/auth";
 import { getAiSecret } from "@/lib/ai-secrets";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { addCredits, consumeCredits } from "@/lib/credits";
+import { recordAiModelChainEvent } from "@/lib/admin-data";
+import {
+  resolveAiModelChainCandidates,
+  resolveAiModelChainPolicy,
+  shouldContinueAiModelChain,
+} from "@/lib/ai-model-chain";
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -235,7 +241,6 @@ export async function POST(request: Request) {
     }
 
     const aiConfig = await resolveAiModeConfig("promptOptimize");
-    const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
     const creditPolicy = resolveModeCreditPolicy(aiConfig.extraPayload);
     shouldCharge = creditPolicy.creditEnabled && creditPolicy.creditCost > 0;
     creditCost = creditPolicy.creditCost;
@@ -244,13 +249,6 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "提示词优化功能正在维护中，请稍后再试。" },
         { status: 503 },
-      );
-    }
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
-        { status: 500 },
       );
     }
 
@@ -283,109 +281,285 @@ export async function POST(request: Request) {
       chargedUserId = currentUser.user_id;
     }
 
-    const useResponsesApi = shouldUseResponsesApi(
-      aiConfig.endpointUrl,
-      aiConfig.model,
-    );
-    const requestEndpoint = resolveGenerationEndpoint(
-      aiConfig.endpointUrl,
-      useResponsesApi,
-    );
     const requestTimeoutMs = resolveAiRequestTimeoutMs();
-    const upstreamPayload = JSON.stringify(
-      useResponsesApi
-        ? {
-            model: aiConfig.model,
-            ...(typeof aiConfig.extraPayload.reasoningEffort === "string"
-              ? {
-                  reasoning: {
-                    effort: aiConfig.extraPayload.reasoningEffort,
-                  },
-                }
-              : {}),
-            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
-              ? {
-                  max_output_tokens: aiConfig.extraPayload.maxCompletionTokens,
-                }
-              : {}),
-            input: [
-              {
-                role: "system",
-                content: aiConfig.systemPrompt,
-              },
-              {
-                role: "user",
-                content: text,
-              },
-            ],
-          }
-        : {
-            model: aiConfig.model,
-            ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
-              ? {
-                  max_tokens: aiConfig.extraPayload.maxCompletionTokens,
-                }
-              : {}),
-            messages: [
-              {
-                role: "system",
-                content: aiConfig.systemPrompt,
-              },
-              {
-                role: "user",
-                content: text,
-              },
-            ],
-          },
-    );
-
-    const upstreamResponse = await requestUpstreamJson({
-      endpoint: requestEndpoint,
-      apiKey,
-      body: upstreamPayload,
-      timeoutMs: requestTimeoutMs,
+    const candidates = resolveAiModelChainCandidates({
+      endpointUrl: aiConfig.endpointUrl,
+      apiKeyEnv: aiConfig.apiKeyEnv,
+      model: aiConfig.model,
+      extraPayload: aiConfig.extraPayload,
+      baseLabel: "A 主模型",
+      provider: aiConfig.extraPayload.providerLabel as string | undefined,
     });
-    const upstreamText = upstreamResponse.text;
-    const upstreamData = parsePossibleJson(upstreamText);
+    const chainPolicy = resolveAiModelChainPolicy(aiConfig.extraPayload);
+    let optimizedPrompt = "";
+    let lastError = "提示词优化失败，请稍后再试。";
+    let lastStatus = 502;
 
-    if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
-      await refundCredits(`提示词优化失败，退回 ${creditCost} 个魔法币。`);
+    for (const candidate of candidates) {
+      const startedAt = Date.now();
+      const apiKey = await getAiSecret(candidate.apiKeyEnv);
 
-      return NextResponse.json(
-        {
-          error:
+      if (!apiKey) {
+        lastError = `服务端缺少 ${candidate.apiKeyEnv} 环境变量。`;
+        lastStatus = 500;
+
+        await recordAiModelChainEvent({
+          modeKey: "promptOptimize",
+          slot: candidate.slot,
+          label: candidate.label,
+          provider: candidate.provider,
+          model: candidate.model,
+          endpointUrl: candidate.endpointUrl,
+          event: "skipped_missing_key",
+          message: `缺少 ${candidate.apiKeyEnv} 密钥`,
+        });
+
+        if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "stopped",
+            status: lastStatus,
+            message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+          });
+          break;
+        }
+
+        continue;
+      }
+
+      const useResponsesApi = shouldUseResponsesApi(
+        candidate.endpointUrl,
+        candidate.model,
+      );
+      const requestEndpoint = resolveGenerationEndpoint(
+        candidate.endpointUrl,
+        useResponsesApi,
+      );
+      const upstreamPayload = JSON.stringify(
+        useResponsesApi
+          ? {
+              model: candidate.model,
+              ...(typeof aiConfig.extraPayload.reasoningEffort === "string"
+                ? {
+                    reasoning: {
+                      effort: aiConfig.extraPayload.reasoningEffort,
+                    },
+                  }
+                : {}),
+              ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+                ? {
+                    max_output_tokens: aiConfig.extraPayload.maxCompletionTokens,
+                  }
+                : {}),
+              input: [
+                {
+                  role: "system",
+                  content: aiConfig.systemPrompt,
+                },
+                {
+                  role: "user",
+                  content: text,
+                },
+              ],
+            }
+          : {
+              model: candidate.model,
+              ...(typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+                ? {
+                    max_tokens: aiConfig.extraPayload.maxCompletionTokens,
+                  }
+                : {}),
+              messages: [
+                {
+                  role: "system",
+                  content: aiConfig.systemPrompt,
+                },
+                {
+                  role: "user",
+                  content: text,
+                },
+              ],
+            },
+      );
+
+      try {
+        const upstreamResponse = await requestUpstreamJson({
+          endpoint: requestEndpoint,
+          apiKey,
+          body: upstreamPayload,
+          timeoutMs: candidate.timeoutMs ?? requestTimeoutMs,
+        });
+        const upstreamText = upstreamResponse.text;
+        const upstreamData = parsePossibleJson(upstreamText);
+
+        if (upstreamResponse.status < 200 || upstreamResponse.status >= 300) {
+          lastError =
             upstreamData?.error?.message?.trim() ||
             upstreamText.trim() ||
-            "提示词优化失败，请稍后再试。",
-          remainingCredits,
-        },
-        { status: mapUpstreamStatusToGatewayStatus(upstreamResponse.status) },
-      );
+            "提示词优化失败，请稍后再试。";
+          lastStatus = mapUpstreamStatusToGatewayStatus(upstreamResponse.status);
+
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: lastStatus === 504 ? "timeout" : "failure",
+            status: lastStatus,
+            latencyMs: Date.now() - startedAt,
+            message: lastError,
+          });
+
+          if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+            await recordAiModelChainEvent({
+              modeKey: "promptOptimize",
+              slot: candidate.slot,
+              label: candidate.label,
+              provider: candidate.provider,
+              model: candidate.model,
+              endpointUrl: candidate.endpointUrl,
+              event: "stopped",
+              status: lastStatus,
+              message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+            });
+            break;
+          }
+
+          continue;
+        }
+
+        if (!upstreamData) {
+          lastError = "提示词优化接口返回了无效数据。";
+          lastStatus = 502;
+
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "failure",
+            status: lastStatus,
+            latencyMs: Date.now() - startedAt,
+            message: lastError,
+          });
+
+          if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+            await recordAiModelChainEvent({
+              modeKey: "promptOptimize",
+              slot: candidate.slot,
+              label: candidate.label,
+              provider: candidate.provider,
+              model: candidate.model,
+              endpointUrl: candidate.endpointUrl,
+              event: "stopped",
+              status: lastStatus,
+              message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+            });
+            break;
+          }
+
+          continue;
+        }
+
+        optimizedPrompt = extractGeneratedContent(upstreamData).trim();
+
+        if (optimizedPrompt) {
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "success",
+            latencyMs: Date.now() - startedAt,
+          });
+          break;
+        }
+
+        lastError = "优化模型没有返回可用内容。";
+        lastStatus = 502;
+
+        await recordAiModelChainEvent({
+          modeKey: "promptOptimize",
+          slot: candidate.slot,
+          label: candidate.label,
+          provider: candidate.provider,
+          model: candidate.model,
+          endpointUrl: candidate.endpointUrl,
+          event: "failure",
+          status: lastStatus,
+          latencyMs: Date.now() - startedAt,
+          message: lastError,
+        });
+
+        if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "stopped",
+            status: lastStatus,
+            message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+          });
+          break;
+        }
+      } catch (error) {
+        lastError =
+          error instanceof Error ? error.message : "提示词优化服务暂时不可用，请稍后再试。";
+        lastStatus = 504;
+
+        await recordAiModelChainEvent({
+          modeKey: "promptOptimize",
+          slot: candidate.slot,
+          label: candidate.label,
+          provider: candidate.provider,
+          model: candidate.model,
+          endpointUrl: candidate.endpointUrl,
+          event: "timeout",
+          status: lastStatus,
+          latencyMs: Date.now() - startedAt,
+          message: lastError,
+        });
+
+        if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+          await recordAiModelChainEvent({
+            modeKey: "promptOptimize",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "stopped",
+            status: lastStatus,
+            message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+          });
+          break;
+        }
+      }
     }
-
-    if (!upstreamData) {
-      await refundCredits(`提示词优化失败，退回 ${creditCost} 个魔法币。`);
-
-      return NextResponse.json(
-        {
-          error: "提示词优化接口返回了无效数据。",
-          remainingCredits,
-        },
-        { status: 502 },
-      );
-    }
-
-    const optimizedPrompt = extractGeneratedContent(upstreamData).trim();
 
     if (!optimizedPrompt) {
       await refundCredits(`提示词优化失败，退回 ${creditCost} 个魔法币。`);
 
       return NextResponse.json(
         {
-          error: "优化模型没有返回可用内容。",
+          error: lastError,
           remainingCredits,
         },
-        { status: 502 },
+        { status: lastStatus },
       );
     }
 

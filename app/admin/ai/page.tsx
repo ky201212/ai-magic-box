@@ -1,8 +1,8 @@
 import {
   type AiSecretAuditRecord,
-  type CodingModelChainStatsRecord,
+  type AiModelChainStatsRecord,
   type AiSecretSecuritySummary,
-  getCodingModelChainStats,
+  getAiModelChainStats,
   listAiModeConfigs,
   listAiModelPresets,
   type AiSecretStatusRecord,
@@ -23,12 +23,19 @@ export default async function AdminAiPage() {
     listAiModeConfigs().catch(() => []),
     listAiModelPresets().catch(() => []),
   ]);
-  const codingModelChainStats: CodingModelChainStatsRecord =
-    await getCodingModelChainStats().catch(() => ({
-      updatedAt: null,
-      models: [],
-      recentEvents: [],
-    }));
+  const modelChainStatsEntries = await Promise.all(
+    configs.map(async (config) => [
+      config.mode_key,
+      await getAiModelChainStats(config.mode_key).catch(() => ({
+        updatedAt: null,
+        models: [],
+        recentEvents: [],
+      })),
+    ]),
+  );
+  const initialModelChainStats = Object.fromEntries(
+    modelChainStatsEntries,
+  ) as Record<string, AiModelChainStatsRecord>;
   const storedSecrets = await getStoredAiSecrets().catch(() => []);
   const envNames = Array.from(
     new Set([
@@ -55,7 +62,7 @@ export default async function AdminAiPage() {
       <AiConfigForm
         initialConfigs={configs}
         initialPresets={presets}
-        initialCodingModelChainStats={codingModelChainStats}
+        initialModelChainStats={initialModelChainStats}
         initialSecretStatuses={secretStatuses}
         initialSecretSecurity={secretSecurity}
         initialSecretAuditLogs={secretAuditLogs}

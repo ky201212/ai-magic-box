@@ -42,6 +42,7 @@ const modeFallbacks: Record<
     extraPayload: {
       reasoningEffort: "low",
       maxCompletionTokens: 800,
+      modelChain: [],
     },
   },
   painting: {
@@ -55,6 +56,7 @@ const modeFallbacks: Record<
       creditEnabled: true,
       creditCost: 5,
       supportsImageEditing: false,
+      modelChain: [],
     },
   },
   video: {
@@ -71,6 +73,7 @@ const modeFallbacks: Record<
       creditCost: 0,
       pollIntervalMs: 5000,
       pollTimeoutMs: 180000,
+      modelChain: [],
     },
   },
   speech: {
@@ -86,6 +89,7 @@ const modeFallbacks: Record<
       gain: 0,
       creditEnabled: false,
       creditCost: 0,
+      modelChain: [],
     },
   },
   transcribe: {
@@ -94,7 +98,9 @@ const modeFallbacks: Record<
     model: "FunAudioLLM/SenseVoiceSmall",
     systemPrompt: "请将儿童语音内容准确识别为简体中文文本。",
     isEnabled: true,
-    extraPayload: {},
+    extraPayload: {
+      modelChain: [],
+    },
   },
   promptOptimize: {
     endpointUrl:
@@ -108,6 +114,7 @@ const modeFallbacks: Record<
     extraPayload: {
       reasoningEffort: "low",
       maxCompletionTokens: 600,
+      modelChain: [],
     },
   },
 };

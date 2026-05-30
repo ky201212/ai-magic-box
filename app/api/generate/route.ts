@@ -5,11 +5,17 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getCodingModelChainStats,
+  recordAiModelChainEvent,
   recordCodingModelChainEvent,
 } from "@/lib/admin-data";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { addCredits, consumeCredits } from "@/lib/credits";
 import { getAiSecret } from "@/lib/ai-secrets";
+import {
+  resolveAiModelChainCandidates,
+  resolveAiModelChainPolicy,
+  shouldContinueAiModelChain,
+} from "@/lib/ai-model-chain";
 import {
   readCodingGenerationTask,
   updateCodingGenerationTask,
@@ -707,6 +713,159 @@ async function runCodingGenerateRequestWithModelChain(input: {
 
     if (!shouldContinueCodingModelChain(attemptResult, policy)) {
       await recordCodingModelChainEvent({
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "stopped",
+        status: attemptResult.status,
+        message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+      });
+      break;
+    }
+  }
+
+  return (
+    lastFailure ?? {
+      ok: false,
+      status: 502,
+      error: "A、B、C 三条模型线路都没有成功返回结果。",
+      remainingCredits: input.remainingCredits,
+    }
+  );
+}
+
+async function runTextGenerateRequestWithModelChain(input: {
+  resolvedMode: "writing";
+  requestPrompt: string;
+  upstreamPrompt: string;
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>;
+  remainingCredits?: number;
+  traceContext: GenerateTraceContext;
+}) {
+  const candidates = resolveAiModelChainCandidates({
+    endpointUrl: input.aiConfig.endpointUrl,
+    apiKeyEnv: input.aiConfig.apiKeyEnv,
+    model: input.aiConfig.model,
+    extraPayload: input.aiConfig.extraPayload,
+    baseLabel: "A 主模型",
+    provider: input.aiConfig.extraPayload.providerLabel as string | undefined,
+  });
+  const policy = resolveAiModelChainPolicy(input.aiConfig.extraPayload);
+  let lastFailure: GenerateRunResult | null = null;
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const startedAt = Date.now();
+    const candidateTraceContext: GenerateTraceContext = {
+      ...input.traceContext,
+      endpoint: candidate.endpointUrl,
+      model: candidate.model,
+      timeoutMs: candidate.timeoutMs ?? input.traceContext.timeoutMs,
+    };
+
+    traceGenerate("log", "text_model_chain_attempt_started", candidateTraceContext, {
+      slot: candidate.slot,
+      candidateLabel: candidate.label,
+      candidateProvider: candidate.provider ?? null,
+      attempt: index + 1,
+      totalAttempts: candidates.length,
+      apiKeyEnv: candidate.apiKeyEnv,
+    });
+
+    const candidateApiKey = await getAiSecret(candidate.apiKeyEnv);
+
+    if (!candidateApiKey) {
+      lastFailure = {
+        ok: false,
+        status: 500,
+        error: `${candidate.label} 缺少 ${candidate.apiKeyEnv} 密钥，已自动尝试下一条模型线路。`,
+        remainingCredits: input.remainingCredits,
+      } satisfies GenerateRunResult;
+
+      await recordAiModelChainEvent({
+        modeKey: input.resolvedMode,
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "skipped_missing_key",
+        message: `缺少 ${candidate.apiKeyEnv} 密钥`,
+      });
+
+      if (!shouldContinueAiModelChain({ status: lastFailure.status, error: lastFailure.error }, policy)) {
+        break;
+      }
+
+      continue;
+    }
+
+    const attemptResult = await runGenerateRequest({
+      resolvedMode: input.resolvedMode,
+      requestPrompt: input.requestPrompt,
+      upstreamPrompt: input.upstreamPrompt,
+      aiConfig: {
+        ...input.aiConfig,
+        endpointUrl: candidate.endpointUrl,
+        apiKeyEnv: candidate.apiKeyEnv,
+        model: candidate.model,
+      },
+      apiKey: candidateApiKey,
+      remainingCredits: input.remainingCredits,
+      traceContext: candidateTraceContext,
+      requestTimeoutMsOverride: candidate.timeoutMs,
+    });
+
+    if (attemptResult.ok) {
+      traceGenerate("log", "text_model_chain_attempt_succeeded", candidateTraceContext, {
+        slot: candidate.slot,
+        candidateLabel: candidate.label,
+        attempt: index + 1,
+        totalAttempts: candidates.length,
+      });
+
+      await recordAiModelChainEvent({
+        modeKey: input.resolvedMode,
+        slot: candidate.slot,
+        label: candidate.label,
+        provider: candidate.provider,
+        model: candidate.model,
+        endpointUrl: candidate.endpointUrl,
+        event: "success",
+        latencyMs: Date.now() - startedAt,
+      });
+
+      return attemptResult;
+    }
+
+    lastFailure = attemptResult;
+    traceGenerate("warn", "text_model_chain_attempt_failed", candidateTraceContext, {
+      slot: candidate.slot,
+      candidateLabel: candidate.label,
+      attempt: index + 1,
+      totalAttempts: candidates.length,
+      status: attemptResult.status,
+      errorMessage: attemptResult.error,
+    });
+
+    await recordAiModelChainEvent({
+      modeKey: input.resolvedMode,
+      slot: candidate.slot,
+      label: candidate.label,
+      provider: candidate.provider,
+      model: candidate.model,
+      endpointUrl: candidate.endpointUrl,
+      event: attemptResult.status === 504 ? "timeout" : "failure",
+      status: attemptResult.status,
+      latencyMs: Date.now() - startedAt,
+      message: attemptResult.error,
+    });
+
+    if (!shouldContinueAiModelChain({ status: attemptResult.status, error: attemptResult.error }, policy)) {
+      await recordAiModelChainEvent({
+        modeKey: input.resolvedMode,
         slot: candidate.slot,
         label: candidate.label,
         provider: candidate.provider,
@@ -1781,16 +1940,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey =
-      resolvedMode === "coding" ? "" : await getAiSecret(aiConfig.apiKeyEnv);
-
-    if (resolvedMode !== "coding" && !apiKey) {
-      return NextResponse.json(
-        { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
-        { status: 500 },
-      );
-    }
-
     if (shouldCharge) {
       const currentUser = await getCurrentUser();
 
@@ -1915,15 +2064,25 @@ export async function POST(request: Request) {
       return response;
     }
 
-    const runResult = await runGenerateRequest({
-      resolvedMode,
-      requestPrompt,
-      upstreamPrompt,
-      aiConfig,
-      apiKey,
-      remainingCredits,
-      traceContext,
-    });
+    const runResult =
+      resolvedMode === "writing"
+        ? await runTextGenerateRequestWithModelChain({
+            resolvedMode,
+            requestPrompt,
+            upstreamPrompt,
+            aiConfig,
+            remainingCredits,
+            traceContext,
+          })
+        : await runGenerateRequest({
+            resolvedMode,
+            requestPrompt,
+            upstreamPrompt,
+            aiConfig,
+            apiKey: "",
+            remainingCredits,
+            traceContext,
+          });
 
     if (runResult.ok) {
       const response = NextResponse.json({

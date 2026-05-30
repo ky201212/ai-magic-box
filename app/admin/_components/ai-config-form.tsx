@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import type {
   AiModeConfigRecord,
+  AiModelPickerState,
   AiModelPresetRecord,
   AiModelOptionsState,
-  CodingModelChainStatsRecord,
+  AiModelChainStatsRecord,
   AiSecretAuditRecord,
   AiSecretSecuritySummary,
   AiSecretStatusRecord,
@@ -16,7 +17,7 @@ type SaveStatus = "idle" | "saving" | "success" | "error";
 type AiConfigFormProps = {
   initialConfigs: AiModeConfigRecord[];
   initialPresets: AiModelPresetRecord[];
-  initialCodingModelChainStats: CodingModelChainStatsRecord;
+  initialModelChainStats: Record<string, AiModelChainStatsRecord>;
   initialSecretStatuses: AiSecretStatusRecord[];
   initialSecretSecurity: AiSecretSecuritySummary;
   initialSecretAuditLogs: AiSecretAuditRecord[];
@@ -338,6 +339,10 @@ function getModeLabel(modeKey: string) {
   return MODE_OPTIONS.find((item) => item.key === modeKey)?.label ?? modeKey;
 }
 
+function supportsModelChain(modeKey: string) {
+  return MODE_OPTIONS.some((item) => item.key === modeKey);
+}
+
 function getPresetsForMode(presets: AiModelPresetRecord[], modeKey: string) {
   return presets.filter((preset) => preset.mode_key === modeKey);
 }
@@ -542,7 +547,7 @@ function formatDurationMs(value?: number) {
   return `${(value / 1000).toFixed(1)}s`;
 }
 
-function buildCodingModelObservability(stats: CodingModelChainStatsRecord) {
+function buildCodingModelObservability(stats: AiModelChainStatsRecord) {
   const since = Date.now() - 24 * 60 * 60 * 1000;
 
   return stats.models.map((item) => {
@@ -586,7 +591,7 @@ function buildCodingModelObservability(stats: CodingModelChainStatsRecord) {
 export function AiConfigForm({
   initialConfigs,
   initialPresets,
-  initialCodingModelChainStats,
+  initialModelChainStats,
   initialSecretStatuses,
   initialSecretSecurity,
   initialSecretAuditLogs,
@@ -603,8 +608,8 @@ export function AiConfigForm({
     useState<AiSecretSecuritySummary>(initialSecretSecurity);
   const [secretAuditLogs, setSecretAuditLogs] =
     useState<AiSecretAuditRecord[]>(initialSecretAuditLogs);
-  const [codingModelChainStats] = useState<CodingModelChainStatsRecord>(
-    initialCodingModelChainStats,
+  const [modelChainStats] = useState<Record<string, AiModelChainStatsRecord>>(
+    initialModelChainStats,
   );
   const [secretInputs, setSecretInputs] = useState<Record<string, string>>({});
   const [newSecretEnvName, setNewSecretEnvName] = useState("");
@@ -629,6 +634,14 @@ export function AiConfigForm({
   const [configModelOptions, setConfigModelOptions] = useState<
     Record<string, AiModelOptionsState>
   >({});
+  const [codingFallbackModelOptions, setCodingFallbackModelOptions] = useState<
+    Record<string, AiModelPickerState>
+  >({});
+  const [expandedCodingSections, setExpandedCodingSections] = useState<
+    Record<string, string[]>
+  >({
+    coding: ["chain", "stats"],
+  });
   const [codingModelHealthCheckState, setCodingModelHealthCheckState] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle");
@@ -758,6 +771,93 @@ export function AiConfigForm({
     );
   };
 
+  const toggleCodingSection = (modeKey: string, sectionKey: string) => {
+    setExpandedCodingSections((current) => {
+      const activeSections = current[modeKey] ?? [];
+      return {
+        ...current,
+        [modeKey]: activeSections.includes(sectionKey)
+          ? activeSections.filter((item) => item !== sectionKey)
+          : [...activeSections, sectionKey],
+      };
+    });
+  };
+
+  const handleFetchModelsForCodingFallback = async (input: {
+    modeKey: string;
+    slot: CodingFallbackModelSlot;
+    endpointUrl: string;
+    apiKeyEnv: string;
+  }) => {
+    const cacheKey = `${input.modeKey}:${input.slot}`;
+
+    setCodingFallbackModelOptions((current) => ({
+      ...current,
+      [cacheKey]: {
+        models: current[cacheKey]?.models ?? [],
+        endpoint: current[cacheKey]?.endpoint ?? "",
+        warning: "",
+        status: "loading",
+      },
+    }));
+
+    try {
+      const response = await fetch("/api/admin/ai-models", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          endpointUrl: input.endpointUrl,
+          apiKeyEnv: input.apiKeyEnv,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        models?: string[];
+        modelsEndpoint?: string;
+        warning?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setCodingFallbackModelOptions((current) => ({
+          ...current,
+          [cacheKey]: {
+            models: current[cacheKey]?.models ?? [],
+            endpoint: data.modelsEndpoint ?? current[cacheKey]?.endpoint ?? "",
+            warning: data.error ?? "模型列表读取失败。",
+            status: "error",
+            lastFetchedAt: new Date().toISOString(),
+          },
+        }));
+        return;
+      }
+
+      setCodingFallbackModelOptions((current) => ({
+        ...current,
+        [cacheKey]: {
+          models: data.models ?? [],
+          endpoint: data.modelsEndpoint ?? "",
+          warning: data.warning ?? "",
+          status: "success",
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+    } catch {
+      setCodingFallbackModelOptions((current) => ({
+        ...current,
+        [cacheKey]: {
+          models: current[cacheKey]?.models ?? [],
+          endpoint: current[cacheKey]?.endpoint ?? "",
+          warning: "模型列表读取失败，请稍后再试。",
+          status: "error",
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+    }
+  };
+
   const handleCodingModelHealthCheck = async (config: EditableAiConfig) => {
     const fallbackModels = getCodingFallbackModelChain(config.extra_payload);
     const candidates = [
@@ -789,6 +889,7 @@ export function AiConfigForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          modeKey: config.mode_key,
           action: "healthCheck",
           candidates,
         }),
@@ -819,7 +920,10 @@ export function AiConfigForm({
     }
   };
 
-  const handleClearCodingModelCooldown = async (slot: "A" | "B" | "C") => {
+  const handleClearCodingModelCooldown = async (
+    modeKey: string,
+    slot: "A" | "B" | "C",
+  ) => {
     try {
       await fetch("/api/admin/ai-coding-model-chain", {
         method: "POST",
@@ -827,6 +931,7 @@ export function AiConfigForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          modeKey,
           action: "clearCooldown",
           slot,
         }),
@@ -1588,18 +1693,23 @@ export function AiConfigForm({
             warning: "",
             status: "idle" as const,
           };
-          const codingFallbackModels =
-            config.mode_key === "coding"
-              ? getCodingFallbackModelChain(config.extra_payload)
-              : [];
-          const codingModelChainPolicy =
-            config.mode_key === "coding"
-              ? getCodingModelChainPolicy(config.extra_payload)
-              : null;
-          const codingObservability =
-            config.mode_key === "coding"
-              ? buildCodingModelObservability(codingModelChainStats)
-              : [];
+          const chainEnabled = supportsModelChain(config.mode_key);
+          const codingFallbackModels = chainEnabled
+            ? getCodingFallbackModelChain(config.extra_payload)
+            : [];
+          const codingModelChainPolicy = chainEnabled
+            ? getCodingModelChainPolicy(config.extra_payload)
+            : null;
+          const expandedCodingSectionKeys =
+            expandedCodingSections[config.mode_key] ?? ["chain", "stats"];
+          const currentModelChainStats = modelChainStats[config.mode_key] ?? {
+            updatedAt: null,
+            models: [],
+            recentEvents: [],
+          };
+          const codingObservability = buildCodingModelObservability(
+            currentModelChainStats,
+          );
 
           return (
             <article
@@ -1922,7 +2032,7 @@ export function AiConfigForm({
                     </div>
                   </div>
 
-                  {config.mode_key === "coding" ? (
+                  {chainEnabled ? (
                     <div className="mt-5 rounded-[26px] border border-[#dbeafe] bg-[linear-gradient(135deg,#f8fbff_0%,#f4f7ff_100%)] p-5">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="max-w-3xl">
@@ -1933,11 +2043,22 @@ export function AiConfigForm({
                             A 主模型失败后，自动切 B，再切 C
                           </h4>
                           <p className="mt-2 text-sm leading-7 text-slate-500">
-                            A 模型就是上面这套主配置。这里再补两套备用线路后，AI 编程会自动按 A、B、C 顺序尝试，尽量把超时和失败挡在后台。
+                            A 模型就是上面这套主配置。这里再补两套备用线路后，{config.mode_name}会自动按 A、B、C 顺序尝试，尽量把超时和失败挡在后台。
                           </p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleCodingSection(config.mode_key, "chain")}
+                          className="rounded-full bg-[#eef4ff] px-4 py-2 text-sm font-black text-[#4b6fcc]"
+                        >
+                          {expandedCodingSectionKeys.includes("chain")
+                            ? "收起接力配置"
+                            : "展开接力配置"}
+                        </button>
                       </div>
 
+                      {expandedCodingSectionKeys.includes("chain") ? (
+                        <>
                       <div className="mt-5 rounded-[22px] border border-dashed border-[#d7e6ff] bg-white px-4 py-4">
                         <p className="text-sm font-black text-slate-700">
                           A 主模型独立超时
@@ -1984,6 +2105,19 @@ export function AiConfigForm({
                             </div>
 
                             <div className="mt-4 grid gap-4">
+                              {(() => {
+                                const fallbackModelOptions =
+                                  codingFallbackModelOptions[
+                                    `${config.mode_key}:${fallbackModel.slot}`
+                                  ] ?? {
+                                    models: [],
+                                    endpoint: "",
+                                    warning: "",
+                                    status: "idle" as const,
+                                  };
+
+                                return (
+                                  <>
                               <label className="block text-sm font-bold text-slate-600">
                                 显示名称
                                 <input
@@ -2061,18 +2195,81 @@ export function AiConfigForm({
 
                               <label className="block text-sm font-bold text-slate-600">
                                 模型名称
-                                <input
-                                  value={fallbackModel.model}
-                                  onChange={(event) =>
-                                    handleCodingFallbackModelChange(
-                                      config.mode_key,
-                                      fallbackModel.slot,
-                                      "model",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="mt-2 h-12 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
-                                />
+                                <div className="mt-2 space-y-3">
+                                  <div className="flex flex-wrap gap-3">
+                                    <select
+                                      value={
+                                        fallbackModelOptions.models.includes(fallbackModel.model)
+                                          ? fallbackModel.model
+                                          : ""
+                                      }
+                                      onChange={(event) => {
+                                        if (event.target.value) {
+                                          handleCodingFallbackModelChange(
+                                            config.mode_key,
+                                            fallbackModel.slot,
+                                            "model",
+                                            event.target.value,
+                                          );
+                                        }
+                                      }}
+                                      className="h-12 min-w-[220px] flex-1 rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+                                    >
+                                      <option value="">先选择已拉取的模型</option>
+                                      {fallbackModelOptions.models.map((modelName) => (
+                                        <option key={modelName} value={modelName}>
+                                          {modelName}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleFetchModelsForCodingFallback({
+                                          modeKey: config.mode_key,
+                                          slot: fallbackModel.slot,
+                                          endpointUrl: fallbackModel.endpointUrl,
+                                          apiKeyEnv: fallbackModel.apiKeyEnv,
+                                        })
+                                      }
+                                      className="rounded-full bg-[#eef4ff] px-4 py-3 text-sm font-black text-[#4b6fcc]"
+                                    >
+                                      {fallbackModelOptions.status === "loading"
+                                        ? "拉取中"
+                                        : "拉取可用模型"}
+                                    </button>
+                                  </div>
+                                  <input
+                                    value={fallbackModel.model}
+                                    onChange={(event) =>
+                                      handleCodingFallbackModelChange(
+                                        config.mode_key,
+                                        fallbackModel.slot,
+                                        "model",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="h-12 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
+                                  />
+                                  <div className="space-y-1 text-xs leading-6 text-slate-500">
+                                    {fallbackModelOptions.endpoint ? (
+                                      <p className="break-all text-slate-400">
+                                        当前拉取地址：{fallbackModelOptions.endpoint}
+                                      </p>
+                                    ) : null}
+                                    {fallbackModelOptions.warning ? (
+                                      <p
+                                        className={
+                                          fallbackModelOptions.status === "error"
+                                            ? "text-[#cf4d72]"
+                                            : "text-[#b86a12]"
+                                        }
+                                      >
+                                        {fallbackModelOptions.warning}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
                               </label>
 
                               <label className="block text-sm font-bold text-slate-600">
@@ -2095,6 +2292,9 @@ export function AiConfigForm({
                                   className="mt-2 h-12 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-slate-800 outline-none"
                                 />
                               </label>
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                         ))}
@@ -2241,159 +2441,195 @@ export function AiConfigForm({
                           </div>
                         ) : null}
                       </div>
-
-                      <div className="mt-5 rounded-[22px] border border-white/80 bg-white px-4 py-4 shadow-[0_12px_28px_rgba(125,140,180,0.08)]">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-black text-slate-700">
-                              最近接力统计
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500">
-                              最近一次统计更新时间：
-                              {codingModelChainStats.updatedAt ?? " 暂无"}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleCodingModelHealthCheck(config)}
-                            className="rounded-full bg-[#eef4ff] px-4 py-2 text-sm font-black text-[#4b6fcc]"
-                          >
-                            {codingModelHealthCheckState === "loading"
-                              ? "体检中"
-                              : "一键体检 A/B/C"}
-                          </button>
+                        </>
+                      ) : (
+                        <div className="mt-5 rounded-[22px] bg-white px-4 py-5 text-sm leading-7 text-slate-500">
+                          接力模型队列与自动切换规则已收起，需要时再展开。
                         </div>
+                      )}
 
-                        <div className="mt-4 grid gap-4 xl:grid-cols-3">
-                          {codingModelChainStats.models.map((item) => (
-                            <div
-                              key={item.slot}
-                              className="rounded-[18px] bg-slate-50 px-4 py-4 text-sm text-slate-600"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-black text-[#4b6fcc]">
-                                  {item.slot}
-                                </span>
-                                <p className="font-black text-slate-800">
-                                  {item.label || `${item.slot} 模型`}
-                                </p>
-                              </div>
-                              <div className="mt-3 space-y-1 leading-7">
-                                <p>成功：{item.successCount}</p>
-                                <p>失败：{item.failureCount}</p>
-                                <p>超时：{item.timeoutCount}</p>
-                                <p>跳过：{item.skipCount}</p>
-                                <p>连续失败：{item.consecutiveFailures}</p>
-                                <p>最近状态：{item.lastStatus ?? "暂无"}</p>
-                                <p>熔断到：{item.cooldownUntil ?? "未熔断"}</p>
-                              </div>
+                      {config.mode_key === "coding" ? (
+                        <div className="mt-5 rounded-[22px] border border-white/80 bg-white px-4 py-4 shadow-[0_12px_28px_rgba(125,140,180,0.08)]">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-slate-700">
+                                最近接力统计
+                              </p>
+                              <p className="mt-1 text-sm text-slate-500">
+                              最近一次统计更新时间：
+                              {currentModelChainStats.updatedAt ?? " 暂无"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-3">
                               <button
                                 type="button"
-                                onClick={() => handleClearCodingModelCooldown(item.slot)}
-                                className="mt-3 rounded-full bg-[#fff7ed] px-3 py-2 text-xs font-black text-[#b86a12]"
+                                onClick={() => toggleCodingSection(config.mode_key, "stats")}
+                                className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700"
                               >
-                                手动解除 {item.slot} 熔断
+                                {expandedCodingSectionKeys.includes("stats")
+                                  ? "收起统计"
+                                  : "展开统计"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCodingModelHealthCheck(config)}
+                                className="rounded-full bg-[#eef4ff] px-4 py-2 text-sm font-black text-[#4b6fcc]"
+                              >
+                                {codingModelHealthCheckState === "loading"
+                                  ? "体检中"
+                                  : "一键体检 A/B/C"}
                               </button>
                             </div>
-                          ))}
-                        </div>
-
-                        <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4">
-                          <p className="text-sm font-black text-slate-700">
-                            24 小时运维视图
-                          </p>
-                          <div className="mt-3 grid gap-4 xl:grid-cols-3">
-                            {codingObservability.map((item) => (
-                              <div
-                                key={`obs-${item.slot}`}
-                                className="rounded-[14px] bg-white px-4 py-4 text-sm text-slate-600"
-                              >
-                                <p className="font-black text-slate-800">
-                                  {item.slot} 最近 24 小时
-                                </p>
-                                <div className="mt-2 space-y-1 leading-7">
-                                  <p>
-                                    成功率：
-                                    {item.successRate === null ? "暂无" : `${item.successRate}%`}
-                                  </p>
-                                  <p>平均响应：{formatDurationMs(item.avgLatencyMs ?? undefined)}</p>
-                                  <p>样本数：{item.sampleCount}</p>
-                                  <p>
-                                    最近错误时间：{item.latestErrorTime ?? "暂无"}
-                                  </p>
-                                </div>
-                                <p className="mt-2 text-slate-500">
-                                  最近错误：
-                                  {item.latestErrorMessage ?? "暂无"}
-                                </p>
-                              </div>
-                            ))}
                           </div>
-                        </div>
 
-                        {codingModelHealthCheckResults.length ? (
+                          {expandedCodingSectionKeys.includes("stats") ? (
+                            <>
+                              <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                                {currentModelChainStats.models.map((item) => (
+                                  <div
+                                    key={item.slot}
+                                    className="rounded-[18px] bg-slate-50 px-4 py-4 text-sm text-slate-600"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-black text-[#4b6fcc]">
+                                        {item.slot}
+                                      </span>
+                                      <p className="font-black text-slate-800">
+                                        {item.label || `${item.slot} 模型`}
+                                      </p>
+                                    </div>
+                                    <div className="mt-3 space-y-1 leading-7">
+                                      <p>成功：{item.successCount}</p>
+                                      <p>失败：{item.failureCount}</p>
+                                      <p>超时：{item.timeoutCount}</p>
+                                      <p>跳过：{item.skipCount}</p>
+                                      <p>连续失败：{item.consecutiveFailures}</p>
+                                      <p>最近状态：{item.lastStatus ?? "暂无"}</p>
+                                      <p>熔断到：{item.cooldownUntil ?? "未熔断"}</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleClearCodingModelCooldown(
+                                          config.mode_key,
+                                          item.slot,
+                                        )
+                                      }
+                                      className="mt-3 rounded-full bg-[#fff7ed] px-3 py-2 text-xs font-black text-[#b86a12]"
+                                    >
+                                      手动解除 {item.slot} 熔断
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4">
+                                <p className="text-sm font-black text-slate-700">
+                                  24 小时运维视图
+                                </p>
+                                <div className="mt-3 grid gap-4 xl:grid-cols-3">
+                                  {codingObservability.map((item) => (
+                                    <div
+                                      key={`obs-${item.slot}`}
+                                      className="rounded-[14px] bg-white px-4 py-4 text-sm text-slate-600"
+                                    >
+                                      <p className="font-black text-slate-800">
+                                        {item.slot} 最近 24 小时
+                                      </p>
+                                      <div className="mt-2 space-y-1 leading-7">
+                                        <p>
+                                          成功率：
+                                          {item.successRate === null ? "暂无" : `${item.successRate}%`}
+                                        </p>
+                                        <p>平均响应：{formatDurationMs(item.avgLatencyMs ?? undefined)}</p>
+                                        <p>样本数：{item.sampleCount}</p>
+                                        <p>
+                                          最近错误时间：{item.latestErrorTime ?? "暂无"}
+                                        </p>
+                                      </div>
+                                      <p className="mt-2 text-slate-500">
+                                        最近错误：
+                                        {item.latestErrorMessage ?? "暂无"}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {codingModelHealthCheckResults.length ? (
+                                <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4">
+                                  <p className="text-sm font-black text-slate-700">
+                                    最近一次模型体检结果
+                                  </p>
+                                  <div className="mt-3 space-y-3">
+                                    {codingModelHealthCheckResults.map((result, index) => (
+                                      <div
+                                        key={`${result.slot}-${index}`}
+                                        className="rounded-[14px] bg-white px-4 py-3 text-sm text-slate-600"
+                                      >
+                                        <p className="font-bold text-slate-800">
+                                          {result.slot} · {result.label} · {result.model || "未填写模型"}
+                                        </p>
+                                        <p className="mt-1">
+                                          {result.ok ? "连通正常" : "连通异常"}
+                                          {typeof result.status === "number"
+                                            ? ` · HTTP ${result.status}`
+                                            : ""}
+                                        </p>
+                                        <p className="mt-1 text-slate-500">{result.message}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                              接力统计、体检结果和切换记录已收起，需要时再展开。
+                            </div>
+                          )}
+
                           <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4">
                             <p className="text-sm font-black text-slate-700">
-                              最近一次模型体检结果
+                              最近切换记录
                             </p>
                             <div className="mt-3 space-y-3">
-                              {codingModelHealthCheckResults.map((result, index) => (
-                                <div
-                                  key={`${result.slot}-${index}`}
-                                  className="rounded-[14px] bg-white px-4 py-3 text-sm text-slate-600"
-                                >
-                                  <p className="font-bold text-slate-800">
-                                    {result.slot} · {result.label} · {result.model || "未填写模型"}
-                                  </p>
-                                  <p className="mt-1">
-                                    {result.ok ? "连通正常" : "连通异常"}
-                                    {typeof result.status === "number"
-                                      ? ` · HTTP ${result.status}`
-                                      : ""}
-                                  </p>
-                                  <p className="mt-1 text-slate-500">{result.message}</p>
+                              {currentModelChainStats.recentEvents.length ? (
+                                currentModelChainStats.recentEvents.slice(0, 8).map((event) => (
+                                  <div
+                                    key={event.id}
+                                    className="rounded-[14px] bg-white px-4 py-3 text-sm text-slate-600"
+                                  >
+                                    <p className="font-bold text-slate-800">
+                                      {event.createdAt} · {event.slot} · {event.label}
+                                    </p>
+                                    <p className="mt-1">
+                                      事件：{event.event}
+                                      {typeof event.status === "number"
+                                        ? ` · HTTP ${event.status}`
+                                        : ""}
+                                      {typeof event.latencyMs === "number"
+                                        ? ` · ${event.latencyMs}ms`
+                                        : ""}
+                                    </p>
+                                    {event.message ? (
+                                      <p className="mt-1 text-slate-500">{event.message}</p>
+                                    ) : null}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="rounded-[14px] bg-white px-4 py-4 text-sm text-slate-400">
+                                  还没有接力统计数据。等线上真实跑几次 {config.mode_name} 后，这里就会开始累计。
                                 </div>
-                              ))}
+                              )}
                             </div>
                           </div>
-                        ) : null}
-
-                        <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4">
-                          <p className="text-sm font-black text-slate-700">
-                            最近切换记录
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {codingModelChainStats.recentEvents.length ? (
-                              codingModelChainStats.recentEvents.slice(0, 8).map((event) => (
-                                <div
-                                  key={event.id}
-                                  className="rounded-[14px] bg-white px-4 py-3 text-sm text-slate-600"
-                                >
-                                  <p className="font-bold text-slate-800">
-                                    {event.createdAt} · {event.slot} · {event.label}
-                                  </p>
-                                  <p className="mt-1">
-                                    事件：{event.event}
-                                    {typeof event.status === "number"
-                                      ? ` · HTTP ${event.status}`
-                                      : ""}
-                                    {typeof event.latencyMs === "number"
-                                      ? ` · ${event.latencyMs}ms`
-                                      : ""}
-                                  </p>
-                                  {event.message ? (
-                                    <p className="mt-1 text-slate-500">{event.message}</p>
-                                  ) : null}
-                                </div>
-                              ))
-                            ) : (
-                              <div className="rounded-[14px] bg-white px-4 py-4 text-sm text-slate-400">
-                                还没有接力统计数据。等线上真实跑几次 AI 编程后，这里就会开始累计。
-                              </div>
-                            )}
-                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="mt-5 rounded-[22px] border border-dashed border-[#d7e6ff] bg-white px-4 py-5 text-sm leading-7 text-slate-500">
+                          这个模块也已经支持 A / B / C 接力配置。这里先保留配置能力，运维统计和模型体检目前仍集中在 AI 编程模块里查看。
+                        </div>
+                      )}
                     </div>
                   ) : null}
 

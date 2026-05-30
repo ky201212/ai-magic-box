@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
-  clearCodingModelCooldown,
-  getCodingModelChainStats,
+  clearAiModelCooldown,
+  getAiModelChainStats,
 } from "@/lib/admin-data";
 import {
   requireAdminContext,
@@ -47,7 +47,7 @@ export async function GET() {
   }
 
   try {
-    const stats = await getCodingModelChainStats();
+    const stats = await getAiModelChainStats("coding");
     return NextResponse.json({ stats });
   } catch (requestError) {
     console.error("【AI 编程模型接力统计读取失败】:", requestError);
@@ -82,10 +82,12 @@ export async function POST(request: Request) {
     const body = (await request.json()) as
       | {
           action?: "clearCooldown";
+          modeKey?: string;
           slot?: "A" | "B" | "C";
         }
       | {
           action?: "healthCheck";
+          modeKey?: string;
           candidates?: Array<{
             slot: "A" | "B" | "C";
             label: string;
@@ -97,6 +99,11 @@ export async function POST(request: Request) {
         };
 
     if (body.action === "clearCooldown") {
+      const modeKey =
+        typeof body.modeKey === "string" && body.modeKey.trim()
+          ? body.modeKey.trim()
+          : "coding";
+
       if (body.slot !== "A" && body.slot !== "B" && body.slot !== "C") {
         return NextResponse.json(
           { error: "缺少要解除熔断的模型档位。" },
@@ -104,7 +111,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const stats = await clearCodingModelCooldown(body.slot);
+      const stats = await clearAiModelCooldown(modeKey, body.slot);
       return NextResponse.json({ success: true, stats });
     }
 

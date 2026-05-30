@@ -2486,6 +2486,8 @@ function WorkshopContent() {
         videoUrl?: string;
         error?: string;
         message?: string;
+        endpointUrl?: string;
+        model?: string;
         status?: string;
       }>(response);
 
@@ -3556,6 +3558,8 @@ function WorkshopContent() {
         prompt?: string;
         requestId?: string;
         speedMode?: "fast" | "quality";
+        endpointUrl?: string;
+        model?: string;
       }) => {
         const response = await fetch("/api/generate-video", {
           method: "POST",
@@ -3569,6 +3573,8 @@ function WorkshopContent() {
           error?: string;
           message?: string;
           requestId?: string;
+          endpointUrl?: string;
+          model?: string;
           status?: string;
           remainingCredits?: number;
         }>(response);
@@ -3606,6 +3612,8 @@ function WorkshopContent() {
           result = await requestVideoResult({
             requestId: pollingRequestId,
             speedMode: videoSpeedMode,
+            endpointUrl: data?.endpointUrl,
+            model: data?.model,
           });
           response = result.response;
           data = result.data;

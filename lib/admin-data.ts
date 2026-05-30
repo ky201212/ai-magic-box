@@ -95,7 +95,7 @@ export type AiSecretSecuritySummary = {
   warningMessage: string | null;
 };
 
-export type CodingModelChainStatsRecord = {
+export type AiModelChainStatsRecord = {
   updatedAt: string | null;
   models: Array<{
     slot: "A" | "B" | "C";
@@ -131,6 +131,8 @@ export type CodingModelChainStatsRecord = {
     message?: string;
   }>;
 };
+
+export type CodingModelChainStatsRecord = AiModelChainStatsRecord;
 
 export type DashboardStats = {
   usersTotal: number;
@@ -416,6 +418,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditCost: 0,
         reasoningEffort: "low",
         maxCompletionTokens: 800,
+        modelChain: [],
       },
     },
     {
@@ -432,6 +435,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditEnabled: true,
         creditCost: 5,
         supportsImageEditing: false,
+        modelChain: [],
       },
     },
     {
@@ -451,6 +455,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditCost: 0,
         pollIntervalMs: 5000,
         pollTimeoutMs: 180000,
+        modelChain: [],
       },
     },
     {
@@ -469,6 +474,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         gain: 0,
         creditEnabled: false,
         creditCost: 0,
+        modelChain: [],
       },
     },
     {
@@ -483,6 +489,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
       extra_payload: {
         creditEnabled: false,
         creditCost: 0,
+        modelChain: [],
       },
     },
     {
@@ -500,6 +507,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditCost: 0,
         reasoningEffort: "low",
         maxCompletionTokens: 600,
+        modelChain: [],
       },
     },
   ];
@@ -571,7 +579,7 @@ export async function listAiModelPresets() {
   return getAiModelPresetsSetting();
 }
 
-function createDefaultCodingModelChainStats(): CodingModelChainStatsRecord {
+function createDefaultAiModelChainStats(): AiModelChainStatsRecord {
   return {
     updatedAt: null,
     models: (["A", "B", "C"] as const).map((slot) => ({
@@ -594,14 +602,37 @@ function createDefaultCodingModelChainStats(): CodingModelChainStatsRecord {
   };
 }
 
-export async function getCodingModelChainStats() {
-  return getSiteSettingValue<CodingModelChainStatsRecord>(
-    "ai.coding-model-chain-stats",
-    createDefaultCodingModelChainStats(),
+function getAiModelChainStatsSettingKey(modeKey: string) {
+  return `ai.${modeKey}-model-chain-stats`;
+}
+
+function getAiModelChainStatsLabel(modeKey: string) {
+  const labelMap: Record<string, string> = {
+    coding: "AI 编程",
+    writing: "AI 写作",
+    painting: "AI 绘画",
+    video: "AI 视频",
+    speech: "AI 语音",
+    transcribe: "语音识别",
+    promptOptimize: "提示词优化",
+  };
+
+  return labelMap[modeKey] ?? modeKey;
+}
+
+export async function getAiModelChainStats(modeKey: string) {
+  return getSiteSettingValue<AiModelChainStatsRecord>(
+    getAiModelChainStatsSettingKey(modeKey),
+    createDefaultAiModelChainStats(),
   );
 }
 
-export async function recordCodingModelChainEvent(input: {
+export async function getCodingModelChainStats() {
+  return getAiModelChainStats("coding");
+}
+
+export async function recordAiModelChainEvent(input: {
+  modeKey: string;
   slot: "A" | "B" | "C";
   label: string;
   provider?: string;
@@ -613,7 +644,7 @@ export async function recordCodingModelChainEvent(input: {
   message?: string;
   cooldownUntil?: string | null;
 }) {
-  const current = await getCodingModelChainStats();
+  const current = await getAiModelChainStats(input.modeKey);
   const eventCreatedAt = new Date().toISOString();
   const nextModels = current.models.map((item) => {
     if (item.slot !== input.slot) {
@@ -656,7 +687,7 @@ export async function recordCodingModelChainEvent(input: {
     };
   });
 
-  const nextStats: CodingModelChainStatsRecord = {
+  const nextStats: AiModelChainStatsRecord = {
     updatedAt: eventCreatedAt,
     models: nextModels,
     recentEvents: [
@@ -681,11 +712,11 @@ export async function recordCodingModelChainEvent(input: {
 
   await upsertSiteSettings([
     {
-      setting_key: "ai.coding-model-chain-stats",
+      setting_key: getAiModelChainStatsSettingKey(input.modeKey),
       setting_group: "ai",
-      label: "AI 编程模型接力统计",
+      label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
       value: nextStats,
-      description: "记录 AI 编程 A/B/C 模型接力的最近结果统计。",
+      description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
       updated_by: "system",
     },
   ]);
@@ -693,9 +724,18 @@ export async function recordCodingModelChainEvent(input: {
   return nextStats;
 }
 
-export async function clearCodingModelCooldown(slot: "A" | "B" | "C") {
-  const current = await getCodingModelChainStats();
-  const nextStats: CodingModelChainStatsRecord = {
+export async function recordCodingModelChainEvent(
+  input: Omit<Parameters<typeof recordAiModelChainEvent>[0], "modeKey">,
+) {
+  return recordAiModelChainEvent({
+    modeKey: "coding",
+    ...input,
+  });
+}
+
+export async function clearAiModelCooldown(modeKey: string, slot: "A" | "B" | "C") {
+  const current = await getAiModelChainStats(modeKey);
+  const nextStats: AiModelChainStatsRecord = {
     ...current,
     updatedAt: new Date().toISOString(),
     models: current.models.map((item) =>
@@ -713,16 +753,20 @@ export async function clearCodingModelCooldown(slot: "A" | "B" | "C") {
 
   await upsertSiteSettings([
     {
-      setting_key: "ai.coding-model-chain-stats",
+      setting_key: getAiModelChainStatsSettingKey(modeKey),
       setting_group: "ai",
-      label: "AI 编程模型接力统计",
+      label: `${getAiModelChainStatsLabel(modeKey)}模型接力统计`,
       value: nextStats,
-      description: "记录 AI 编程 A/B/C 模型接力的最近结果统计。",
+      description: `记录${getAiModelChainStatsLabel(modeKey)} A/B/C 模型接力的最近结果统计。`,
       updated_by: "system",
     },
   ]);
 
   return nextStats;
+}
+
+export async function clearCodingModelCooldown(slot: "A" | "B" | "C") {
+  return clearAiModelCooldown("coding", slot);
 }
 
 export async function upsertAiModeConfigs(

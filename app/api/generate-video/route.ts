@@ -3,6 +3,12 @@ import { addCredits, consumeCredits } from "@/lib/credits";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveAiModeConfig, resolveModeCreditPolicy } from "@/lib/ai-config";
 import { getAiSecret } from "@/lib/ai-secrets";
+import { recordAiModelChainEvent } from "@/lib/admin-data";
+import {
+  resolveAiModelChainCandidates,
+  resolveAiModelChainPolicy,
+  shouldContinueAiModelChain,
+} from "@/lib/ai-model-chain";
 
 type VideoSubmitResponse = {
   requestId?: string;
@@ -234,6 +240,38 @@ function waitFor(ms: number) {
   });
 }
 
+function isAbortTimeoutError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" ||
+      error.message.toLowerCase().includes("timed out"))
+  );
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs?: number,
+) {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs < 10_000) {
+    return fetch(input, init);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error("Upstream request timed out"));
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchVideoTaskStatus(input: {
   apiKey: string;
   endpointUrl: string;
@@ -274,6 +312,8 @@ async function fetchVideoTaskStatus(input: {
     return NextResponse.json({
       videoUrl,
       requestId: input.requestId,
+      endpointUrl: input.endpointUrl,
+      model: input.model,
       status: "succeeded",
     });
   }
@@ -285,6 +325,8 @@ async function fetchVideoTaskStatus(input: {
           statusData?.error?.message?.trim() ||
           "视频生成失败了，请检查模型配置或稍后重试。",
         requestId: input.requestId,
+        endpointUrl: input.endpointUrl,
+        model: input.model,
         status: resolvedStatus || "failed",
       },
       { status: 502 },
@@ -294,6 +336,8 @@ async function fetchVideoTaskStatus(input: {
   return NextResponse.json(
     {
       requestId: input.requestId,
+      endpointUrl: input.endpointUrl,
+      model: input.model,
       status: resolvedStatus || "processing",
       message: "视频任务还在生成中，请继续等待。",
     },
@@ -303,14 +347,21 @@ async function fetchVideoTaskStatus(input: {
 
 export async function POST(request: Request) {
   try {
-    const { prompt, requestId: existingRequestId, speedMode } = (await request.json()) as {
+    const {
+      prompt,
+      requestId: existingRequestId,
+      speedMode,
+      endpointUrl: existingEndpointUrl,
+      model: existingModel,
+    } = (await request.json()) as {
       prompt?: string;
       requestId?: string;
       speedMode?: string;
+      endpointUrl?: string;
+      model?: string;
     };
 
     const aiConfig = await resolveAiModeConfig("video");
-    const apiKey = await getAiSecret(aiConfig.apiKeyEnv);
     const submitModel = resolveVideoSubmitModel({
       requestedMode: speedMode,
       configuredModel: aiConfig.model,
@@ -342,18 +393,48 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: `服务端缺少 ${aiConfig.apiKeyEnv} 环境变量。` },
-        { status: 500 },
-      );
-    }
-
     if (existingRequestId?.trim()) {
+      const pollingEndpointUrl =
+        typeof existingEndpointUrl === "string" && existingEndpointUrl.trim()
+          ? existingEndpointUrl.trim()
+          : aiConfig.endpointUrl;
+      const pollingModel =
+        typeof existingModel === "string" && existingModel.trim()
+          ? existingModel.trim()
+          : submitModel;
+      const pollingCandidates = resolveAiModelChainCandidates({
+        endpointUrl: aiConfig.endpointUrl,
+        apiKeyEnv: aiConfig.apiKeyEnv,
+        model: submitModel,
+        extraPayload: aiConfig.extraPayload,
+        baseLabel: "A 主模型",
+        provider: aiConfig.extraPayload.providerLabel as string | undefined,
+      });
+      const matchedCandidate =
+        pollingCandidates.find(
+          (candidate) =>
+            candidate.endpointUrl.trim() === pollingEndpointUrl &&
+            candidate.model.trim() === pollingModel,
+        ) ?? pollingCandidates[0];
+      const apiKey = matchedCandidate
+        ? await getAiSecret(matchedCandidate.apiKeyEnv)
+        : await getAiSecret(aiConfig.apiKeyEnv);
+
+      if (!apiKey) {
+        return NextResponse.json(
+          {
+            error: `服务端缺少 ${
+              matchedCandidate?.apiKeyEnv ?? aiConfig.apiKeyEnv
+            } 环境变量。`,
+          },
+          { status: 500 },
+        );
+      }
+
       return fetchVideoTaskStatus({
         apiKey,
-        endpointUrl: aiConfig.endpointUrl,
-        model: submitModel,
+        endpointUrl: matchedCandidate?.endpointUrl ?? pollingEndpointUrl,
+        model: matchedCandidate?.model ?? pollingModel,
         requestId: existingRequestId.trim(),
       });
     }
@@ -394,121 +475,276 @@ export async function POST(request: Request) {
       chargedUserId = currentUser.user_id;
     }
 
-    const submitResponse = await fetch(aiConfig.endpointUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(
-        buildVideoSubmitRequestBody({
-          model: submitModel,
-          prompt,
-          imageSize,
-        }),
-      ),
+    const candidates = resolveAiModelChainCandidates({
+      endpointUrl: aiConfig.endpointUrl,
+      apiKeyEnv: aiConfig.apiKeyEnv,
+      model: submitModel,
+      extraPayload: aiConfig.extraPayload,
+      baseLabel: "A 主模型",
+      provider: aiConfig.extraPayload.providerLabel as string | undefined,
     });
+    const chainPolicy = resolveAiModelChainPolicy(aiConfig.extraPayload);
+    let lastError = "视频生成服务暂时不可用，请稍后再试。";
+    let lastStatus = 502;
 
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text();
+    for (const candidate of candidates) {
+      const startedAt = Date.now();
+      const candidateApiKey = await getAiSecret(candidate.apiKeyEnv);
 
-      if (shouldCharge && chargedUserId) {
-        remainingCredits = await addCredits(chargedUserId, creditCost, {
-          reasonCode: "video_refund",
-          reasonLabel: "AI视频失败退回",
-          note: `AI 视频生成失败，退回 ${creditCost} 个魔法币。`,
+      if (!candidateApiKey) {
+        lastError = `服务端缺少 ${candidate.apiKeyEnv} 环境变量。`;
+        lastStatus = 500;
+
+        await recordAiModelChainEvent({
+          modeKey: "video",
+          slot: candidate.slot,
+          label: candidate.label,
+          provider: candidate.provider,
+          model: candidate.model,
+          endpointUrl: candidate.endpointUrl,
+          event: "skipped_missing_key",
+          message: `缺少 ${candidate.apiKeyEnv} 密钥`,
         });
-      }
 
-      return NextResponse.json(
-        {
-          error: buildVideoErrorMessage(
-            errorText,
-            submitModel,
-            aiConfig.endpointUrl,
-            "视频提交接口",
-          ),
-          remainingCredits,
-        },
-        { status: mapUpstreamStatusToGatewayStatus(submitResponse.status) },
-      );
-    }
-
-    const submitData = (await submitResponse.json()) as VideoSubmitResponse;
-    const requestId = extractRequestId(submitData);
-
-    if (!requestId) {
-      if (shouldCharge && chargedUserId) {
-        remainingCredits = await addCredits(chargedUserId, creditCost, {
-          reasonCode: "video_refund",
-          reasonLabel: "AI视频失败退回",
-          note: `AI 视频生成失败，退回 ${creditCost} 个魔法币。`,
-        });
-      }
-
-      return NextResponse.json(
-        {
-          error: "视频任务已提交，但接口没有返回可追踪的任务编号，请检查后台 AI 视频配置。",
-          remainingCredits,
-        },
-        { status: 502 },
-      );
-    }
-
-    const quickPollDeadline = Date.now() + Math.min(pollTimeoutMs, 12000);
-
-    while (Date.now() < quickPollDeadline) {
-      await waitFor(pollIntervalMs);
-
-      const taskResponse = await fetchVideoTaskStatus({
-        apiKey,
-        endpointUrl: aiConfig.endpointUrl,
-        model: submitModel,
-        requestId,
-      });
-      const taskData = (await taskResponse.clone().json().catch(() => null)) as {
-        videoUrl?: string;
-        error?: string;
-        status?: string;
-      } | null;
-
-      if (taskResponse.status !== 202) {
-        if (shouldCharge && chargedUserId) {
-          if (taskResponse.ok && taskData?.videoUrl) {
-            const successPayload = {
-              videoUrl: taskData.videoUrl,
-              requestId,
-              status: taskData.status ?? "succeeded",
-              remainingCredits,
-            };
-
-            return NextResponse.json(successPayload);
-          }
-
-          remainingCredits = await addCredits(chargedUserId, creditCost, {
-            reasonCode: "video_refund",
-            reasonLabel: "AI视频失败退回",
-            note: `AI 视频生成失败，退回 ${creditCost} 个魔法币。`,
+        if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+          await recordAiModelChainEvent({
+            modeKey: "video",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "stopped",
+            status: lastStatus,
+            message: "当前错误类型不在自动切换规则里，已停止继续切换。",
           });
+          break;
         }
 
-        const failedPayload = {
-          ...(taskData ?? {}),
-          remainingCredits,
-        };
-
-        return NextResponse.json(failedPayload, { status: taskResponse.status });
+        continue;
       }
+
+      try {
+        const submitResponse = await fetchWithTimeout(
+          candidate.endpointUrl,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${candidateApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(
+              buildVideoSubmitRequestBody({
+                model: candidate.model,
+                prompt,
+                imageSize,
+              }),
+            ),
+          },
+          candidate.timeoutMs,
+        );
+
+        if (!submitResponse.ok) {
+          const errorText = await submitResponse.text();
+          lastError = buildVideoErrorMessage(
+            errorText,
+            candidate.model,
+            candidate.endpointUrl,
+            "视频提交接口",
+          );
+          lastStatus = mapUpstreamStatusToGatewayStatus(submitResponse.status);
+
+          await recordAiModelChainEvent({
+            modeKey: "video",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: lastStatus === 504 ? "timeout" : "failure",
+            status: lastStatus,
+            latencyMs: Date.now() - startedAt,
+            message: lastError,
+          });
+
+          if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+            await recordAiModelChainEvent({
+              modeKey: "video",
+              slot: candidate.slot,
+              label: candidate.label,
+              provider: candidate.provider,
+              model: candidate.model,
+              endpointUrl: candidate.endpointUrl,
+              event: "stopped",
+              status: lastStatus,
+              message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+            });
+            break;
+          }
+
+          continue;
+        }
+
+        const submitData = (await submitResponse.json()) as VideoSubmitResponse;
+        const requestId = extractRequestId(submitData);
+
+        if (!requestId) {
+          lastError = "视频任务已提交，但接口没有返回可追踪的任务编号，请检查后台 AI 视频配置。";
+          lastStatus = 502;
+
+          await recordAiModelChainEvent({
+            modeKey: "video",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "failure",
+            status: lastStatus,
+            latencyMs: Date.now() - startedAt,
+            message: lastError,
+          });
+
+          if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+            await recordAiModelChainEvent({
+              modeKey: "video",
+              slot: candidate.slot,
+              label: candidate.label,
+              provider: candidate.provider,
+              model: candidate.model,
+              endpointUrl: candidate.endpointUrl,
+              event: "stopped",
+              status: lastStatus,
+              message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+            });
+            break;
+          }
+
+          continue;
+        }
+
+        const quickPollDeadline = Date.now() + Math.min(pollTimeoutMs, 12000);
+
+        while (Date.now() < quickPollDeadline) {
+          await waitFor(pollIntervalMs);
+
+          const taskResponse = await fetchVideoTaskStatus({
+            apiKey: candidateApiKey,
+            endpointUrl: candidate.endpointUrl,
+            model: candidate.model,
+            requestId,
+          });
+          const taskData = (await taskResponse.clone().json().catch(() => null)) as {
+            videoUrl?: string;
+            error?: string;
+            status?: string;
+          } | null;
+
+          if (taskResponse.status !== 202) {
+            if (taskResponse.ok && taskData?.videoUrl) {
+              await recordAiModelChainEvent({
+                modeKey: "video",
+                slot: candidate.slot,
+                label: candidate.label,
+                provider: candidate.provider,
+                model: candidate.model,
+                endpointUrl: candidate.endpointUrl,
+                event: "success",
+                latencyMs: Date.now() - startedAt,
+              });
+              const successPayload = {
+                videoUrl: taskData.videoUrl,
+                requestId,
+                endpointUrl: candidate.endpointUrl,
+                model: candidate.model,
+                status: taskData.status ?? "succeeded",
+                remainingCredits,
+              };
+
+              return NextResponse.json(successPayload);
+            }
+
+            lastError = taskData?.error || "视频生成失败了，请检查模型配置或稍后重试。";
+            lastStatus = taskResponse.status;
+            await recordAiModelChainEvent({
+              modeKey: "video",
+              slot: candidate.slot,
+              label: candidate.label,
+              provider: candidate.provider,
+              model: candidate.model,
+              endpointUrl: candidate.endpointUrl,
+              event: lastStatus === 504 ? "timeout" : "failure",
+              status: lastStatus,
+              latencyMs: Date.now() - startedAt,
+              message: lastError,
+            });
+            break;
+          }
+        }
+
+        return NextResponse.json(
+          {
+            requestId,
+            endpointUrl: candidate.endpointUrl,
+            model: candidate.model,
+            status: "processing",
+            message: "视频任务已经提交，正在继续生成中。",
+            remainingCredits,
+          },
+          { status: 202 },
+        );
+      } catch (error) {
+        lastError = isAbortTimeoutError(error)
+          ? "服务器等待视频模型返回超时了。"
+          : error instanceof Error
+            ? error.message
+            : "视频生成服务暂时不可用，请稍后再试。";
+        lastStatus = isAbortTimeoutError(error) ? 504 : 502;
+
+        await recordAiModelChainEvent({
+          modeKey: "video",
+          slot: candidate.slot,
+          label: candidate.label,
+          provider: candidate.provider,
+          model: candidate.model,
+          endpointUrl: candidate.endpointUrl,
+          event: isAbortTimeoutError(error) ? "timeout" : "failure",
+          status: lastStatus,
+          latencyMs: Date.now() - startedAt,
+          message: lastError,
+        });
+
+        if (!shouldContinueAiModelChain({ status: lastStatus, error: lastError }, chainPolicy)) {
+          await recordAiModelChainEvent({
+            modeKey: "video",
+            slot: candidate.slot,
+            label: candidate.label,
+            provider: candidate.provider,
+            model: candidate.model,
+            endpointUrl: candidate.endpointUrl,
+            event: "stopped",
+            status: lastStatus,
+            message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+          });
+          break;
+        }
+      }
+    }
+
+    if (shouldCharge && chargedUserId) {
+      remainingCredits = await addCredits(chargedUserId, creditCost, {
+        reasonCode: "video_refund",
+        reasonLabel: "AI视频失败退回",
+        note: `AI 视频生成失败，退回 ${creditCost} 个魔法币。`,
+      });
     }
 
     return NextResponse.json(
       {
-        requestId,
-        status: "processing",
-        message: "视频任务已经提交，正在继续生成中。",
+        error: lastError,
         remainingCredits,
       },
-      { status: 202 },
+      { status: lastStatus },
     );
   } catch (error) {
     console.error("【AI 视频生成失败】:", error);
