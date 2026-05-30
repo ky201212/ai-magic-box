@@ -248,7 +248,7 @@ export async function upsertSiteSettings(
     label: string;
     value: Record<string, unknown>;
     description?: string;
-    updated_by: string;
+    updated_by: string | null;
   }>,
 ) {
   const supabaseAdmin = getSupabaseAdmin();
@@ -259,6 +259,10 @@ export async function upsertSiteSettings(
     .returns<SiteSettingRecord[]>();
 
   if (error) {
+    console.error("【site_settings 写入失败】:", {
+      settingKeys: settings.map((item) => item.setting_key),
+      error,
+    });
     throw error;
   }
 
@@ -718,7 +722,7 @@ export async function recordAiModelChainEvent(input: {
         label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
         value: nextStats,
         description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
-        updated_by: "system",
+        updated_by: null,
       },
     ]);
 
@@ -771,7 +775,7 @@ export async function clearAiModelCooldown(modeKey: string, slot: "A" | "B" | "C
       label: `${getAiModelChainStatsLabel(modeKey)}模型接力统计`,
       value: nextStats,
       description: `记录${getAiModelChainStatsLabel(modeKey)} A/B/C 模型接力的最近结果统计。`,
-      updated_by: "system",
+      updated_by: null,
     },
   ]);
 
