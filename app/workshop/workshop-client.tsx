@@ -225,6 +225,22 @@ type AiCapabilitiesMap = Partial<
   >
 >;
 
+type CodingModelAttempt = {
+  slot: "A" | "B" | "C";
+  label: string;
+  model: string;
+  endpointUrl: string;
+  result:
+    | "success"
+    | "failure"
+    | "timeout"
+    | "skipped_missing_key"
+    | "stopped"
+    | "cooldown_skipped";
+  status?: number;
+  message?: string;
+};
+
 type ShareCropSelection = {
   left: number;
   top: number;
@@ -1665,6 +1681,41 @@ const ensurePreviewHtmlDocument = (rawHtml: string) => {
 </html>`;
 };
 
+const getCodingAttemptResultLabel = (result: CodingModelAttempt["result"]) => {
+  switch (result) {
+    case "success":
+      return "已成功";
+    case "failure":
+      return "失败";
+    case "timeout":
+      return "超时";
+    case "skipped_missing_key":
+      return "缺少密钥";
+    case "stopped":
+      return "已停止";
+    case "cooldown_skipped":
+      return "冷却跳过";
+    default:
+      return "处理中";
+  }
+};
+
+const getCodingAttemptResultTone = (result: CodingModelAttempt["result"]) => {
+  switch (result) {
+    case "success":
+      return "bg-[#ecfdf3] text-[#16794d]";
+    case "failure":
+    case "timeout":
+    case "stopped":
+      return "bg-[#fff1f2] text-[#d45b85]";
+    case "skipped_missing_key":
+    case "cooldown_skipped":
+      return "bg-[#fff8e8] text-[#c5871f]";
+    default:
+      return "bg-[#eef4ff] text-[#4b6fcc]";
+  }
+};
+
 const buildStreamingCodePreviewHtml = (rawCode: string) => {
   const escapedCode = rawCode
     .replace(/&/g, "&amp;")
@@ -1848,6 +1899,9 @@ function WorkshopContent() {
   const [speechError, setSpeechError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [codingTaskMessage, setCodingTaskMessage] = useState("");
+  const [codingModelAttempts, setCodingModelAttempts] = useState<
+    CodingModelAttempt[]
+  >([]);
   const [videoTaskMessage, setVideoTaskMessage] = useState("");
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [codingCompileMessageIndex, setCodingCompileMessageIndex] = useState(0);
@@ -3128,6 +3182,7 @@ function WorkshopContent() {
     setIsCodingCompiling(false);
     setCodingCompileMessageIndex(0);
     setCodingTaskMessage("正在准备创作任务，请稍等。");
+    setCodingModelAttempts([]);
     setLoadingMessageIndex(0);
     setIsLoading(true);
 
@@ -3153,21 +3208,7 @@ function WorkshopContent() {
           remainingCredits?: number;
           degraded?: boolean;
           degradedReason?: string;
-          modelAttempts?: Array<{
-            slot: "A" | "B" | "C";
-            label: string;
-            model: string;
-            endpointUrl: string;
-            result:
-              | "success"
-              | "failure"
-              | "timeout"
-              | "skipped_missing_key"
-              | "stopped"
-              | "cooldown_skipped";
-            status?: number;
-            message?: string;
-          }>;
+          modelAttempts?: CodingModelAttempt[];
           requestId?: string;
           taskId?: string;
           status?: string;
@@ -3217,6 +3258,10 @@ function WorkshopContent() {
             );
           }
 
+          if (Array.isArray(data?.modelAttempts)) {
+            setCodingModelAttempts(data.modelAttempts);
+          }
+
           if (data?.message) {
             setCodingTaskMessage(data.message);
           } else {
@@ -3233,21 +3278,7 @@ function WorkshopContent() {
         remainingCredits?: number;
         degraded?: boolean;
         degradedReason?: string;
-        modelAttempts?: Array<{
-          slot: "A" | "B" | "C";
-          label: string;
-          model: string;
-          endpointUrl: string;
-          result:
-            | "success"
-            | "failure"
-            | "timeout"
-            | "skipped_missing_key"
-            | "stopped"
-            | "cooldown_skipped";
-          status?: number;
-          message?: string;
-        }>;
+        modelAttempts?: CodingModelAttempt[];
         requestId?: string;
         taskId?: string;
       } | null;
@@ -3277,6 +3308,10 @@ function WorkshopContent() {
 
       if (typeof normalizedData?.remainingCredits === "number") {
         setMagicCredits(normalizedData.remainingCredits);
+      }
+
+      if (Array.isArray(normalizedData?.modelAttempts)) {
+        setCodingModelAttempts(normalizedData.modelAttempts);
       }
 
       if (response.status === 202 && normalizedData?.taskId) {
@@ -3338,6 +3373,7 @@ function WorkshopContent() {
       }
     } catch {
       setCodingTaskMessage("");
+      setCodingModelAttempts([]);
       setStreamingCodePreview("");
       setIsCodingCompiling(false);
       setGeneratedCode(
@@ -4330,6 +4366,9 @@ function WorkshopContent() {
                           type="button"
                           onClick={() => {
                             setGeneratedCode(defaultPreviewHtml);
+                            setStreamingCodePreview("");
+                            setCodingTaskMessage("");
+                            setCodingModelAttempts([]);
                             setShareMessage("");
                             setShareFeedback(null);
                           }}
@@ -4374,6 +4413,62 @@ function WorkshopContent() {
                           </p>
                         </div>
                       </div>
+
+                      {isLoading || codingModelAttempts.length ? (
+                        <div className="mt-4 rounded-[18px] bg-[#f8fbff] px-4 py-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
+                              模型接力状态
+                            </p>
+                            <p className="text-xs font-bold text-slate-500">
+                              {codingModelAttempts.length
+                                ? `已记录 ${codingModelAttempts.length} 次尝试`
+                                : "正在准备第一条模型线路"}
+                            </p>
+                          </div>
+
+                          <div className="mt-3 space-y-3">
+                            {codingModelAttempts.length ? (
+                              codingModelAttempts.map((attempt, index) => (
+                                <div
+                                  key={`${attempt.slot}-${attempt.result}-${index}`}
+                                  className="rounded-[16px] border border-white/90 bg-white px-4 py-3 shadow-[0_8px_18px_rgba(148,163,184,0.08)]"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-[11px] font-black text-[#4b6fcc]">
+                                      {attempt.slot}
+                                    </span>
+                                    <p className="text-sm font-black text-slate-700">
+                                      {attempt.label || `${attempt.slot} 模型`}
+                                    </p>
+                                    <span
+                                      className={`rounded-full px-2.5 py-1 text-[11px] font-black ${getCodingAttemptResultTone(attempt.result)}`}
+                                    >
+                                      {getCodingAttemptResultLabel(attempt.result)}
+                                    </span>
+                                  </div>
+                                  <p className="mt-2 text-xs font-bold text-slate-500">
+                                    {attempt.model || "未配置模型"}
+                                    {typeof attempt.status === "number"
+                                      ? ` · HTTP ${attempt.status}`
+                                      : ""}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-6 text-slate-500">
+                                    {attempt.message ||
+                                      (attempt.result === "success"
+                                        ? "这一条模型线路已经返回结果。"
+                                        : "系统正在根据当前结果继续处理。")}
+                                  </p>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="rounded-[16px] border border-dashed border-[#d7e6ff] bg-white/80 px-4 py-4 text-sm font-bold text-slate-500">
+                                系统正在连接第一条模型线路，马上就会开始显示接力过程。
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : isWritingMode ? (

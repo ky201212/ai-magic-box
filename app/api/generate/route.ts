@@ -31,6 +31,7 @@ function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
   return {
     taskId: task.id,
     status: "succeeded" as const,
+    message: task.progressMessage ?? "作品已经生成完成。",
     partialCode: task.partialCode ?? "",
     code: task.code ?? buildCodingFallbackHtml(task.promptPreview),
     remainingCredits: task.remainingCredits,
@@ -44,6 +45,8 @@ function createCodingTaskFailurePayload(task: CodingGenerationTaskRecord) {
   return {
     taskId: task.id,
     status: "succeeded" as const,
+    message:
+      task.progressMessage ?? "后台生成没有拿到完整结果，已自动切换到站内兜底生成。",
     partialCode: task.partialCode ?? "",
     code: buildCodingFallbackHtml(task.promptPreview),
     remainingCredits: task.remainingCredits,
@@ -80,8 +83,9 @@ export async function GET(request: Request) {
     {
       taskId,
       status: task.status,
-      message: "作品还在生成中，请继续等待。",
+      message: task.progressMessage ?? "作品还在生成中，请继续等待。",
       partialCode: task.partialCode ?? "",
+      modelAttempts: task.modelAttempts ?? [],
     },
     { status: 202 },
   );
@@ -575,6 +579,7 @@ async function startDeferredCodingGenerationTask(input: {
     await updateCodingGenerationTask(input.taskId, {
       status: "processing",
       startedAt: new Date().toISOString(),
+      progressMessage: "任务已进入后台，正在连接模型。",
     });
 
     const result = await input.run();
@@ -589,6 +594,9 @@ async function startDeferredCodingGenerationTask(input: {
         degraded: result.degraded,
         degradedReason: result.degradedReason,
         modelAttempts: result.modelAttempts,
+        progressMessage: result.degraded
+          ? result.degradedReason ?? "后台已完成兜底生成。"
+          : "作品已经生成完成。",
         httpStatus: 200,
       });
 
@@ -610,6 +618,7 @@ async function startDeferredCodingGenerationTask(input: {
       degraded: true,
       degradedReason: result.error,
       modelAttempts: result.modelAttempts,
+      progressMessage: result.error,
       httpStatus: 200,
     });
 
@@ -640,6 +649,9 @@ async function startDeferredCodingGenerationTask(input: {
       degradedReason: isAiUpstreamTimeoutError(error)
         ? "后台生成等待模型返回超时，已自动切换到站内兜底生成。"
         : "后台生成链路出现波动，已自动切换到站内兜底生成。",
+      progressMessage: isAiUpstreamTimeoutError(error)
+        ? "后台生成等待模型超时，已切到站内兜底。"
+        : "后台生成链路出现波动，已切到站内兜底。",
       modelAttempts:
         "modelAttempts" in (error as Record<string, unknown>)
           ? ((error as { modelAttempts?: CodingGenerationTaskRecord["modelAttempts"] })
@@ -663,6 +675,11 @@ async function runCodingGenerateRequestWithModelChain(input: {
   traceContext: GenerateTraceContext;
   requestTimeoutMsOverride?: number;
   onPartialCode?: (partialCode: string) => Promise<void> | void;
+  onTaskUpdate?: (
+    patch: Partial<
+      Pick<CodingGenerationTaskRecord, "progressMessage" | "modelAttempts" | "partialCode">
+    >,
+  ) => Promise<void> | void;
 }) {
   const policy = resolveCodingModelChainPolicy(input.aiConfig);
   const modelStats = await getCodingModelChainStats().catch(() => null);
@@ -730,6 +747,10 @@ async function runCodingGenerateRequestWithModelChain(input: {
         message: `熔断中，冷却截止到 ${stats?.cooldownUntil ?? ""}`,
         cooldownUntil: stats?.cooldownUntil ?? null,
       });
+      await input.onTaskUpdate?.({
+        progressMessage: `${candidate.label} 正在冷却中，准备尝试下一条模型线路。`,
+        modelAttempts: [...modelAttempts],
+      });
       continue;
     }
 
@@ -750,6 +771,10 @@ async function runCodingGenerateRequestWithModelChain(input: {
       attempt: index + 1,
       totalAttempts: candidates.length,
       apiKeyEnv: candidate.apiKeyEnv,
+    });
+    await input.onTaskUpdate?.({
+      progressMessage: `正在尝试 ${candidate.slot} 路模型：${candidate.label}。`,
+      modelAttempts: [...modelAttempts],
     });
 
     const candidateApiKey = await getAiSecret(candidate.apiKeyEnv);
@@ -789,6 +814,10 @@ async function runCodingGenerateRequestWithModelChain(input: {
         endpointUrl: candidate.endpointUrl,
         event: "skipped_missing_key",
         message: `缺少 ${candidate.apiKeyEnv} 密钥`,
+      });
+      await input.onTaskUpdate?.({
+        progressMessage: `${candidate.label} 缺少密钥，正在切换下一条模型线路。`,
+        modelAttempts: [...modelAttempts],
       });
       continue;
     }
@@ -836,6 +865,11 @@ async function runCodingGenerateRequestWithModelChain(input: {
         streamSupport: attemptResult.streamSupport,
         latencyMs: Date.now() - startedAt,
       });
+      await input.onTaskUpdate?.({
+        progressMessage: `${candidate.label} 已返回结果，正在整理代码预览。`,
+        modelAttempts: [...modelAttempts],
+        partialCode: attemptResult.partialCode,
+      });
 
       return {
         ...attemptResult,
@@ -879,6 +913,14 @@ async function runCodingGenerateRequestWithModelChain(input: {
           ? new Date(Date.now() + policy.circuitBreakerCooldownMs).toISOString()
           : undefined,
     });
+    await input.onTaskUpdate?.({
+      progressMessage:
+        index < candidates.length - 1
+          ? `${candidate.label} 暂时没有成功返回，正在切换下一条模型线路。`
+          : `${candidate.label} 返回失败，正在准备兜底结果。`,
+      modelAttempts: [...modelAttempts],
+      partialCode: attemptResult.partialCode,
+    });
 
     if (!shouldContinueCodingModelChain(attemptResult, policy)) {
       modelAttempts.push({
@@ -900,6 +942,11 @@ async function runCodingGenerateRequestWithModelChain(input: {
         streamSupport: attemptResult.streamSupport,
         status: attemptResult.status,
         message: "当前错误类型不在自动切换规则里，已停止继续切换。",
+      });
+      await input.onTaskUpdate?.({
+        progressMessage: "当前错误类型不适合继续切换模型，正在准备兜底结果。",
+        modelAttempts: [...modelAttempts],
+        partialCode: attemptResult.partialCode,
       });
       break;
     }
@@ -2195,6 +2242,8 @@ export async function POST(request: Request) {
       if (existingTask.status === "succeeded" && existingTask.code) {
         const response = NextResponse.json({
           code: existingTask.code,
+          partialCode: existingTask.partialCode ?? "",
+          message: existingTask.progressMessage ?? "作品已经生成完成。",
           remainingCredits: existingTask.remainingCredits,
           degraded: existingTask.degraded ?? false,
           degradedReason: existingTask.degradedReason,
@@ -2210,6 +2259,9 @@ export async function POST(request: Request) {
         const response = NextResponse.json(
           {
             error: existingTask.error ?? "生成任务失败了，请稍后再试。",
+            partialCode: existingTask.partialCode ?? "",
+            message:
+              existingTask.progressMessage ?? existingTask.error ?? "生成任务失败了，请稍后再试。",
             remainingCredits: existingTask.remainingCredits,
             requestId,
             taskId: existingTask.id,
@@ -2227,10 +2279,12 @@ export async function POST(request: Request) {
 
       const response = NextResponse.json(
         {
-          message: "作品还在生成中，请继续等待。",
+          message: existingTask.progressMessage ?? "作品还在生成中，请继续等待。",
           requestId,
           taskId: existingTask.id,
           status: existingTask.status,
+          partialCode: existingTask.partialCode ?? "",
+          modelAttempts: existingTask.modelAttempts ?? [],
         },
         { status: 202 },
       );
@@ -2346,6 +2400,7 @@ export async function POST(request: Request) {
         id: taskId,
         status: "queued",
         promptPreview: buildPromptPreview(requestPrompt),
+        progressMessage: "任务已经排队，马上开始连接模型。",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -2383,7 +2438,14 @@ export async function POST(request: Request) {
               partialCodePersistence.latestPersistedAt = now;
               await updateCodingGenerationTask(partialCodePersistence.taskId, {
                 status: "processing",
+                progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
                 partialCode,
+              });
+            },
+            onTaskUpdate: async (patch) => {
+              await updateCodingGenerationTask(partialCodePersistence.taskId, {
+                status: "processing",
+                ...patch,
               });
             },
           }),

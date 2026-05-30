@@ -2,6 +2,7 @@ create table if not exists public.coding_generation_tasks (
   id text primary key,
   status text not null check (status in ('queued', 'processing', 'succeeded', 'failed')),
   prompt_preview text not null default '',
+  progress_message text null,
   created_at timestamptz not null default timezone('utc'::text, now()),
   updated_at timestamptz not null default timezone('utc'::text, now()),
   started_at timestamptz null,
@@ -18,6 +19,9 @@ create table if not exists public.coding_generation_tasks (
 
 alter table if exists public.coding_generation_tasks
   add column if not exists partial_code text null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists progress_message text null;
 
 alter table if exists public.coding_generation_tasks
   add column if not exists model_attempts jsonb null;

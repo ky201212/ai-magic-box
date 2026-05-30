@@ -13,6 +13,7 @@ export type CodingGenerationTaskRecord = {
   id: string;
   status: CodingGenerationTaskStatus;
   promptPreview: string;
+  progressMessage?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -56,6 +57,7 @@ function mapTaskRowToRecord(row: {
   id: string;
   status: string;
   prompt_preview: string;
+  progress_message?: string | null;
   created_at: string;
   updated_at: string;
   started_at?: string | null;
@@ -89,6 +91,7 @@ function mapTaskRowToRecord(row: {
     id: row.id,
     status: row.status as CodingGenerationTaskStatus,
     promptPreview: row.prompt_preview,
+    progressMessage: row.progress_message ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
@@ -109,6 +112,7 @@ function mapTaskRecordToRow(task: CodingGenerationTaskRecord) {
     id: task.id,
     status: task.status,
     prompt_preview: task.promptPreview,
+    progress_message: task.progressMessage ?? null,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
     started_at: task.startedAt ?? null,
