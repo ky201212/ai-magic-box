@@ -1780,6 +1780,43 @@ function sanitizeGeneratedContent(rawText: string) {
   return normalizedText;
 }
 
+function buildRecoveredStreamingCode(rawText: string) {
+  const normalizedText = sanitizeGeneratedContent(rawText);
+
+  if (!normalizedText || normalizedText.length < 200) {
+    return null;
+  }
+
+  const loweredText = normalizedText.toLowerCase();
+  const looksLikeStructuredHtml =
+    loweredText.includes("<!doctype html") ||
+    loweredText.includes("<html") ||
+    loweredText.includes("<body") ||
+    loweredText.includes("<main") ||
+    loweredText.includes("<script") ||
+    loweredText.includes("<style");
+
+  if (!looksLikeStructuredHtml) {
+    return null;
+  }
+
+  if (loweredText.includes("<!doctype html") || loweredText.includes("<html")) {
+    return normalizedText;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body>
+${normalizedText}
+  </body>
+</html>`;
+}
+
 function parsePossibleJson(rawText: string) {
   try {
     return JSON.parse(rawText) as ChatCompletionResponse;
@@ -2124,14 +2161,19 @@ async function runGenerateRequest(input: {
       input.resolvedMode === "coding" &&
       input.allowCodingDegradedFallback === true
     ) {
+      const recoveredCode = accumulatedPartialCode
+        ? buildRecoveredStreamingCode(accumulatedPartialCode)
+        : null;
+
       traceGenerate("warn", "coding_degraded_upstream_status", input.traceContext, {
         upstreamStatus: upstreamResponse.status,
         degradedReason: upstreamErrorMessage,
+        recoveredFromPartialCode: Boolean(recoveredCode),
       });
 
       return {
         ok: true,
-        code: buildCodingFallbackHtml(input.requestPrompt),
+        code: recoveredCode ?? buildCodingFallbackHtml(input.requestPrompt),
         partialCode: accumulatedPartialCode,
         ...(input.resolvedMode === "coding" && input.onPartialCode
           ? {
@@ -2141,8 +2183,10 @@ async function runGenerateRequest(input: {
             }
           : {}),
         remainingCredits: input.remainingCredits,
-        degraded: true,
-        degradedReason: upstreamErrorMessage,
+        degraded: recoveredCode ? false : true,
+        degradedReason: recoveredCode
+          ? undefined
+          : upstreamErrorMessage,
       } satisfies GenerateRunResult;
     }
 
@@ -2181,13 +2225,18 @@ async function runGenerateRequest(input: {
       input.resolvedMode === "coding" &&
       input.allowCodingDegradedFallback === true
     ) {
+      const recoveredCode = accumulatedPartialCode
+        ? buildRecoveredStreamingCode(accumulatedPartialCode)
+        : null;
+
       traceGenerate("warn", "coding_degraded_non_json", input.traceContext, {
         degradedReason: nonJsonMessage,
+        recoveredFromPartialCode: Boolean(recoveredCode),
       });
 
       return {
         ok: true,
-        code: buildCodingFallbackHtml(input.requestPrompt),
+        code: recoveredCode ?? buildCodingFallbackHtml(input.requestPrompt),
         partialCode: accumulatedPartialCode,
         ...(input.resolvedMode === "coding" && input.onPartialCode
           ? {
@@ -2197,8 +2246,10 @@ async function runGenerateRequest(input: {
             }
           : {}),
         remainingCredits: input.remainingCredits,
-        degraded: true,
-        degradedReason: nonJsonMessage,
+        degraded: recoveredCode ? false : true,
+        degradedReason: recoveredCode
+          ? undefined
+          : nonJsonMessage,
       } satisfies GenerateRunResult;
     }
 
@@ -2229,13 +2280,18 @@ async function runGenerateRequest(input: {
       input.resolvedMode === "coding" &&
       input.allowCodingDegradedFallback === true
     ) {
+      const recoveredCode = accumulatedPartialCode
+        ? buildRecoveredStreamingCode(accumulatedPartialCode)
+        : null;
+
       traceGenerate("warn", "coding_degraded_empty_content", input.traceContext, {
         degradedReason: "模型没有返回可用内容。",
+        recoveredFromPartialCode: Boolean(recoveredCode),
       });
 
       return {
         ok: true,
-        code: buildCodingFallbackHtml(input.requestPrompt),
+        code: recoveredCode ?? buildCodingFallbackHtml(input.requestPrompt),
         partialCode: accumulatedPartialCode,
         ...(input.resolvedMode === "coding" && input.onPartialCode
           ? {
@@ -2245,8 +2301,10 @@ async function runGenerateRequest(input: {
             }
           : {}),
         remainingCredits: input.remainingCredits,
-        degraded: true,
-        degradedReason: "模型没有返回可用内容。",
+        degraded: recoveredCode ? false : true,
+        degradedReason: recoveredCode
+          ? undefined
+          : "模型没有返回可用内容。",
       } satisfies GenerateRunResult;
     }
 
