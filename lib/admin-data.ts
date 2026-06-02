@@ -408,7 +408,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         creditEnabled: false,
         creditCost: 0,
         reasoningEffort: "none",
-        maxCompletionTokens: 1400,
+        maxCompletionTokens: 900,
         modelChain: [],
       },
     },

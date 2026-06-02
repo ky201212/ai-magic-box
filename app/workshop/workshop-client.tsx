@@ -1819,6 +1819,12 @@ async function playStreamingCodePreview(input: {
     return;
   }
 
+  if (source.length > 7000) {
+    input.setStreamingCodePreview(buildStreamingCodePreviewHtml(source));
+    input.setCodingTaskMessage("代码已经生成完成，正在立即装载可运行预览。");
+    return;
+  }
+
   const maxAnimatedLength = 18000;
   const animationSource =
     source.length > maxAnimatedLength
@@ -3382,8 +3388,8 @@ function WorkshopContent() {
       });
       setIsLoading(false);
       setIsCodingCompiling(true);
-      setCodingTaskMessage("正在为你编译并装载可运行预览。");
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      setCodingTaskMessage("正在为你装载可运行预览。");
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
       setGeneratedCode(finalPreviewDoc);
       setStreamingCodePreview("");
       setIsCodingCompiling(false);

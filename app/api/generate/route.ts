@@ -33,6 +33,7 @@ export const maxDuration = 300;
 
 const DEFAULT_CODING_TASK_CONCURRENCY = 2;
 const MAX_CODING_TASK_CONCURRENCY = 12;
+const CODING_TASK_STALE_MS = 8 * 60 * 1000;
 const codingTaskRunners = new Set<string>();
 let codingQueueDrainPromise: Promise<void> | null = null;
 
@@ -68,6 +69,21 @@ function createCodingTaskPendingPayload(task: CodingGenerationTaskRecord, messag
     partialCode: task.partialCode ?? "",
     modelAttempts: task.modelAttempts ?? [],
   };
+}
+
+function isCodingTaskStale(task: CodingGenerationTaskRecord) {
+  if (task.status !== "processing") {
+    return false;
+  }
+
+  const referenceTime = task.updatedAt || task.startedAt || task.createdAt;
+  const referenceAt = Date.parse(referenceTime);
+
+  if (!Number.isFinite(referenceAt)) {
+    return false;
+  }
+
+  return Date.now() - referenceAt >= CODING_TASK_STALE_MS;
 }
 
 function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
@@ -331,8 +347,8 @@ function resolveCodingModelCandidates(
     model: aiConfig.model,
     timeoutMs:
       typeof aiConfig.extraPayload.singleModelTimeoutMs === "number"
-        ? Math.max(10_000, Math.floor(aiConfig.extraPayload.singleModelTimeoutMs))
-        : undefined,
+        ? Math.min(45_000, Math.max(10_000, Math.floor(aiConfig.extraPayload.singleModelTimeoutMs)))
+        : 28_000,
   };
   const rawModelChain = aiConfig.extraPayload.modelChain;
   const extraCandidates: CodingModelCandidate[] = Array.isArray(rawModelChain)
@@ -360,8 +376,8 @@ function resolveCodingModelCandidates(
             typeof rawEntry.model === "string" ? rawEntry.model.trim() : "";
           const timeoutMs =
             typeof rawEntry.timeoutMs === "number" && Number.isFinite(rawEntry.timeoutMs)
-              ? Math.max(10_000, Math.floor(rawEntry.timeoutMs))
-              : undefined;
+              ? Math.min(45_000, Math.max(10_000, Math.floor(rawEntry.timeoutMs)))
+              : 24_000;
 
           if (
             (slot !== "B" && slot !== "C") ||
@@ -906,6 +922,19 @@ async function drainCodingGenerationQueue() {
 
   codingQueueDrainPromise = (async () => {
     const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+    const processingTasks = await listCodingGenerationTasksByStatus(["processing"]);
+
+    for (const processingTask of processingTasks) {
+      if (!isCodingTaskStale(processingTask)) {
+        continue;
+      }
+
+      await updateCodingGenerationTask(processingTask.id, {
+        status: "queued",
+        startedAt: undefined,
+        progressMessage: "检测到上一次后台执行中断，任务已重新排队并准备继续生成。",
+      }).catch(() => null);
+    }
 
     while (true) {
       const activeCount = await countCodingGenerationTasksByStatus(["processing"]);
@@ -2092,8 +2121,8 @@ function resolveAiRequestTimeoutMs(mode: "coding" | "writing") {
 function resolveDeferredAiRequestTimeoutMs(mode: "coding" | "writing") {
   const rawValue = process.env.AI_DEFERRED_REQUEST_TIMEOUT_MS;
   const parsedValue = Number(rawValue);
-  const defaultTimeoutMs = mode === "coding" ? 180_000 : 240_000;
-  const maxTimeoutMs = mode === "coding" ? 240_000 : 300_000;
+  const defaultTimeoutMs = mode === "coding" ? 75_000 : 240_000;
+  const maxTimeoutMs = mode === "coding" ? 120_000 : 300_000;
 
   if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
     return defaultTimeoutMs;
@@ -2106,8 +2135,8 @@ function resolveSafeMaxCompletionTokens(
   mode: "coding" | "writing",
   rawValue: unknown,
 ) {
-  const fallbackValue = mode === "coding" ? 1400 : 800;
-  const hardCap = mode === "coding" ? 12000 : 4000;
+  const fallbackValue = mode === "coding" ? 900 : 800;
+  const hardCap = mode === "coding" ? 4000 : 4000;
 
   if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
     return fallbackValue;
