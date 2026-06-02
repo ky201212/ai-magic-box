@@ -23,7 +23,6 @@ import {
   listCodingGenerationTasksByStatus,
   readCodingGenerationTask,
   updateCodingGenerationTask,
-  writeCodingGenerationTask,
   type CodingGenerationTaskRecord,
 } from "@/lib/coding-generation-tasks";
 
@@ -277,6 +276,49 @@ type CodingModelChainPolicy = {
   circuitBreakerCooldownMs: number;
 };
 
+function parseModelBillions(model: string) {
+  const matched = model.match(/(\d+(?:\.\d+)?)\s*B/i);
+
+  if (!matched) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(matched[1] ?? "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveRecommendedCodingModelTimeoutMs(model: string) {
+  const billions = parseModelBillions(model);
+
+  if (billions === null) {
+    return 45_000;
+  }
+
+  if (billions >= 60) {
+    return 120_000;
+  }
+
+  if (billions >= 30) {
+    return 90_000;
+  }
+
+  if (billions > 7) {
+    return 75_000;
+  }
+
+  return 45_000;
+}
+
+function normalizeCodingModelTimeoutMs(rawValue: unknown, model: string) {
+  const recommendedTimeoutMs = resolveRecommendedCodingModelTimeoutMs(model);
+
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+    return recommendedTimeoutMs;
+  }
+
+  return Math.min(150_000, Math.max(recommendedTimeoutMs, Math.floor(rawValue)));
+}
+
 function buildPromptPreview(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
   return normalized.length > 120
@@ -342,6 +384,7 @@ function extractContentDeltaFromStreamChunk(rawLine: string) {
 function resolveCodingModelCandidates(
   aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>,
 ) {
+  const configuredSingleModelTimeoutMs = aiConfig.extraPayload.singleModelTimeoutMs;
   const baseCandidate: CodingModelCandidate = {
     slot: "A",
     label: "A 主模型",
@@ -349,10 +392,10 @@ function resolveCodingModelCandidates(
     endpointUrl: aiConfig.endpointUrl,
     apiKeyEnv: aiConfig.apiKeyEnv,
     model: aiConfig.model,
-    timeoutMs:
-      typeof aiConfig.extraPayload.singleModelTimeoutMs === "number"
-        ? Math.min(45_000, Math.max(10_000, Math.floor(aiConfig.extraPayload.singleModelTimeoutMs)))
-        : 28_000,
+    timeoutMs: normalizeCodingModelTimeoutMs(
+      configuredSingleModelTimeoutMs,
+      aiConfig.model,
+    ),
   };
   const rawModelChain = aiConfig.extraPayload.modelChain;
   const extraCandidates: CodingModelCandidate[] = Array.isArray(rawModelChain)
@@ -379,9 +422,7 @@ function resolveCodingModelCandidates(
           const model =
             typeof rawEntry.model === "string" ? rawEntry.model.trim() : "";
           const timeoutMs =
-            typeof rawEntry.timeoutMs === "number" && Number.isFinite(rawEntry.timeoutMs)
-              ? Math.min(45_000, Math.max(10_000, Math.floor(rawEntry.timeoutMs)))
-              : 24_000;
+            normalizeCodingModelTimeoutMs(rawEntry.timeoutMs, model);
 
           if (
             (slot !== "B" && slot !== "C") ||
@@ -2126,8 +2167,8 @@ function mapUpstreamStatusToGatewayStatus(status: number) {
 function resolveAiRequestTimeoutMs(mode: "coding" | "writing") {
   const rawValue = process.env.AI_REQUEST_TIMEOUT_MS;
   const parsedValue = Number(rawValue);
-  const defaultTimeoutMs = mode === "coding" ? 45_000 : 240_000;
-  const maxTimeoutMs = mode === "coding" ? 55_000 : 240_000;
+  const defaultTimeoutMs = mode === "coding" ? 90_000 : 240_000;
+  const maxTimeoutMs = mode === "coding" ? 150_000 : 240_000;
 
   if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
     return defaultTimeoutMs;
@@ -2139,8 +2180,8 @@ function resolveAiRequestTimeoutMs(mode: "coding" | "writing") {
 function resolveDeferredAiRequestTimeoutMs(mode: "coding" | "writing") {
   const rawValue = process.env.AI_DEFERRED_REQUEST_TIMEOUT_MS;
   const parsedValue = Number(rawValue);
-  const defaultTimeoutMs = mode === "coding" ? 75_000 : 240_000;
-  const maxTimeoutMs = mode === "coding" ? 120_000 : 300_000;
+  const defaultTimeoutMs = mode === "coding" ? 120_000 : 240_000;
+  const maxTimeoutMs = mode === "coding" ? 180_000 : 300_000;
 
   if (!Number.isFinite(parsedValue) || parsedValue < 10_000) {
     return defaultTimeoutMs;

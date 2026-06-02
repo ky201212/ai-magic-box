@@ -2186,7 +2186,7 @@ export function AiConfigForm({
                           A 主模型独立超时
                         </p>
                         <p className="mt-1 text-sm leading-7 text-slate-500">
-                          这里设置 A 主模型单独等待多久。填 `45000` 表示 45 秒。
+                          这里设置 A 主模型单独等待多久。7B 左右建议至少 `45000`，14B 建议至少 `75000`，更大的模型建议 `90000` 以上。
                         </p>
                         <label className="mt-3 block text-sm font-bold text-slate-600">
                           A 主模型超时毫秒
