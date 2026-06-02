@@ -10,6 +10,20 @@ import {
 } from "@/lib/admin";
 import { getAiSecret } from "@/lib/ai-secrets";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function createNoStoreJsonResponse(
+  payload: Record<string, unknown>,
+  init?: ResponseInit,
+) {
+  const response = NextResponse.json(payload, init);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
+  return response;
+}
+
 function resolveHealthCheckEndpoint(endpointUrl: string) {
   const trimmed = endpointUrl.trim();
   const normalized = trimmed.toLowerCase();
@@ -48,11 +62,14 @@ export async function GET() {
 
   try {
     const stats = await getAiModelChainStats("coding");
-    return NextResponse.json({ stats });
+    return createNoStoreJsonResponse({
+      stats,
+      refreshedAt: new Date().toISOString(),
+    });
   } catch (requestError) {
     console.error("【AI 编程模型接力统计读取失败】:", requestError);
 
-    return NextResponse.json(
+    return createNoStoreJsonResponse(
       { error: "AI 编程模型接力统计读取失败，请稍后再试。" },
       { status: 500 },
     );
@@ -112,7 +129,11 @@ export async function POST(request: Request) {
       }
 
       const stats = await clearAiModelCooldown(modeKey, body.slot);
-      return NextResponse.json({ success: true, stats });
+      return createNoStoreJsonResponse({
+        success: true,
+        stats,
+        refreshedAt: new Date().toISOString(),
+      });
     }
 
     if (body.action === "healthCheck") {
@@ -196,17 +217,20 @@ export async function POST(request: Request) {
         }),
       );
 
-      return NextResponse.json({ results });
+      return createNoStoreJsonResponse({
+        results,
+        refreshedAt: new Date().toISOString(),
+      });
     }
 
-    return NextResponse.json(
+    return createNoStoreJsonResponse(
       { error: "不支持的操作类型。" },
       { status: 400 },
     );
   } catch (requestError) {
     console.error("【AI 编程模型接力管理失败】:", requestError);
 
-    return NextResponse.json(
+    return createNoStoreJsonResponse(
       { error: "AI 编程模型接力管理失败，请稍后再试。" },
       { status: 500 },
     );
