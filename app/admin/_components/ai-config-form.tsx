@@ -712,9 +712,6 @@ export function AiConfigForm({
   const [codingModelHealthCheckResults, setCodingModelHealthCheckResults] = useState<
     CodingModelHealthCheckResult[]
   >([]);
-  const [codingModelStatsRefreshedAt, setCodingModelStatsRefreshedAt] = useState<
-    string | null
-  >(null);
 
   const refreshCodingModelChainStats = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -730,7 +727,6 @@ export function AiConfigForm({
         const data = (await response.json()) as {
           stats?: AiModelChainStatsRecord;
           error?: string;
-          refreshedAt?: string;
         };
 
         if (!response.ok) {
@@ -741,9 +737,6 @@ export function AiConfigForm({
           ...current,
           coding: data.stats ?? createEmptyModelChainStatsRecord(),
         }));
-        setCodingModelStatsRefreshedAt(
-          typeof data.refreshedAt === "string" ? data.refreshedAt : new Date().toISOString(),
-        );
         setCodingModelStatsState("success");
       } catch (error) {
         console.error("【AI 编程接力统计刷新失败】:", error);
@@ -2585,11 +2578,7 @@ export function AiConfigForm({
                                 最近接力统计
                               </p>
                               <p className="mt-1 text-sm text-slate-500">
-                                最近一次点击刷新成功时间：
-                                {formatAdminDateTime(codingModelStatsRefreshedAt)}
-                              </p>
-                              <p className="mt-1 text-sm text-slate-500">
-                                统计内容最后事件时间：
+                                最近一次统计更新时间：
                                 {formatAdminDateTime(currentModelChainStats.updatedAt)}
                               </p>
                               <p className="mt-1 text-xs text-slate-400">

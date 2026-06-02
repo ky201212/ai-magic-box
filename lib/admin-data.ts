@@ -230,6 +230,36 @@ export type UserNotificationsSummary = {
   unreadCount: number;
 };
 
+const aiModelChainStatsMutationLocks = new Map<string, Promise<void>>();
+
+async function withAiModelChainStatsMutationLock<T>(
+  modeKey: string,
+  work: () => Promise<T>,
+) {
+  const previous = aiModelChainStatsMutationLocks.get(modeKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  aiModelChainStatsMutationLocks.set(
+    modeKey,
+    previous.then(() => current),
+  );
+
+  await previous;
+
+  try {
+    return await work();
+  } finally {
+    release();
+
+    if (aiModelChainStatsMutationLocks.get(modeKey) === current) {
+      aiModelChainStatsMutationLocks.delete(modeKey);
+    }
+  }
+}
+
 export async function listSiteSettings(): Promise<SiteSettingRecord[]> {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -656,86 +686,88 @@ export async function recordAiModelChainEvent(input: {
   cooldownUntil?: string | null;
 }) {
   try {
-    const current = await getAiModelChainStats(input.modeKey);
-    const eventCreatedAt = new Date().toISOString();
-    const nextModels = current.models.map((item) => {
-      if (item.slot !== input.slot) {
-        return item;
-      }
+    return await withAiModelChainStatsMutationLock(input.modeKey, async () => {
+      const current = await getAiModelChainStats(input.modeKey);
+      const eventCreatedAt = new Date().toISOString();
+      const nextModels = current.models.map((item) => {
+        if (item.slot !== input.slot) {
+          return item;
+        }
 
-      const isFailureLike =
-        input.event === "failure" || input.event === "timeout";
-      const nextConsecutiveFailures = input.event === "success"
-        ? 0
-        : isFailureLike
-          ? item.consecutiveFailures + 1
-          : item.consecutiveFailures;
+        const isFailureLike =
+          input.event === "failure" || input.event === "timeout";
+        const nextConsecutiveFailures = input.event === "success"
+          ? 0
+          : isFailureLike
+            ? item.consecutiveFailures + 1
+            : item.consecutiveFailures;
 
-      return {
-        ...item,
-        label: input.label.trim() || item.label,
-        provider: input.provider?.trim() || item.provider,
-        model: input.model.trim() || item.model,
-        endpointUrl: input.endpointUrl.trim() || item.endpointUrl,
-        successCount:
-          item.successCount + (input.event === "success" ? 1 : 0),
-        failureCount:
-          item.failureCount + (input.event === "failure" ? 1 : 0),
-        timeoutCount:
-          item.timeoutCount + (input.event === "timeout" ? 1 : 0),
-        skipCount:
-          item.skipCount + (input.event === "skipped_missing_key" ? 1 : 0),
-        consecutiveFailures: nextConsecutiveFailures,
-        cooldownUntil:
-          input.event === "success"
-            ? null
-            : input.cooldownUntil === undefined
-              ? item.cooldownUntil
-              : input.cooldownUntil,
-        streamSupport: input.streamSupport ?? item.streamSupport ?? "unknown",
-        lastStatus:
-          typeof input.status === "number" ? String(input.status) : input.event,
-        lastError: input.message?.trim() || null,
-        lastUsedAt: eventCreatedAt,
+        return {
+          ...item,
+          label: input.label.trim() || item.label,
+          provider: input.provider?.trim() || item.provider,
+          model: input.model.trim() || item.model,
+          endpointUrl: input.endpointUrl.trim() || item.endpointUrl,
+          successCount:
+            item.successCount + (input.event === "success" ? 1 : 0),
+          failureCount:
+            item.failureCount + (input.event === "failure" ? 1 : 0),
+          timeoutCount:
+            item.timeoutCount + (input.event === "timeout" ? 1 : 0),
+          skipCount:
+            item.skipCount + (input.event === "skipped_missing_key" ? 1 : 0),
+          consecutiveFailures: nextConsecutiveFailures,
+          cooldownUntil:
+            input.event === "success"
+              ? null
+              : input.cooldownUntil === undefined
+                ? item.cooldownUntil
+                : input.cooldownUntil,
+          streamSupport: input.streamSupport ?? item.streamSupport ?? "unknown",
+          lastStatus:
+            typeof input.status === "number" ? String(input.status) : input.event,
+          lastError: input.message?.trim() || null,
+          lastUsedAt: eventCreatedAt,
+        };
+      });
+
+      const nextStats: AiModelChainStatsRecord = {
+        updatedAt: eventCreatedAt,
+        models: nextModels,
+        recentEvents: [
+          {
+            id: randomUUID(),
+            createdAt: eventCreatedAt,
+            slot: input.slot,
+            label: input.label.trim() || `${input.slot} 模型`,
+            provider: input.provider?.trim() || "",
+            model: input.model.trim(),
+            event: input.event,
+            streamSupport: input.streamSupport,
+            status: input.status,
+            latencyMs:
+              typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)
+                ? Math.max(0, Math.round(input.latencyMs))
+                : undefined,
+            message: input.message?.trim() || undefined,
+          },
+          ...current.recentEvents,
+        ].slice(0, 120),
       };
-    });
 
-    const nextStats: AiModelChainStatsRecord = {
-      updatedAt: eventCreatedAt,
-      models: nextModels,
-      recentEvents: [
+      await upsertSiteSettings([
         {
-          id: randomUUID(),
-          createdAt: eventCreatedAt,
-          slot: input.slot,
-          label: input.label.trim() || `${input.slot} 模型`,
-          provider: input.provider?.trim() || "",
-          model: input.model.trim(),
-          event: input.event,
-          streamSupport: input.streamSupport,
-          status: input.status,
-          latencyMs:
-            typeof input.latencyMs === "number" && Number.isFinite(input.latencyMs)
-              ? Math.max(0, Math.round(input.latencyMs))
-              : undefined,
-          message: input.message?.trim() || undefined,
+          setting_key: getAiModelChainStatsSettingKey(input.modeKey),
+          setting_group: "ai",
+          label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
+          value: nextStats,
+          description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
+          updated_by: null,
         },
-        ...current.recentEvents,
-      ].slice(0, 120),
-    };
+      ]);
 
-    await upsertSiteSettings([
-      {
-        setting_key: getAiModelChainStatsSettingKey(input.modeKey),
-        setting_group: "ai",
-        label: `${getAiModelChainStatsLabel(input.modeKey)}模型接力统计`,
-        value: nextStats,
-        description: `记录${getAiModelChainStatsLabel(input.modeKey)} A/B/C 模型接力的最近结果统计。`,
-        updated_by: null,
-      },
-    ]);
-
-    return nextStats;
+      return nextStats;
+    });
   } catch (error) {
     console.error("【AI 模型接力统计写入失败】:", {
       modeKey: input.modeKey,
@@ -760,35 +792,37 @@ export async function recordCodingModelChainEvent(
 }
 
 export async function clearAiModelCooldown(modeKey: string, slot: "A" | "B" | "C") {
-  const current = await getAiModelChainStats(modeKey);
-  const nextStats: AiModelChainStatsRecord = {
-    ...current,
-    updatedAt: new Date().toISOString(),
-    models: current.models.map((item) =>
-      item.slot === slot
-        ? {
-            ...item,
-            consecutiveFailures: 0,
-            cooldownUntil: null,
-            lastStatus: "manual_reset",
-            lastError: null,
-          }
-        : item,
-    ),
-  };
+  return withAiModelChainStatsMutationLock(modeKey, async () => {
+    const current = await getAiModelChainStats(modeKey);
+    const nextStats: AiModelChainStatsRecord = {
+      ...current,
+      updatedAt: new Date().toISOString(),
+      models: current.models.map((item) =>
+        item.slot === slot
+          ? {
+              ...item,
+              consecutiveFailures: 0,
+              cooldownUntil: null,
+              lastStatus: "manual_reset",
+              lastError: null,
+            }
+          : item,
+      ),
+    };
 
-  await upsertSiteSettings([
-    {
-      setting_key: getAiModelChainStatsSettingKey(modeKey),
-      setting_group: "ai",
-      label: `${getAiModelChainStatsLabel(modeKey)}模型接力统计`,
-      value: nextStats,
-      description: `记录${getAiModelChainStatsLabel(modeKey)} A/B/C 模型接力的最近结果统计。`,
-      updated_by: null,
-    },
-  ]);
+    await upsertSiteSettings([
+      {
+        setting_key: getAiModelChainStatsSettingKey(modeKey),
+        setting_group: "ai",
+        label: `${getAiModelChainStatsLabel(modeKey)}模型接力统计`,
+        value: nextStats,
+        description: `记录${getAiModelChainStatsLabel(modeKey)} A/B/C 模型接力的最近结果统计。`,
+        updated_by: null,
+      },
+    ]);
 
-  return nextStats;
+    return nextStats;
+  });
 }
 
 export async function clearCodingModelCooldown(slot: "A" | "B" | "C") {

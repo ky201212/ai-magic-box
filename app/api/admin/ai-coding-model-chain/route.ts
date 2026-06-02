@@ -62,10 +62,7 @@ export async function GET() {
 
   try {
     const stats = await getAiModelChainStats("coding");
-    return createNoStoreJsonResponse({
-      stats,
-      refreshedAt: new Date().toISOString(),
-    });
+    return createNoStoreJsonResponse({ stats });
   } catch (requestError) {
     console.error("【AI 编程模型接力统计读取失败】:", requestError);
 
@@ -129,11 +126,7 @@ export async function POST(request: Request) {
       }
 
       const stats = await clearAiModelCooldown(modeKey, body.slot);
-      return createNoStoreJsonResponse({
-        success: true,
-        stats,
-        refreshedAt: new Date().toISOString(),
-      });
+      return createNoStoreJsonResponse({ success: true, stats });
     }
 
     if (body.action === "healthCheck") {
@@ -217,10 +210,7 @@ export async function POST(request: Request) {
         }),
       );
 
-      return createNoStoreJsonResponse({
-        results,
-        refreshedAt: new Date().toISOString(),
-      });
+      return createNoStoreJsonResponse({ results });
     }
 
     return createNoStoreJsonResponse(
