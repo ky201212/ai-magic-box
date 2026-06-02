@@ -19,6 +19,9 @@ export async function GET() {
       listUserCreditLogsByWindow(currentUser.user_id, {
         limit: 120,
         sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+      }).catch((error) => {
+        console.error("【读取魔法币摘要账本失败，已回退为空】:", error);
+        return [];
       }),
     ]);
 

@@ -27,12 +27,21 @@ export async function GET() {
         listUserCreditLogsByWindow(currentUser.user_id, {
           limit: 120,
           sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+        }).catch((error) => {
+          console.error("【支付中心读取账本失败，已回退为空】:", error);
+          return [];
         }),
         getMagicCoinRate(),
         listCoinRechargePackages(),
         listSubscriptionPlans(),
-        listUserPaymentOrders(currentUser.user_id),
-        listUserSubscriptions(currentUser.user_id),
+        listUserPaymentOrders(currentUser.user_id).catch((error) => {
+          console.error("【支付中心读取订单失败，已回退为空】:", error);
+          return [];
+        }),
+        listUserSubscriptions(currentUser.user_id).catch((error) => {
+          console.error("【支付中心读取订阅失败，已回退为空】:", error);
+          return [];
+        }),
       ]);
 
     return NextResponse.json({

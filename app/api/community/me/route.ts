@@ -29,9 +29,18 @@ export async function GET() {
       listUserCreditLogsByWindow(currentUser.user_id, {
         limit: 500,
         sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+      }).catch((error) => {
+        console.error("【个人主页读取魔法币账本失败，已回退为空】:", error);
+        return [];
       }),
-      listUserPaymentOrders(currentUser.user_id, 6),
-      listUserSubscriptions(currentUser.user_id),
+      listUserPaymentOrders(currentUser.user_id, 6).catch((error) => {
+        console.error("【个人主页读取订单失败，已回退为空】:", error);
+        return [];
+      }),
+      listUserSubscriptions(currentUser.user_id).catch((error) => {
+        console.error("【个人主页读取订阅失败，已回退为空】:", error);
+        return [];
+      }),
     ]);
 
     return NextResponse.json({

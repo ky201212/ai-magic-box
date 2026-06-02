@@ -57,7 +57,20 @@ function isMissingCreditLogTable(error: unknown) {
     return false;
   }
 
-  return "code" in error && error.code === "PGRST205";
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
+  const message =
+    "message" in error && typeof error.message === "string" ? error.message : "";
+
+  return (
+    code === "PGRST205" ||
+    code === "PGRST204" ||
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("user_credit_logs") ||
+    message.includes("created_at") ||
+    message.includes("reason_label")
+  );
 }
 
 function getCreditLogFallbackKey(userId: string) {

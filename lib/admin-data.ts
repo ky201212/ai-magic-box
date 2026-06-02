@@ -1141,7 +1141,20 @@ function isMissingCreditLogTable(error: unknown) {
     return false;
   }
 
-  return "code" in error && error.code === "PGRST205";
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
+  const message =
+    "message" in error && typeof error.message === "string" ? error.message : "";
+
+  return (
+    code === "PGRST205" ||
+    code === "PGRST204" ||
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("user_credit_logs") ||
+    message.includes("created_at") ||
+    message.includes("reason_label")
+  );
 }
 
 function isMissingPaymentSchema(error: unknown) {
@@ -1350,8 +1363,20 @@ export async function listAdminUsers(input?: {
           user,
         ): Promise<[string, CreditLogRow[], PaymentOrder[]]> => [
           user.id,
-          await listAdminCreditLogsForUser(user.id, 500),
-          await listAdminUserPaymentOrders(user.id, 30),
+          await listAdminCreditLogsForUser(user.id, 500).catch((error) => {
+            console.error("【后台用户账本读取失败，已回退为空】:", {
+              userId: user.id,
+              error,
+            });
+            return [];
+          }),
+          await listAdminUserPaymentOrders(user.id, 30).catch((error) => {
+            console.error("【后台用户订单读取失败，已回退为空】:", {
+              userId: user.id,
+              error,
+            });
+            return [];
+          }),
         ],
       ),
     );
