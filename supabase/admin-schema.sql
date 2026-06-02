@@ -67,6 +67,7 @@ create table if not exists public.user_credit_logs (
   reason_code text not null,
   reason_label text not null,
   note text,
+  -- Accounting-related magic coin logs must be retained for at least 6 months.
   created_at timestamptz not null default now()
 );
 

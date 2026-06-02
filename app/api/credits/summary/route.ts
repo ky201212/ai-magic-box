@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
+import {
+  USER_CREDIT_LOG_VISIBLE_DAYS,
+  ensureUserCredits,
+  listUserCreditLogsByWindow,
+} from "@/lib/credits";
 
 export async function GET() {
   try {
@@ -12,7 +16,10 @@ export async function GET() {
 
     const [credits, creditLogs] = await Promise.all([
       ensureUserCredits(currentUser.user_id),
-      listUserCreditLogs(currentUser.user_id, 12),
+      listUserCreditLogsByWindow(currentUser.user_id, {
+        limit: 120,
+        sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+      }),
     ]);
 
     return NextResponse.json({

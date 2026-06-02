@@ -957,7 +957,7 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                         <div>
                           <p className="text-sm font-black text-slate-800">魔法币流水</p>
                           <p className="mt-2 text-sm leading-7 text-slate-500">
-                            用户端看到的增加、扣减记录，这里后台同步保留一份。
+                            用户端显示最近两个月，这里后台保留并显示最近六个月的流水。
                           </p>
                         </div>
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500">

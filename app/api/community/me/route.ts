@@ -4,7 +4,11 @@ import {
   getUserProfile,
   listUserCommunityPosts,
 } from "@/lib/community";
-import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
+import {
+  USER_CREDIT_LOG_VISIBLE_DAYS,
+  ensureUserCredits,
+  listUserCreditLogsByWindow,
+} from "@/lib/credits";
 import { getCurrentUser } from "@/lib/auth";
 import { listUserPaymentOrders, listUserSubscriptions } from "@/lib/payments";
 
@@ -22,7 +26,10 @@ export async function GET() {
       getUserProfile(currentUser.user_id),
       ensureUserCredits(currentUser.user_id),
       listUserCommunityPosts(currentUser.user_id),
-      listUserCreditLogs(currentUser.user_id),
+      listUserCreditLogsByWindow(currentUser.user_id, {
+        limit: 500,
+        sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+      }),
       listUserPaymentOrders(currentUser.user_id, 6),
       listUserSubscriptions(currentUser.user_id),
     ]);

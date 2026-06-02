@@ -107,7 +107,9 @@ function formatOrderStatus(status: string) {
 }
 
 function toDateOnly(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+  }).format(date);
 }
 
 function isCurrentSubscription(

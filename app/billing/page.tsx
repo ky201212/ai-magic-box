@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureUserCredits, listUserCreditLogs } from "@/lib/credits";
+import {
+  USER_CREDIT_LOG_VISIBLE_DAYS,
+  ensureUserCredits,
+  listUserCreditLogsByWindow,
+} from "@/lib/credits";
 import {
   getMagicCoinRate,
   listCoinRechargePackages,
@@ -19,7 +23,10 @@ export default async function BillingPage() {
 
   const [credits, creditLogs, rate, packages, plans, orders, subscriptions] = await Promise.all([
     ensureUserCredits(currentUser.user_id),
-    listUserCreditLogs(currentUser.user_id, 12),
+    listUserCreditLogsByWindow(currentUser.user_id, {
+      limit: 120,
+      sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+    }),
     getMagicCoinRate(),
     listCoinRechargePackages(),
     listSubscriptionPlans(),

@@ -688,7 +688,7 @@ export default function ProfilePage() {
                   我的魔法币账本
                 </h3>
                 <p className="mt-3 text-sm leading-7 text-[#687394]">
-                  这里会告诉你魔法币什么时候增加、什么时候减少，以及对应原因。
+                  这里会显示最近两个月内的魔法币变化时间、原因和余额变化。
                 </p>
               </div>
               <button

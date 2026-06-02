@@ -2,8 +2,11 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { PostgrestError } from "@supabase/supabase-js";
-import { createCreditLogEntry } from "@/lib/credits";
-import type { CreditLogRow } from "@/lib/credits";
+import {
+  ADMIN_CREDIT_LOG_VISIBLE_DAYS,
+  createCreditLogEntry,
+  type CreditLogRow,
+} from "@/lib/credits";
 import {
   listAdminUserPaymentOrders,
   type PaymentOrder,
@@ -1163,12 +1166,15 @@ function isMissingPaymentSchema(error: unknown) {
 
 async function listAdminCreditLogsForUser(userId: string, limit = 30) {
   const supabaseAdmin = getSupabaseAdmin();
+  const sinceDate = new Date();
+  sinceDate.setUTCDate(sinceDate.getUTCDate() - ADMIN_CREDIT_LOG_VISIBLE_DAYS);
   const { data, error } = await supabaseAdmin
     .from("user_credit_logs")
     .select(
       "id, user_id, change_amount, balance_after, reason_code, reason_label, note, created_at",
     )
     .eq("user_id", userId)
+    .gte("created_at", sinceDate.toISOString())
     .order("created_at", { ascending: false })
     .limit(limit)
     .returns<CreditLogRow[]>();
@@ -1191,7 +1197,9 @@ async function listAdminCreditLogsForUser(userId: string, limit = 30) {
     throw fallbackError;
   }
 
-  return (fallback?.value?.logs ?? []).slice(0, limit);
+  return (fallback?.value?.logs ?? [])
+    .filter((log) => new Date(log.created_at) >= sinceDate)
+    .slice(0, limit);
 }
 
 async function listAdminSubscriptionsForUsers(userIds: string[]) {
@@ -1342,7 +1350,7 @@ export async function listAdminUsers(input?: {
           user,
         ): Promise<[string, CreditLogRow[], PaymentOrder[]]> => [
           user.id,
-          await listAdminCreditLogsForUser(user.id, 30),
+          await listAdminCreditLogsForUser(user.id, 500),
           await listAdminUserPaymentOrders(user.id, 30),
         ],
       ),

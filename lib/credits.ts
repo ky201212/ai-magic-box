@@ -4,6 +4,10 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getCreditPolicySetting } from "@/lib/admin-data";
 
 export const INITIAL_CREDITS = 50;
+export const USER_CREDIT_LOG_VISIBLE_DAYS = 60;
+export const ADMIN_CREDIT_LOG_VISIBLE_DAYS = 180;
+const FALLBACK_CREDIT_LOG_RETENTION_DAYS = ADMIN_CREDIT_LOG_VISIBLE_DAYS;
+const FALLBACK_CREDIT_LOG_MAX_ENTRIES = 1000;
 
 type CreditRow = {
   user_id: string;
@@ -63,6 +67,10 @@ function getCreditLogFallbackKey(userId: string) {
 async function appendFallbackCreditLog(input: UserCreditLogInsertPayload) {
   const supabaseAdmin = getSupabaseAdmin();
   const settingKey = getCreditLogFallbackKey(input.user_id);
+  const retentionStart = new Date();
+  retentionStart.setUTCDate(
+    retentionStart.getUTCDate() - FALLBACK_CREDIT_LOG_RETENTION_DAYS,
+  );
   const nextLog: CreditLogRow = {
     id: crypto.randomUUID(),
     user_id: input.user_id,
@@ -85,7 +93,9 @@ async function appendFallbackCreditLog(input: UserCreditLogInsertPayload) {
   }
 
   const existingLogs = existingSetting?.value?.logs ?? [];
-  const nextLogs = [nextLog, ...existingLogs].slice(0, 100);
+  const nextLogs = [nextLog, ...existingLogs]
+    .filter((log) => new Date(log.created_at) >= retentionStart)
+    .slice(0, FALLBACK_CREDIT_LOG_MAX_ENTRIES);
 
   const { error: upsertError } = await supabaseAdmin.from("site_settings").upsert(
     {
@@ -358,7 +368,24 @@ export async function deductCredits(
 }
 
 export async function listUserCreditLogs(userId: string, limit = 30) {
+  return listUserCreditLogsByWindow(userId, {
+    limit,
+    sinceDays: USER_CREDIT_LOG_VISIBLE_DAYS,
+  });
+}
+
+export async function listUserCreditLogsByWindow(
+  userId: string,
+  input?: {
+    limit?: number;
+    sinceDays?: number;
+  },
+) {
   const supabaseAdmin = getSupabaseAdmin();
+  const limit = Math.max(1, Math.floor(input?.limit ?? 30));
+  const sinceDays = Math.max(1, Math.floor(input?.sinceDays ?? USER_CREDIT_LOG_VISIBLE_DAYS));
+  const sinceDate = new Date();
+  sinceDate.setUTCDate(sinceDate.getUTCDate() - sinceDays);
 
   const { data, error } = await supabaseAdmin
     .from("user_credit_logs")
@@ -366,6 +393,7 @@ export async function listUserCreditLogs(userId: string, limit = 30) {
       "id, user_id, change_amount, balance_after, reason_code, reason_label, note, created_at",
     )
     .eq("user_id", userId)
+    .gte("created_at", sinceDate.toISOString())
     .order("created_at", { ascending: false })
     .limit(limit)
     .returns<CreditLogRow[]>();
@@ -373,7 +401,10 @@ export async function listUserCreditLogs(userId: string, limit = 30) {
   if (error) {
     if (isMissingCreditLogTable(error)) {
       console.warn("魔法币日志表暂不可用，已改为读取后备日志存储。", error);
-      return listFallbackCreditLogs(userId);
+      const fallbackLogs = await listFallbackCreditLogs(userId);
+      return fallbackLogs
+        .filter((log) => new Date(log.created_at) >= sinceDate)
+        .slice(0, limit);
     }
 
     throw error;
