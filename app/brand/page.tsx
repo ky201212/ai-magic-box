@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { marketingNavItems } from "../_components/marketing-nav";
+import { cookies } from "next/headers";
+import { MarketingHeader } from "../_components/marketing-header";
 import { getBrandIdentitySetting } from "@/lib/site-config";
 
 const philosophyItems = [
@@ -91,6 +92,8 @@ function SectionLabel({ label }: { label: string }) {
 }
 
 export default async function BrandPage() {
+  const cookieStore = await cookies();
+  const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
   const brandIdentity = await getBrandIdentitySetting();
 
   return (
@@ -99,50 +102,14 @@ export default async function BrandPage() {
         <BrandBackground />
 
         <div className="relative mx-auto flex min-h-screen w-full max-w-[1920px] flex-col px-4 py-5 sm:px-6 sm:py-6 lg:px-10 xl:px-12 2xl:px-16">
-          <header className="relative z-20 rounded-[28px] border border-white/80 bg-white/72 px-6 py-5 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <Link href="/" className="flex items-center gap-4">
-                <Image
-                  src={brandIdentity.logoUrl}
-                  alt={brandIdentity.siteName}
-                  width={54}
-                  height={54}
-                  className="rounded-[18px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)]"
-                  priority
-                />
-                <div>
-                  <p className="text-[18px] font-semibold tracking-normal text-[#17213f]">
-                    {brandIdentity.siteName}
-                  </p>
-                  <p className="text-[12px] tracking-[0.08em] text-[#6d7899]">
-                    {brandIdentity.tagline}
-                  </p>
-                </div>
-              </Link>
-
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-                <nav className="flex flex-wrap items-center gap-5 text-[14px] font-semibold text-[#6a7392]">
-                  {marketingNavItems.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`transition hover:text-[#17213f] ${
-                        item.href === "/brand" ? "text-[#6c63ff]" : "text-[#6a7392]"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                  <Link
-                    href="/login"
-                    className="text-[#5f6b8e] transition hover:text-[#17213f]"
-                  >
-                    手机登录
-                  </Link>
-                </nav>
-              </div>
-            </div>
-          </header>
+          <div className="relative z-20">
+            <MarketingHeader
+              brandIdentity={brandIdentity}
+              activeHref="/brand"
+              isLoggedIn={isLoggedIn}
+              loginRedirect="/brand"
+            />
+          </div>
 
           <div className="relative z-10 mt-6 grid flex-1 gap-6">
             <BrandCard className="p-8 sm:p-10 xl:p-12">

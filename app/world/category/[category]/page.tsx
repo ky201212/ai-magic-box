@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { listInfoContentPosts } from "@/lib/admin-data";
+import { MarketingHeader } from "@/app/_components/marketing-header";
 import {
   getInfoCategoryHref,
   getInfoCategoryTitle,
@@ -8,6 +10,7 @@ import {
   getInfoPostHref,
   isInfoCategoryKey,
 } from "@/lib/info-content";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 
 type CategoryPageProps = {
   params: Promise<{
@@ -24,12 +27,24 @@ export default async function WorldCategoryPage({
     notFound();
   }
 
-  const posts = await listInfoContentPosts().catch(() => []);
+  const cookieStore = await cookies();
+  const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const [brandIdentity, posts] = await Promise.all([
+    getBrandIdentitySetting(),
+    listInfoContentPosts().catch(() => []),
+  ]);
   const categoryPosts = posts.filter((post) => post.category === category);
 
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#18213f] sm:px-6 sm:py-10 lg:px-12">
-      <div className="mx-auto max-w-[1120px]">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-5 text-[#18213f] sm:px-6 sm:py-6 lg:px-12">
+      <div className="mx-auto max-w-[1280px]">
+        <MarketingHeader
+          brandIdentity={brandIdentity}
+          activeHref="/world"
+          isLoggedIn={isLoggedIn}
+          loginRedirect={`/world/category/${category}`}
+        />
+        <div className="mx-auto mt-8 max-w-[1120px]">
         <div className="rounded-[30px] border border-white/80 bg-white/78 p-8 shadow-[0_24px_70px_rgba(92,116,189,0.12)] backdrop-blur-2xl">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -98,6 +113,7 @@ export default async function WorldCategoryPage({
             </div>
           )}
         </section>
+        </div>
       </div>
     </main>
   );

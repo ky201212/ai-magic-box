@@ -1,12 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { listInfoContentPosts } from "@/lib/admin-data";
+import { MarketingHeader } from "@/app/_components/marketing-header";
 import {
   getInfoCategoryHref,
   getInfoCategoryTitle,
   getInfoPostExcerpt,
 } from "@/lib/info-content";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 
 type InfoDetailPageProps = {
   params: Promise<{
@@ -25,7 +28,12 @@ export default async function InfoDetailPage({
   params,
 }: InfoDetailPageProps) {
   const { postId } = await params;
-  const posts = await listInfoContentPosts().catch(() => []);
+  const cookieStore = await cookies();
+  const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const [brandIdentity, posts] = await Promise.all([
+    getBrandIdentitySetting(),
+    listInfoContentPosts().catch(() => []),
+  ]);
   const post = posts.find((item) => item.id === postId);
 
   if (!post) {
@@ -35,9 +43,16 @@ export default async function InfoDetailPage({
   const paragraphs = renderParagraphs(post.body);
 
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#18213f] sm:px-6 sm:py-10 lg:px-12">
-      <div className="mx-auto max-w-[980px]">
-        <article className="overflow-hidden rounded-[34px] border border-white/80 bg-white/82 shadow-[0_30px_90px_rgba(92,116,189,0.14)] backdrop-blur-2xl">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-5 text-[#18213f] sm:px-6 sm:py-6 lg:px-12">
+      <div className="mx-auto max-w-[1280px]">
+        <MarketingHeader
+          brandIdentity={brandIdentity}
+          activeHref="/world"
+          isLoggedIn={isLoggedIn}
+          loginRedirect={`/world/${post.id}`}
+        />
+        <div className="mx-auto mt-8 max-w-[980px]">
+          <article className="overflow-hidden rounded-[34px] border border-white/80 bg-white/82 shadow-[0_30px_90px_rgba(92,116,189,0.14)] backdrop-blur-2xl">
           <div className="border-b border-[#edf1ff] px-7 py-8 sm:px-10">
             <div className="flex flex-wrap items-center gap-3">
               <Link
@@ -106,7 +121,8 @@ export default async function InfoDetailPage({
               )}
             </div>
           </div>
-        </article>
+          </article>
+        </div>
       </div>
     </main>
   );

@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { marketingNavItems } from "../_components/marketing-nav";
+import { MarketingHeader } from "../_components/marketing-header";
 import { getBrandIdentitySetting } from "@/lib/site-config";
 
 const matrixCards = [
@@ -63,106 +63,12 @@ export default async function MatrixPage() {
         </div>
 
         <div className="relative mx-auto w-full max-w-[1920px] px-4 py-6 sm:px-6 sm:py-8 lg:px-14 xl:px-20">
-          <header className="flex flex-col gap-4 rounded-[28px] border border-white/80 bg-white/72 px-4 py-4 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
-            <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
-              <Image
-                src={brandIdentity.logoUrl}
-                alt={brandIdentity.siteName}
-                width={54}
-                height={54}
-                className="h-11 w-11 rounded-[14px] bg-white object-cover shadow-[0_12px_28px_rgba(87,115,180,0.16)] sm:h-[54px] sm:w-[54px] sm:rounded-[18px]"
-                priority
-              />
-              <div className="min-w-0">
-                <p className="truncate text-[16px] font-semibold tracking-[-0.03em] text-[#17213f] sm:text-[18px]">
-                  {brandIdentity.siteName}
-                </p>
-                <p className="truncate text-[11px] tracking-[0.08em] text-[#6d7899] sm:text-[12px]">
-                  {brandIdentity.tagline}
-                </p>
-              </div>
-            </Link>
-
-            <div className="hidden items-center gap-8 lg:flex">
-              {marketingNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`text-[14px] font-semibold tracking-[0.03em] transition hover:text-[#17213f] ${
-                    item.href === "/matrix" ? "text-[#6c63ff]" : "text-[#6a7392]"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-              <div className="flex items-center gap-3 rounded-full border border-[#dce5ff] bg-white/78 p-2 pl-3 shadow-[0_18px_44px_rgba(116,132,185,0.1)] backdrop-blur-xl">
-                {isLoggedIn ? (
-                  <form action="/api/auth/logout" method="POST">
-                    <button
-                      type="submit"
-                      className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
-                    >
-                      退出登录
-                    </button>
-                  </form>
-                ) : (
-                  <Link
-                    href="/login"
-                    className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
-                  >
-                    手机号登录
-                  </Link>
-                )}
-                <Link
-                  href="/workshop?mode=coding"
-                  className="rounded-full bg-[#17213f] px-6 py-2.5 text-[14px] font-semibold text-white shadow-[0_14px_34px_rgba(23,33,63,0.16)] transition hover:-translate-y-0.5"
-                >
-                  进入工坊
-                </Link>
-              </div>
-            </div>
-
-            <div className="flex w-full flex-col gap-3 lg:hidden">
-              <div className="flex flex-wrap items-center gap-3 text-[13px] font-semibold text-[#5f6b8e]">
-                {marketingNavItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`transition hover:text-[#17213f] ${
-                      item.href === "/matrix" ? "text-[#6c63ff]" : "text-[#6a7392]"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                {isLoggedIn ? (
-                  <form action="/api/auth/logout" method="POST" className="sm:flex-1">
-                    <button
-                      type="submit"
-                      className="w-full rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
-                    >
-                      退出登录
-                    </button>
-                  </form>
-                ) : (
-                  <Link
-                    href="/login"
-                    className="inline-flex items-center justify-center rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-1"
-                  >
-                    手机号登录
-                  </Link>
-                )}
-                <Link
-                  href="/workshop?mode=coding"
-                  className="inline-flex items-center justify-center rounded-full bg-[#17213f] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_14px_34px_rgba(23,33,63,0.16)] transition hover:-translate-y-0.5 sm:flex-1"
-                >
-                  进入工坊
-                </Link>
-              </div>
-            </div>
-          </header>
+          <MarketingHeader
+            brandIdentity={brandIdentity}
+            activeHref="/matrix"
+            isLoggedIn={isLoggedIn}
+            loginRedirect="/matrix"
+          />
 
           <section className="py-12 sm:py-16">
             <div className="inline-flex rounded-full border border-white/80 bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#627ee6] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">

@@ -12,6 +12,7 @@ import {
   listUserPaymentOrders,
   listUserSubscriptions,
 } from "@/lib/payments";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 import { BillingClient, type BillingPayload } from "./billing-client";
 
 export default async function BillingPage() {
@@ -21,7 +22,8 @@ export default async function BillingPage() {
     redirect("/login?redirect=/billing");
   }
 
-  const [credits, creditLogs, rate, packages, plans, orders, subscriptions] = await Promise.all([
+  const [brandIdentity, credits, creditLogs, rate, packages, plans, orders, subscriptions] = await Promise.all([
+    getBrandIdentitySetting(),
     ensureUserCredits(currentUser.user_id),
     listUserCreditLogsByWindow(currentUser.user_id, {
       limit: 120,
@@ -45,5 +47,5 @@ export default async function BillingPage() {
     subscriptions,
   };
 
-  return <BillingClient initialData={initialData} />;
+  return <BillingClient brandIdentity={brandIdentity} initialData={initialData} />;
 }

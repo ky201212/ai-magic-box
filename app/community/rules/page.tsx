@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { MarketingHeader } from "@/app/_components/marketing-header";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 
 const ruleSections = [
   {
@@ -51,11 +54,21 @@ const ruleSections = [
   },
 ];
 
-export default function CommunityRulesPage() {
+export default async function CommunityRulesPage() {
+  const cookieStore = await cookies();
+  const isLoggedIn = Boolean(cookieStore.get("magic_session")?.value);
+  const brandIdentity = await getBrandIdentitySetting();
+
   return (
-    <main className="min-h-screen bg-[#f7f8ff] px-4 py-8 text-[#17213f] sm:px-6 lg:px-12">
-      <div className="mx-auto max-w-[1120px]">
-        <div className="rounded-[28px] border border-white/80 bg-white/82 p-6 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl sm:p-8">
+    <main className="min-h-screen bg-[#f7f8ff] px-4 py-5 text-[#17213f] sm:px-6 sm:py-6 lg:px-12">
+      <div className="mx-auto max-w-[1280px]">
+        <MarketingHeader
+          brandIdentity={brandIdentity}
+          activeHref="/community"
+          isLoggedIn={isLoggedIn}
+          loginRedirect="/community/rules"
+        />
+        <div className="mx-auto mt-8 max-w-[1120px] rounded-[28px] border border-white/80 bg-white/82 p-6 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="inline-flex items-center rounded-full bg-[#f3efff] px-3 py-1 text-xs font-black text-[#8a6dff]">

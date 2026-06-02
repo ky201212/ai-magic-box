@@ -63,14 +63,22 @@ export default async function HomePage() {
             ))}
             <div className="flex items-center gap-3 rounded-full border border-white/80 bg-white/72 p-2 pl-3 shadow-[0_18px_44px_rgba(116,132,185,0.12)] backdrop-blur-xl">
               {isLoggedIn ? (
-                <form action="/api/auth/logout" method="POST">
-                  <button
-                    type="submit"
+                <>
+                  <Link
+                    href="/profile"
                     className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                   >
-                    退出登录
-                  </button>
-                </form>
+                    我的主页
+                  </Link>
+                  <form action="/api/auth/logout" method="POST">
+                    <button
+                      type="submit"
+                      className="rounded-full border border-[#e1e7ff] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    >
+                      退出登录
+                    </button>
+                  </form>
+                </>
               ) : (
                 <Link
                   href="/login"
@@ -102,14 +110,22 @@ export default async function HomePage() {
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               {isLoggedIn ? (
-                <form action="/api/auth/logout" method="POST" className="sm:flex-1">
-                  <button
-                    type="submit"
-                    className="w-full rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                <>
+                  <Link
+                    href="/profile"
+                    className="inline-flex items-center justify-center rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252] sm:flex-1"
                   >
-                    退出登录
-                  </button>
-                </form>
+                    我的主页
+                  </Link>
+                  <form action="/api/auth/logout" method="POST" className="sm:flex-1">
+                    <button
+                      type="submit"
+                      className="w-full rounded-full border border-[#e1e7ff] bg-white px-4 py-3 text-[13px] font-semibold text-[#5c6688] shadow-[0_12px_26px_rgba(116,132,185,0.08)] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    >
+                      退出登录
+                    </button>
+                  </form>
+                </>
               ) : (
                 <Link
                   href="/login"

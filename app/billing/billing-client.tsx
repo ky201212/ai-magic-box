@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { marketingNavItems } from "../_components/marketing-nav";
+import { MarketingHeader } from "../_components/marketing-header";
 
 type PaymentMethod = "alipay_pc" | "wechat_pc";
 type SaveState = "idle" | "saving" | "success" | "error";
@@ -55,6 +55,12 @@ export type BillingPayload = {
       price: number;
     } | null;
   }>;
+};
+
+type BrandIdentity = {
+  siteName: string;
+  tagline: string;
+  logoUrl: string;
 };
 
 function formatMoney(price: number) {
@@ -238,7 +244,13 @@ function PaymentMethodSelector({
   );
 }
 
-export function BillingClient({ initialData }: { initialData: BillingPayload }) {
+export function BillingClient({
+  brandIdentity,
+  initialData,
+}: {
+  brandIdentity: BrandIdentity;
+  initialData: BillingPayload;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [data, setData] = useState<BillingPayload>(initialData);
@@ -650,31 +662,12 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
         <div className="home-grid pointer-events-none absolute inset-0 opacity-80" />
 
         <div className="relative mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 sm:py-6 lg:px-10">
-          <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" prefetch className="text-lg font-black text-[#17213f]">
-              小红车魔法工坊
-            </Link>
-
-            <div className="flex flex-wrap items-center gap-5">
-              {marketingNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch
-                  className="hidden text-sm font-semibold text-[#6a7392] sm:inline-flex"
-                >
-                  {item.label}
-                </Link>
-              ))}
-              <Link
-                href="/profile"
-                prefetch
-                className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-bold text-[#5c6688]"
-              >
-                我的主页
-              </Link>
-            </div>
-          </header>
+          <MarketingHeader
+            brandIdentity={brandIdentity}
+            activeHref="/billing"
+            isLoggedIn
+            loginRedirect="/billing"
+          />
 
           <section className="grid gap-6 py-8 xl:grid-cols-[340px_minmax(0,1fr)]">
             <aside className="space-y-4">

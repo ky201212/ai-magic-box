@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listUserPaymentOrders } from "@/lib/payments";
-import { marketingNavItems } from "@/app/_components/marketing-nav";
+import { MarketingHeader } from "@/app/_components/marketing-header";
+import { getBrandIdentitySetting } from "@/lib/site-config";
 
 function formatMoney(price: number) {
   return `¥${(price / 100).toFixed(2)}`;
@@ -81,7 +81,10 @@ export default async function BillingOrdersPage() {
     redirect("/login?redirect=/billing/orders");
   }
 
-  const orders = await listUserPaymentOrders(currentUser.user_id, 100);
+  const [brandIdentity, orders] = await Promise.all([
+    getBrandIdentitySetting(),
+    listUserPaymentOrders(currentUser.user_id, 100),
+  ]);
 
   return (
     <main className="min-h-screen bg-[#f7f8ff] text-[#17213f]">
@@ -90,31 +93,12 @@ export default async function BillingOrdersPage() {
         <div className="home-grid pointer-events-none absolute inset-0 opacity-80" />
 
         <div className="relative mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-6 sm:py-6 lg:px-10">
-          <header className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/80 bg-white/72 px-4 py-3 shadow-[0_18px_50px_rgba(84,107,170,0.12)] backdrop-blur-2xl">
-            <Link href="/" prefetch className="text-lg font-black text-[#17213f]">
-              小红车魔法工坊
-            </Link>
-
-            <div className="flex flex-wrap items-center gap-5">
-              {marketingNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch
-                  className="hidden text-sm font-semibold text-[#6a7392] sm:inline-flex"
-                >
-                  {item.label}
-                </Link>
-              ))}
-              <Link
-                href="/billing"
-                prefetch
-                className="rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-sm font-bold text-[#5c6688]"
-              >
-                返回充值中心
-              </Link>
-            </div>
-          </header>
+          <MarketingHeader
+            brandIdentity={brandIdentity}
+            activeHref="/billing"
+            isLoggedIn
+            loginRedirect="/billing/orders"
+          />
 
           <section className="pt-8">
             <div className="rounded-[30px] border border-white/80 bg-white/78 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.1)] backdrop-blur-2xl sm:p-7">
