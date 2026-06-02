@@ -149,15 +149,19 @@ export async function GET(request: Request) {
     await updateCodingGenerationTask(task.id, {
       progressMessage: message,
     }).catch(() => null);
-    void drainCodingGenerationQueue();
+    await drainCodingGenerationQueue();
+
+    const refreshedTask = await readCodingGenerationTask(task.id);
+
+    if (refreshedTask?.status === "processing") {
+      return NextResponse.json(createCodingTaskPendingPayload(refreshedTask), {
+        status: 202,
+      });
+    }
 
     return NextResponse.json(createCodingTaskPendingPayload(task, message), {
       status: 202,
     });
-  }
-
-  if (task.status === "processing") {
-    void drainCodingGenerationQueue();
   }
 
   return NextResponse.json(createCodingTaskPendingPayload(task), { status: 202 });
@@ -857,62 +861,76 @@ async function runDeferredCodingTaskRecord(task: CodingGenerationTaskRecord) {
     latestPersistedAt: 0,
   };
 
-  await startDeferredCodingGenerationTask({
-    taskId: task.id,
-    requestPrompt,
-    traceContext,
-    run: () =>
-      runCodingGenerateRequestWithModelChain({
-        requestPrompt,
-        upstreamPrompt,
-        aiConfig,
-        remainingCredits: task.remainingCredits,
-        traceContext,
-        requestTimeoutMsOverride: requestTimeoutMs,
-        onPartialCode: async (partialCode) => {
-          const now = Date.now();
+  try {
+    await startDeferredCodingGenerationTask({
+      taskId: task.id,
+      requestPrompt,
+      traceContext,
+      run: () =>
+        runCodingGenerateRequestWithModelChain({
+          requestPrompt,
+          upstreamPrompt,
+          aiConfig,
+          remainingCredits: task.remainingCredits,
+          traceContext,
+          requestTimeoutMsOverride: requestTimeoutMs,
+          onPartialCode: async (partialCode) => {
+            const now = Date.now();
 
-          if (
-            partialCodePersistence.latestPersistedAt !== 0 &&
-            now - partialCodePersistence.latestPersistedAt < 700 &&
-            partialCode.length < 1200
-          ) {
-            return;
-          }
+            if (
+              partialCodePersistence.latestPersistedAt !== 0 &&
+              now - partialCodePersistence.latestPersistedAt < 700 &&
+              partialCode.length < 1200
+            ) {
+              return;
+            }
 
-          partialCodePersistence.latestPersistedAt = now;
-          await updateCodingGenerationTask(partialCodePersistence.taskId, {
-            status: "processing",
-            progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
-            partialCode,
-          });
-        },
-        onTaskUpdate: async (patch) => {
-          await updateCodingGenerationTask(partialCodePersistence.taskId, {
-            status: "processing",
-            ...patch,
-          });
-        },
-      }),
-    refundCredits: async () => {
-      if (!task.chargedUserId || !task.creditCost || task.creditCost <= 0) {
-        return task.remainingCredits;
-      }
+            partialCodePersistence.latestPersistedAt = now;
+            await updateCodingGenerationTask(partialCodePersistence.taskId, {
+              status: "processing",
+              progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
+              partialCode,
+            });
+          },
+          onTaskUpdate: async (patch) => {
+            await updateCodingGenerationTask(partialCodePersistence.taskId, {
+              status: "processing",
+              ...patch,
+            });
+          },
+        }),
+      refundCredits: async () => {
+        if (!task.chargedUserId || !task.creditCost || task.creditCost <= 0) {
+          return task.remainingCredits;
+        }
 
-      const refundedCredits = await addCredits(task.chargedUserId, task.creditCost, {
-        reasonCode: "coding_refund",
-        reasonLabel: "AI编程失败退回",
-        note: `AI 编程后台生成失败，退回 ${task.creditCost} 个魔法币。`,
-      });
+        const refundedCredits = await addCredits(task.chargedUserId, task.creditCost, {
+          reasonCode: "coding_refund",
+          reasonLabel: "AI编程失败退回",
+          note: `AI 编程后台生成失败，退回 ${task.creditCost} 个魔法币。`,
+        });
 
-      await updateCodingGenerationTask(task.id, {
-        chargedUserId: undefined,
-        remainingCredits: refundedCredits,
-      });
+        await updateCodingGenerationTask(task.id, {
+          chargedUserId: undefined,
+          remainingCredits: refundedCredits,
+        });
 
-      return refundedCredits;
-    },
-  });
+        return refundedCredits;
+      },
+    });
+  } catch (error) {
+    await updateCodingGenerationTask(task.id, {
+      status: "succeeded",
+      completedAt: new Date().toISOString(),
+      code: buildCodingFallbackHtml(requestPrompt),
+      partialCode: "",
+      degraded: true,
+      degradedReason: error instanceof Error ? error.message : "后台任务启动失败，已切换到站内兜底。",
+      progressMessage: "后台任务启动失败，已切换到站内兜底。",
+      error: error instanceof Error ? error.message : "后台任务启动失败",
+      httpStatus: 200,
+    }).catch(() => null);
+  }
 }
 
 async function drainCodingGenerationQueue() {
@@ -2684,7 +2702,21 @@ export async function POST(request: Request) {
         await updateCodingGenerationTask(existingTask.id, {
           progressMessage: message,
         }).catch(() => null);
-        void drainCodingGenerationQueue();
+        await drainCodingGenerationQueue();
+
+        const refreshedTask = await readCodingGenerationTask(existingTask.id);
+
+        if (refreshedTask?.status === "processing") {
+          const response = NextResponse.json(
+            {
+              ...createCodingTaskPendingPayload(refreshedTask),
+              requestId,
+            },
+            { status: 202 },
+          );
+          response.headers.set("x-ai-request-id", requestId);
+          return response;
+        }
 
         const response = NextResponse.json(
           createCodingTaskPendingPayload(existingTask, message),
@@ -2692,10 +2724,6 @@ export async function POST(request: Request) {
         );
         response.headers.set("x-ai-request-id", requestId);
         return response;
-      }
-
-      if (existingTask.status === "processing") {
-        void drainCodingGenerationQueue();
       }
 
       const response = NextResponse.json(
@@ -2838,14 +2866,18 @@ export async function POST(request: Request) {
       );
 
       await writeCodingGenerationTask(queuedTask);
-      void drainCodingGenerationQueue();
+      await drainCodingGenerationQueue();
+
+      const startedTask = await readCodingGenerationTask(taskId);
+      const startedMessage =
+        startedTask?.progressMessage ?? queuedTask.progressMessage;
 
       const response = NextResponse.json(
         {
           requestId,
           taskId,
-          status: "queued",
-          message: queuedTask.progressMessage,
+          status: startedTask?.status ?? "queued",
+          message: startedMessage,
           remainingCredits,
         },
         { status: 202 },
