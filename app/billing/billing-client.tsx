@@ -106,6 +106,16 @@ function formatOrderStatus(status: string) {
   return status;
 }
 
+function toDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function isCurrentSubscription(
+  subscription: BillingPayload["subscriptions"][number],
+) {
+  return subscription.status === "active" && subscription.end_date >= toDateOnly(new Date());
+}
+
 const ORDER_PREVIEW_LIMIT = 5;
 const PENDING_CHECKOUT_STORAGE_KEY = "magic-box:pending-checkout-order";
 const ALIPAY_LOGO_SRC = "/alipay-assets/alipay-logo-square.png";
@@ -246,8 +256,8 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
   const [selectedPaymentMethod, setSelectedPaymentMethod] =
     useState<PaymentMethod>("alipay_pc");
 
-  const activeSubscription = useMemo(
-    () => data.subscriptions.find((item) => item.status === "active") ?? null,
+  const currentSubscription = useMemo(
+    () => data.subscriptions.find(isCurrentSubscription) ?? null,
     [data.subscriptions],
   );
   const previewOrders = useMemo(
@@ -538,9 +548,9 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
     try {
       const selectedPlan = data.plans.find((plan) => plan.id === planId) ?? null;
 
-      if (activeSubscription) {
+      if (currentSubscription) {
         const confirmed = window.confirm(
-          `你当前正在使用“${activeSubscription.subscription_plans?.name ?? "已开通订阅"}”。继续购买“${selectedPlan?.name ?? "新套餐"}”后，当前订阅会被新订阅覆盖。`,
+          `你当前正在使用“${currentSubscription.subscription_plans?.name ?? "已开通订阅"}”。继续购买“${selectedPlan?.name ?? "新套餐"}”后，当前仍在生效的订阅会被新订阅覆盖。`,
         );
 
         if (!confirmed) {
@@ -811,7 +821,7 @@ export function BillingClient({ initialData }: { initialData: BillingPayload }) 
                   <p className="text-lg font-black text-[#17213f]">订阅中心</p>
 
                   <div className="mt-3 rounded-[18px] border border-[#f4e2b2] bg-[#fffbf1] px-4 py-3 text-sm leading-7 text-[#8a7141]">
-                    订阅套餐之间不能叠加。购买新的订阅会覆盖当前正在生效的订阅。
+                    订阅套餐之间不能叠加。只有仍在生效期内的订阅会被新订阅覆盖，已过期订阅不会被覆盖。
                   </div>
 
                   <PaymentMethodSelector

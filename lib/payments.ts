@@ -1312,6 +1312,7 @@ export async function createUserSubscription(input: {
   referenceId?: string | null;
 }) {
   const supabase = getSupabaseAdmin();
+  const startDate = toDateOnly(new Date());
   const { data: plan, error: planError } = await supabase
     .from("subscription_plans")
     .select(
@@ -1324,19 +1325,32 @@ export async function createUserSubscription(input: {
     throw asPaymentInfrastructureError(planError);
   }
 
+  const { error: expireExistingError } = await supabase
+    .from("user_subscriptions")
+    .update({
+      status: "expired",
+    } as never)
+    .eq("user_id", input.userId)
+    .eq("status", "active")
+    .lt("end_date", startDate);
+
+  if (expireExistingError) {
+    throw asPaymentInfrastructureError(expireExistingError);
+  }
+
   const { error: cancelExistingError } = await supabase
     .from("user_subscriptions")
     .update({
       status: "cancelled",
     } as never)
     .eq("user_id", input.userId)
-    .eq("status", "active");
+    .eq("status", "active")
+    .gte("end_date", startDate);
 
   if (cancelExistingError) {
     throw asPaymentInfrastructureError(cancelExistingError);
   }
 
-  const startDate = toDateOnly(new Date());
   const endDate = toDateOnly(addDays(new Date(), Math.max(0, plan.duration_days - 1)));
   const { data, error } = await supabase
     .from("user_subscriptions")
