@@ -1799,6 +1799,10 @@ export function AiConfigForm({
           const maxCompletionTokens = Number(
             config.extra_payload.maxCompletionTokens ?? 0,
           );
+          const streamPreviewEnabled =
+            config.mode_key === "coding"
+              ? config.extra_payload.streamPreviewEnabled !== false
+              : false;
           const imageSize =
             typeof config.extra_payload.image_size === "string"
               ? config.extra_payload.image_size
@@ -2153,6 +2157,31 @@ export function AiConfigForm({
                         : "当前未开启扣币，用户可以免费使用这个功能。"}
                     </div>
                   </div>
+
+                  {config.mode_key === "coding" ? (
+                    <div className="mt-4 rounded-[22px] bg-slate-50 px-4 py-4">
+                      <label className="flex items-start gap-3 text-sm font-bold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={streamPreviewEnabled}
+                          onChange={(event) =>
+                            handleExtraPayloadChange(
+                              config.mode_key,
+                              "streamPreviewEnabled",
+                              event.target.checked,
+                            )
+                          }
+                          className="mt-1 h-4 w-4"
+                        />
+                        <span>
+                          开启 AI 编程流式预览
+                          <span className="mt-1 block text-sm font-normal leading-7 text-slate-500">
+                            开启后，预览区会边生成边显示代码，但服务器 CPU 和内存占用更高。关闭后只等待最终结果，更省资源、更稳。
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  ) : null}
 
                   {chainEnabled ? (
                     <div className="mt-5 rounded-[26px] border border-[#dbeafe] bg-[linear-gradient(135deg,#f8fbff_0%,#f4f7ff_100%)] p-5">

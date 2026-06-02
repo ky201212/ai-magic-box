@@ -31,7 +31,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const DEFAULT_CODING_TASK_CONCURRENCY = 2;
+const DEFAULT_CODING_TASK_CONCURRENCY = 1;
 const MAX_CODING_TASK_CONCURRENCY = 12;
 const CODING_TASK_STALE_MS = 8 * 60 * 1000;
 const codingTaskRunners = new Set<string>();
@@ -49,6 +49,17 @@ function resolveCodingTaskConcurrencyLimit() {
   }
 
   return Math.min(MAX_CODING_TASK_CONCURRENCY, Math.max(1, parsed));
+}
+
+function resolveCodingUpstreamRetryCount() {
+  const rawValue = process.env.AI_CODING_UPSTREAM_RETRIES ?? "";
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, parsed));
 }
 
 function buildCodingQueuedMessage(queueAhead: number, concurrencyLimit: number) {
@@ -84,6 +95,12 @@ function isCodingTaskStale(task: CodingGenerationTaskRecord) {
   }
 
   return Date.now() - referenceAt >= CODING_TASK_STALE_MS;
+}
+
+function shouldEnableCodingStreamPreview(
+  aiConfig: Awaited<ReturnType<typeof resolveAiModeConfig>>,
+) {
+  return aiConfig.extraPayload.streamPreviewEnabled !== false;
 }
 
 function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
@@ -212,6 +229,7 @@ type GenerateTraceContext = {
 type PartialCodePersistence = {
   taskId: string;
   latestPersistedAt: number;
+  latestPersistedLength: number;
 };
 
 type PreparedCodingPrompt = {
@@ -906,7 +924,9 @@ async function runDeferredCodingTaskRecord(task: CodingGenerationTaskRecord) {
   const partialCodePersistence: PartialCodePersistence = {
     taskId: task.id,
     latestPersistedAt: 0,
+    latestPersistedLength: 0,
   };
+  const streamPreviewEnabled = shouldEnableCodingStreamPreview(aiConfig);
 
   try {
     await startDeferredCodingGenerationTask({
@@ -921,24 +941,29 @@ async function runDeferredCodingTaskRecord(task: CodingGenerationTaskRecord) {
           remainingCredits: task.remainingCredits,
           traceContext,
           requestTimeoutMsOverride: requestTimeoutMs,
-          onPartialCode: async (partialCode) => {
-            const now = Date.now();
+          onPartialCode: streamPreviewEnabled
+            ? async (partialCode) => {
+                const now = Date.now();
+                const appendedChars =
+                  partialCode.length - partialCodePersistence.latestPersistedLength;
 
-            if (
-              partialCodePersistence.latestPersistedAt !== 0 &&
-              now - partialCodePersistence.latestPersistedAt < 700 &&
-              partialCode.length < 1200
-            ) {
-              return;
-            }
+                if (
+                  partialCodePersistence.latestPersistedAt !== 0 &&
+                  now - partialCodePersistence.latestPersistedAt < 2500 &&
+                  appendedChars < 2400
+                ) {
+                  return;
+                }
 
-            partialCodePersistence.latestPersistedAt = now;
-            await updateCodingGenerationTask(partialCodePersistence.taskId, {
-              status: "processing",
-              progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
-              partialCode,
-            });
-          },
+                partialCodePersistence.latestPersistedAt = now;
+                partialCodePersistence.latestPersistedLength = partialCode.length;
+                await updateCodingGenerationTask(partialCodePersistence.taskId, {
+                  status: "processing",
+                  progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
+                  partialCode,
+                });
+              }
+            : undefined,
           onTaskUpdate: async (patch) => {
             await updateCodingGenerationTask(partialCodePersistence.taskId, {
               status: "processing",
@@ -2399,7 +2424,10 @@ async function runGenerateRequest(input: {
       apiKey: input.apiKey,
       body: upstreamPayload,
       timeoutMs: requestTimeoutMs,
-      retries: input.resolvedMode === "coding" ? 2 : 1,
+      retries:
+        input.resolvedMode === "coding"
+          ? resolveCodingUpstreamRetryCount()
+          : 1,
       onDelta:
         input.resolvedMode === "coding" && input.onPartialCode
           ? (delta) => {
