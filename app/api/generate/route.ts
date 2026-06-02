@@ -23,6 +23,7 @@ import {
   listCodingGenerationTasksByStatus,
   readCodingGenerationTask,
   updateCodingGenerationTask,
+  writeCodingGenerationTask,
   type CodingGenerationTaskRecord,
 } from "@/lib/coding-generation-tasks";
 
@@ -148,7 +149,12 @@ export async function GET(request: Request) {
     await updateCodingGenerationTask(task.id, {
       progressMessage: message,
     }).catch(() => null);
-    await drainCodingGenerationQueue();
+    const startedTask =
+      queueAhead === 0 ? await tryStartCodingTaskNow(task) : null;
+
+    if (!startedTask) {
+      await drainCodingGenerationQueue();
+    }
 
     const refreshedTask = await readCodingGenerationTask(task.id);
 
@@ -972,6 +978,27 @@ async function runDeferredCodingTaskRecord(task: CodingGenerationTaskRecord) {
       httpStatus: 200,
     }).catch(() => null);
   }
+}
+
+async function tryStartCodingTaskNow(task: CodingGenerationTaskRecord) {
+  const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+  const activeCount = await countCodingGenerationTasksByStatus(["processing"]);
+
+  if (activeCount >= concurrencyLimit) {
+    return null;
+  }
+
+  const claimedTask = await claimCodingGenerationTask(task.id, {
+    startedAt: new Date().toISOString(),
+    progressMessage: "任务已进入后台，正在连接模型。",
+  });
+
+  if (!claimedTask) {
+    return null;
+  }
+
+  void runDeferredCodingTaskRecord(claimedTask);
+  return claimedTask;
 }
 
 async function drainCodingGenerationQueue() {
@@ -2743,7 +2770,12 @@ export async function POST(request: Request) {
         await updateCodingGenerationTask(existingTask.id, {
           progressMessage: message,
         }).catch(() => null);
-        await drainCodingGenerationQueue();
+        const startedTask =
+          queueAhead === 0 ? await tryStartCodingTaskNow(existingTask) : null;
+
+        if (!startedTask) {
+          await drainCodingGenerationQueue();
+        }
 
         const refreshedTask = await readCodingGenerationTask(existingTask.id);
 
@@ -2880,6 +2912,54 @@ export async function POST(request: Request) {
         configuredMaxCompletionTokens !== null &&
         configuredMaxCompletionTokens !== effectiveMaxCompletionTokens,
     });
+    if (resolvedMode === "coding") {
+      const taskId = randomUUID();
+      const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+      const processingCount = await countCodingGenerationTasksByStatus(["processing"]);
+      const queueAhead = Math.max(
+        0,
+        await countCodingGenerationTasksByStatus(["queued"]),
+      );
+      const queuedTask: CodingGenerationTaskRecord = {
+        id: taskId,
+        mode: "coding",
+        status: "queued",
+        requestId,
+        requestPrompt,
+        chargedUserId: chargedUserId ?? undefined,
+        creditCost: shouldCharge ? creditCost : undefined,
+        promptPreview: buildPromptPreview(requestPrompt),
+        progressMessage: buildCodingQueuedMessage(queueAhead, concurrencyLimit),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await writeCodingGenerationTask(queuedTask);
+
+      const startedTask =
+        queueAhead === 0 && processingCount < concurrencyLimit
+          ? await tryStartCodingTaskNow(queuedTask)
+          : null;
+
+      if (!startedTask) {
+        await drainCodingGenerationQueue();
+      }
+
+      const persistedTask = await readCodingGenerationTask(taskId);
+      const response = NextResponse.json(
+        {
+          requestId,
+          taskId,
+          status: persistedTask?.status ?? "queued",
+          message: persistedTask?.progressMessage ?? queuedTask.progressMessage,
+          remainingCredits,
+        },
+        { status: 202 },
+      );
+      response.headers.set("x-ai-request-id", requestId);
+      return response;
+    }
+
     const runResult =
       resolvedMode === "writing"
         ? await runTextGenerateRequestWithModelChain({
@@ -2890,10 +2970,12 @@ export async function POST(request: Request) {
             remainingCredits,
             traceContext,
           })
-        : await runCodingGenerateRequestWithModelChain({
+        : await runGenerateRequest({
+            resolvedMode,
             requestPrompt,
             upstreamPrompt,
             aiConfig,
+            apiKey: "",
             remainingCredits,
             traceContext,
           });
