@@ -6,6 +6,43 @@ const headBootstrapScript = `
   const MOBILE = "width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover";
   const CLASS_NAME = "landscape-desktop-viewport";
   const STORAGE_KEY = "landscape-desktop-viewport-state";
+  const CHUNK_RELOAD_KEY = "chunk-load-recovery-once";
+
+  const shouldRecoverChunkError = (error) => {
+    if (!error) return false;
+    const message =
+      typeof error === "string"
+        ? error
+        : typeof error.message === "string"
+          ? error.message
+          : "";
+    return (
+      message.includes("ChunkLoadError") ||
+      message.includes("Loading chunk") ||
+      message.includes("Failed to fetch dynamically imported module")
+    );
+  };
+
+  const recoverChunkErrorOnce = () => {
+    if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") {
+      return;
+    }
+
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+    window.location.reload();
+  };
+
+  window.addEventListener("error", (event) => {
+    if (shouldRecoverChunkError(event.error)) {
+      recoverChunkErrorOnce();
+    }
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    if (shouldRecoverChunkError(event.reason)) {
+      recoverChunkErrorOnce();
+    }
+  });
 
   const ensureViewportMeta = () => {
     let meta = document.querySelector('meta[name="viewport"]');
@@ -39,6 +76,10 @@ const headBootstrapScript = `
       window.location.reload();
     }
   };
+
+  if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+  }
 
   applyViewport();
   window.addEventListener("pageshow", applyViewport);
