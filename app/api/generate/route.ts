@@ -2839,53 +2839,6 @@ export async function POST(request: Request) {
         configuredMaxCompletionTokens !== null &&
         configuredMaxCompletionTokens !== effectiveMaxCompletionTokens,
     });
-    if (resolvedMode === "coding") {
-      const taskId = randomUUID();
-      const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
-      const queuedTask: CodingGenerationTaskRecord = {
-        id: taskId,
-        mode: "coding",
-        status: "queued",
-        requestId,
-        requestPrompt,
-        chargedUserId: chargedUserId ?? undefined,
-        creditCost: shouldCharge ? creditCost : undefined,
-        promptPreview: buildPromptPreview(requestPrompt),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      const processingCount = await countCodingGenerationTasksByStatus(["processing"]);
-      const queueAhead = Math.max(
-        0,
-        (await countCodingGenerationTasksByStatus(["queued"])) -
-          (processingCount < concurrencyLimit ? 0 : 0),
-      );
-      queuedTask.progressMessage = buildCodingQueuedMessage(
-        queueAhead,
-        concurrencyLimit,
-      );
-
-      await writeCodingGenerationTask(queuedTask);
-      await drainCodingGenerationQueue();
-
-      const startedTask = await readCodingGenerationTask(taskId);
-      const startedMessage =
-        startedTask?.progressMessage ?? queuedTask.progressMessage;
-
-      const response = NextResponse.json(
-        {
-          requestId,
-          taskId,
-          status: startedTask?.status ?? "queued",
-          message: startedMessage,
-          remainingCredits,
-        },
-        { status: 202 },
-      );
-      response.headers.set("x-ai-request-id", requestId);
-      return response;
-    }
-
     const runResult =
       resolvedMode === "writing"
         ? await runTextGenerateRequestWithModelChain({
@@ -2896,12 +2849,10 @@ export async function POST(request: Request) {
             remainingCredits,
             traceContext,
           })
-        : await runGenerateRequest({
-            resolvedMode,
+        : await runCodingGenerateRequestWithModelChain({
             requestPrompt,
             upstreamPrompt,
             aiConfig,
-            apiKey: "",
             remainingCredits,
             traceContext,
           });
