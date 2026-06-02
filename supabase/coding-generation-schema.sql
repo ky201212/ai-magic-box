@@ -1,6 +1,11 @@
 create table if not exists public.coding_generation_tasks (
   id text primary key,
   status text not null check (status in ('queued', 'processing', 'succeeded', 'failed')),
+  mode text null,
+  request_id text null,
+  request_prompt text null,
+  charged_user_id text null,
+  credit_cost integer null,
   prompt_preview text not null default '',
   progress_message text null,
   created_at timestamptz not null default timezone('utc'::text, now()),
@@ -25,6 +30,21 @@ alter table if exists public.coding_generation_tasks
 
 alter table if exists public.coding_generation_tasks
   add column if not exists model_attempts jsonb null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists mode text null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists request_id text null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists request_prompt text null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists charged_user_id text null;
+
+alter table if exists public.coding_generation_tasks
+  add column if not exists credit_cost integer null;
 
 create index if not exists idx_coding_generation_tasks_status
   on public.coding_generation_tasks(status);

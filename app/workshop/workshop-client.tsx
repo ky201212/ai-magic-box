@@ -1851,6 +1851,8 @@ function WorkshopContent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const creditPollingInFlightRef = useRef(false);
+  const notificationPollingInFlightRef = useRef(false);
   const previewShellRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const codeGuidePreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -2553,6 +2555,17 @@ function WorkshopContent() {
     };
 
     const loadCreditSummary = async () => {
+      if (
+        creditPollingInFlightRef.current ||
+        document.hidden ||
+        isLoading ||
+        isCodingCompiling
+      ) {
+        return;
+      }
+
+      creditPollingInFlightRef.current = true;
+
       try {
         const response = await fetch("/api/credits/summary", {
           cache: "no-store",
@@ -2584,10 +2597,23 @@ function WorkshopContent() {
         if (isMounted) {
           window.console.error("魔法币信息加载失败");
         }
+      } finally {
+        creditPollingInFlightRef.current = false;
       }
     };
 
     const loadNotifications = async () => {
+      if (
+        notificationPollingInFlightRef.current ||
+        document.hidden ||
+        isLoading ||
+        isCodingCompiling
+      ) {
+        return;
+      }
+
+      notificationPollingInFlightRef.current = true;
+
       try {
         const response = await fetch("/api/notifications", {
           cache: "no-store",
@@ -2607,6 +2633,8 @@ function WorkshopContent() {
         if (isMounted) {
           window.console.error("通知加载失败");
         }
+      } finally {
+        notificationPollingInFlightRef.current = false;
       }
     };
 
@@ -2616,18 +2644,18 @@ function WorkshopContent() {
 
     const creditIntervalId = window.setInterval(() => {
       void loadCreditSummary();
-    }, 15000);
+    }, 45000);
 
     const notificationIntervalId = window.setInterval(() => {
       void loadNotifications();
-    }, 12000);
+    }, 60000);
 
     return () => {
       isMounted = false;
       window.clearInterval(creditIntervalId);
       window.clearInterval(notificationIntervalId);
     };
-  }, []);
+  }, [isCodingCompiling, isLoading]);
 
   const handleCodingPresetClick = (scene: string) => {
     setPromptText(codingPresetPrompts[scene]);
@@ -3231,13 +3259,14 @@ function WorkshopContent() {
       if (response.status === 202 && data?.taskId) {
         const startedAt = Date.now();
         const maxClientWaitMs = 5 * 60 * 1000;
+        let pollDelayMs = 2500;
         setCodingTaskMessage(
           data.message ?? "这次内容比较复杂，已经切换到后台继续生成。",
         );
 
         while (response.status === 202 && Date.now() - startedAt < maxClientWaitMs) {
           await new Promise((resolve) => {
-            setTimeout(resolve, 2500);
+            setTimeout(resolve, pollDelayMs);
           });
 
           if (!data?.taskId) {
@@ -3266,6 +3295,10 @@ function WorkshopContent() {
             setCodingTaskMessage(data.message);
           } else {
             setCodingTaskMessage("作品还在后台生成中，请继续等待。");
+          }
+
+          if (response.status === 202) {
+            pollDelayMs = Math.min(pollDelayMs + 1500, 10000);
           }
         }
       }

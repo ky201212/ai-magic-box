@@ -17,6 +17,10 @@ import {
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
 import {
+  claimCodingGenerationTask,
+  countCodingGenerationTasksByStatus,
+  countQueuedCodingGenerationTasksAhead,
+  listCodingGenerationTasksByStatus,
   readCodingGenerationTask,
   updateCodingGenerationTask,
   writeCodingGenerationTask,
@@ -26,6 +30,45 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+const DEFAULT_CODING_TASK_CONCURRENCY = 2;
+const MAX_CODING_TASK_CONCURRENCY = 12;
+const codingTaskRunners = new Set<string>();
+let codingQueueDrainPromise: Promise<void> | null = null;
+
+function resolveCodingTaskConcurrencyLimit() {
+  const rawValue =
+    process.env.AI_CODING_TASK_CONCURRENCY ||
+    process.env.CODING_TASK_CONCURRENCY_LIMIT ||
+    "";
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_CODING_TASK_CONCURRENCY;
+  }
+
+  return Math.min(MAX_CODING_TASK_CONCURRENCY, Math.max(1, parsed));
+}
+
+function buildCodingQueuedMessage(queueAhead: number, concurrencyLimit: number) {
+  if (queueAhead <= 0) {
+    return concurrencyLimit > 1
+      ? `任务已经进入队列，当前正按 ${concurrencyLimit} 路并发稳定生成，马上开始连接模型。`
+      : "任务已经进入队列，正在按顺序稳定生成，马上开始连接模型。";
+  }
+
+  return `任务已经进入队列，前方还有 ${queueAhead} 个任务，系统正按 ${concurrencyLimit} 路并发稳定生成。`;
+}
+
+function createCodingTaskPendingPayload(task: CodingGenerationTaskRecord, message?: string) {
+  return {
+    taskId: task.id,
+    status: task.status,
+    message: message ?? task.progressMessage ?? "作品还在生成中，请继续等待。",
+    partialCode: task.partialCode ?? "",
+    modelAttempts: task.modelAttempts ?? [],
+  };
+}
 
 function createCodingTaskSuccessPayload(task: CodingGenerationTaskRecord) {
   return {
@@ -79,16 +122,29 @@ export async function GET(request: Request) {
     return NextResponse.json(createCodingTaskFailurePayload(task));
   }
 
-  return NextResponse.json(
-    {
-      taskId,
-      status: task.status,
-      message: task.progressMessage ?? "作品还在生成中，请继续等待。",
-      partialCode: task.partialCode ?? "",
-      modelAttempts: task.modelAttempts ?? [],
-    },
-    { status: 202 },
-  );
+  if (task.status === "queued") {
+    const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+    const queueAhead = await countQueuedCodingGenerationTasksAhead(
+      task.id,
+      task.createdAt,
+    );
+    const message = buildCodingQueuedMessage(queueAhead, concurrencyLimit);
+
+    await updateCodingGenerationTask(task.id, {
+      progressMessage: message,
+    }).catch(() => null);
+    void drainCodingGenerationQueue();
+
+    return NextResponse.json(createCodingTaskPendingPayload(task, message), {
+      status: 202,
+    });
+  }
+
+  if (task.status === "processing") {
+    void drainCodingGenerationQueue();
+  }
+
+  return NextResponse.json(createCodingTaskPendingPayload(task), { status: 202 });
 }
 
 type ChatCompletionResponse = {
@@ -649,13 +705,9 @@ async function startDeferredCodingGenerationTask(input: {
   run: () => Promise<GenerateRunResult>;
   refundCredits?: () => Promise<number | undefined>;
 }) {
-  try {
-    await updateCodingGenerationTask(input.taskId, {
-      status: "processing",
-      startedAt: new Date().toISOString(),
-      progressMessage: "任务已进入后台，正在连接模型。",
-    });
+  codingTaskRunners.add(input.taskId);
 
+  try {
     const result = await input.run();
 
     if (result.ok) {
@@ -738,7 +790,169 @@ async function startDeferredCodingGenerationTask(input: {
       taskId: input.taskId,
       errorMessage,
     });
+  } finally {
+    codingTaskRunners.delete(input.taskId);
+    void drainCodingGenerationQueue();
   }
+}
+
+async function runDeferredCodingTaskRecord(task: CodingGenerationTaskRecord) {
+  const requestPrompt = task.requestPrompt?.trim();
+
+  if (!requestPrompt) {
+    await updateCodingGenerationTask(task.id, {
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: "任务缺少原始提示词，无法继续生成。",
+      progressMessage: "任务缺少原始提示词，无法继续生成。",
+      httpStatus: 500,
+    });
+    return;
+  }
+
+  const aiConfig = await resolveAiModeConfig("coding");
+  const upstreamPrompt = buildCodingPromptForModel(requestPrompt).prompt;
+  const requestTimeoutMs = resolveDeferredAiRequestTimeoutMs("coding");
+  const effectiveMaxCompletionTokens = resolveSafeMaxCompletionTokens(
+    "coding",
+    aiConfig.extraPayload.maxCompletionTokens,
+  );
+  const traceContext: GenerateTraceContext = {
+    requestId: task.requestId?.trim() || randomUUID(),
+    mode: "coding",
+    endpoint: resolveGenerationEndpoint(
+      aiConfig.endpointUrl,
+      shouldUseResponsesApi(aiConfig.endpointUrl, aiConfig.model),
+    ),
+    model: aiConfig.model,
+    timeoutMs: requestTimeoutMs,
+    useResponsesApi: shouldUseResponsesApi(aiConfig.endpointUrl, aiConfig.model),
+    maxCompletionTokens: effectiveMaxCompletionTokens,
+    promptPreview: task.promptPreview || buildPromptPreview(requestPrompt),
+  };
+
+  traceGenerate("log", "deferred_task_started", traceContext, {
+    taskId: task.id,
+    queueRecovered: true,
+  });
+
+  const partialCodePersistence: PartialCodePersistence = {
+    taskId: task.id,
+    latestPersistedAt: 0,
+  };
+
+  await startDeferredCodingGenerationTask({
+    taskId: task.id,
+    requestPrompt,
+    traceContext,
+    run: () =>
+      runCodingGenerateRequestWithModelChain({
+        requestPrompt,
+        upstreamPrompt,
+        aiConfig,
+        remainingCredits: task.remainingCredits,
+        traceContext,
+        requestTimeoutMsOverride: requestTimeoutMs,
+        onPartialCode: async (partialCode) => {
+          const now = Date.now();
+
+          if (
+            partialCodePersistence.latestPersistedAt !== 0 &&
+            now - partialCodePersistence.latestPersistedAt < 700 &&
+            partialCode.length < 1200
+          ) {
+            return;
+          }
+
+          partialCodePersistence.latestPersistedAt = now;
+          await updateCodingGenerationTask(partialCodePersistence.taskId, {
+            status: "processing",
+            progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
+            partialCode,
+          });
+        },
+        onTaskUpdate: async (patch) => {
+          await updateCodingGenerationTask(partialCodePersistence.taskId, {
+            status: "processing",
+            ...patch,
+          });
+        },
+      }),
+    refundCredits: async () => {
+      if (!task.chargedUserId || !task.creditCost || task.creditCost <= 0) {
+        return task.remainingCredits;
+      }
+
+      const refundedCredits = await addCredits(task.chargedUserId, task.creditCost, {
+        reasonCode: "coding_refund",
+        reasonLabel: "AI编程失败退回",
+        note: `AI 编程后台生成失败，退回 ${task.creditCost} 个魔法币。`,
+      });
+
+      await updateCodingGenerationTask(task.id, {
+        chargedUserId: undefined,
+        remainingCredits: refundedCredits,
+      });
+
+      return refundedCredits;
+    },
+  });
+}
+
+async function drainCodingGenerationQueue() {
+  if (codingQueueDrainPromise) {
+    return codingQueueDrainPromise;
+  }
+
+  codingQueueDrainPromise = (async () => {
+    const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+
+    while (true) {
+      const activeCount = await countCodingGenerationTasksByStatus(["processing"]);
+      const availableSlots = Math.max(0, concurrencyLimit - activeCount);
+
+      if (availableSlots <= 0) {
+        return;
+      }
+
+      const queuedTasks = await listCodingGenerationTasksByStatus(
+        ["queued"],
+        availableSlots,
+      );
+
+      if (!queuedTasks.length) {
+        return;
+      }
+
+      let launchedTask = false;
+
+      for (const queuedTask of queuedTasks) {
+        if (codingTaskRunners.has(queuedTask.id)) {
+          continue;
+        }
+
+        const claimedTask = await claimCodingGenerationTask(queuedTask.id, {
+          startedAt: new Date().toISOString(),
+          progressMessage: "任务已进入后台，正在连接模型。",
+        });
+
+        if (!claimedTask) {
+          continue;
+        }
+
+        launchedTask = true;
+        void runDeferredCodingTaskRecord(claimedTask);
+      }
+
+      if (!launchedTask) {
+        return;
+      }
+    }
+  })().finally(() => {
+    codingQueueDrainPromise = null;
+  });
+
+  return codingQueueDrainPromise;
 }
 
 async function runCodingGenerateRequestWithModelChain(input: {
@@ -2430,14 +2644,35 @@ export async function POST(request: Request) {
         return response;
       }
 
+      if (existingTask.status === "queued") {
+        const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
+        const queueAhead = await countQueuedCodingGenerationTasksAhead(
+          existingTask.id,
+          existingTask.createdAt,
+        );
+        const message = buildCodingQueuedMessage(queueAhead, concurrencyLimit);
+
+        await updateCodingGenerationTask(existingTask.id, {
+          progressMessage: message,
+        }).catch(() => null);
+        void drainCodingGenerationQueue();
+
+        const response = NextResponse.json(
+          createCodingTaskPendingPayload(existingTask, message),
+          { status: 202 },
+        );
+        response.headers.set("x-ai-request-id", requestId);
+        return response;
+      }
+
+      if (existingTask.status === "processing") {
+        void drainCodingGenerationQueue();
+      }
+
       const response = NextResponse.json(
         {
-          message: existingTask.progressMessage ?? "作品还在生成中，请继续等待。",
+          ...createCodingTaskPendingPayload(existingTask),
           requestId,
-          taskId: existingTask.id,
-          status: existingTask.status,
-          partialCode: existingTask.partialCode ?? "",
-          modelAttempts: existingTask.modelAttempts ?? [],
         },
         { status: 202 },
       );
@@ -2549,73 +2784,39 @@ export async function POST(request: Request) {
     });
     if (resolvedMode === "coding") {
       const taskId = randomUUID();
+      const concurrencyLimit = resolveCodingTaskConcurrencyLimit();
       const queuedTask: CodingGenerationTaskRecord = {
         id: taskId,
+        mode: "coding",
         status: "queued",
+        requestId,
+        requestPrompt,
+        chargedUserId: chargedUserId ?? undefined,
+        creditCost: shouldCharge ? creditCost : undefined,
         promptPreview: buildPromptPreview(requestPrompt),
-        progressMessage: "任务已经排队，马上开始连接模型。",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+      const processingCount = await countCodingGenerationTasksByStatus(["processing"]);
+      const queueAhead = Math.max(
+        0,
+        (await countCodingGenerationTasksByStatus(["queued"])) -
+          (processingCount < concurrencyLimit ? 0 : 0),
+      );
+      queuedTask.progressMessage = buildCodingQueuedMessage(
+        queueAhead,
+        concurrencyLimit,
+      );
 
       await writeCodingGenerationTask(queuedTask);
-
-      const partialCodePersistence: PartialCodePersistence = {
-        taskId,
-        latestPersistedAt: 0,
-      };
-
-      void startDeferredCodingGenerationTask({
-        taskId,
-        requestPrompt,
-        traceContext,
-        run: () =>
-          runCodingGenerateRequestWithModelChain({
-            requestPrompt,
-            upstreamPrompt,
-            aiConfig,
-            remainingCredits,
-            traceContext,
-            requestTimeoutMsOverride: resolveDeferredAiRequestTimeoutMs(resolvedMode),
-            onPartialCode: async (partialCode) => {
-              const now = Date.now();
-
-              if (
-                partialCodePersistence.latestPersistedAt !== 0 &&
-                now - partialCodePersistence.latestPersistedAt < 700 &&
-                partialCode.length < 1200
-              ) {
-                return;
-              }
-
-              partialCodePersistence.latestPersistedAt = now;
-              await updateCodingGenerationTask(partialCodePersistence.taskId, {
-                status: "processing",
-                progressMessage: "模型正在持续输出代码，预览区会逐步更新。",
-                partialCode,
-              });
-            },
-            onTaskUpdate: async (patch) => {
-              await updateCodingGenerationTask(partialCodePersistence.taskId, {
-                status: "processing",
-                ...patch,
-              });
-            },
-          }),
-        refundCredits: () =>
-          refundCredits(
-            resolvedMode === "writing"
-              ? `AI 写作后台生成失败，退回 ${creditCost} 个魔法币。`
-              : `AI 编程后台生成失败，退回 ${creditCost} 个魔法币。`,
-          ),
-      });
+      void drainCodingGenerationQueue();
 
       const response = NextResponse.json(
         {
           requestId,
           taskId,
           status: "queued",
-          message: "创作任务已经提交，系统正在后台稳定生成，请稍等几秒自动返回结果。",
+          message: queuedTask.progressMessage,
           remainingCredits,
         },
         { status: 202 },
