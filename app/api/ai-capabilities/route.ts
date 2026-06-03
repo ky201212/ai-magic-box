@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
 import { listAiModeConfigs } from "@/lib/admin-data";
+import { PROFILE_BIO_MODERATION_MODE_KEY } from "@/lib/profile-moderation-defaults";
 
 export async function GET() {
   try {
     const configs = await listAiModeConfigs();
     const capabilities = Object.fromEntries(
-      configs.map((config) => [
-        config.mode_key,
-        {
-          isEnabled: config.is_enabled,
-          modeName: config.mode_name,
-          extraPayload: config.extra_payload ?? {},
-        },
-      ]),
+      configs
+        .filter((config) => config.mode_key !== PROFILE_BIO_MODERATION_MODE_KEY)
+        .map((config) => [
+          config.mode_key,
+          {
+            isEnabled: config.is_enabled,
+            modeName: config.mode_name,
+            extraPayload: config.extra_payload ?? {},
+          },
+        ]),
     );
 
     return NextResponse.json({ capabilities });

@@ -1,6 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { getAiSecret } from "@/lib/ai-secrets";
+import {
+  PROFILE_BIO_MODERATION_DEFAULT_BLOCKED_KEYWORDS,
+  PROFILE_BIO_MODERATION_DEFAULT_PROMPT,
+  PROFILE_BIO_MODERATION_MODE_KEY,
+} from "@/lib/profile-moderation-defaults";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export type ProfileBioModerationStatus = "approved" | "pending" | "rejected";
@@ -24,6 +29,15 @@ type ProfileBioAiResponse = {
   reason?: string;
 };
 
+type ProfileBioAiConfig = {
+  endpointUrl: string;
+  apiKeyEnv: string;
+  model: string;
+  systemPrompt: string;
+  isEnabled: boolean;
+  extraPayload: Record<string, unknown>;
+};
+
 const defaultReviewRecord: ProfileBioReviewRecord = {
   status: "approved",
   approvedBio: null,
@@ -35,6 +49,21 @@ const defaultReviewRecord: ProfileBioReviewRecord = {
   updatedAt: new Date(0).toISOString(),
   reviewedAt: null,
   reviewedBy: null,
+};
+
+const fallbackProfileBioAiConfig: ProfileBioAiConfig = {
+  endpointUrl:
+    process.env.AI_API_URL ??
+    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+  apiKeyEnv: "AI_API_KEY",
+  model: "mimo-v2.5-pro",
+  systemPrompt: PROFILE_BIO_MODERATION_DEFAULT_PROMPT,
+  isEnabled: true,
+  extraPayload: {
+    reasoningEffort: "low",
+    maxCompletionTokens: 300,
+    customBlockedKeywords: PROFILE_BIO_MODERATION_DEFAULT_BLOCKED_KEYWORDS.join("\n"),
+  },
 };
 
 const blockedKeywordGroups = [
@@ -123,6 +152,39 @@ const blockedKeywordGroups = [
   },
 ];
 
+async function resolveProfileBioAiConfig(): Promise<ProfileBioAiConfig> {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("ai_mode_configs")
+    .select("endpoint_url, api_key_env, model, system_prompt, is_enabled, extra_payload")
+    .eq("mode_key", PROFILE_BIO_MODERATION_MODE_KEY)
+    .maybeSingle<{
+      endpoint_url: string;
+      api_key_env: string;
+      model: string;
+      system_prompt: string;
+      is_enabled: boolean;
+      extra_payload: Record<string, unknown> | null;
+    }>();
+
+  if (error || !data) {
+    return fallbackProfileBioAiConfig;
+  }
+
+  return {
+    endpointUrl: data.endpoint_url?.trim() || fallbackProfileBioAiConfig.endpointUrl,
+    apiKeyEnv: data.api_key_env?.trim() || fallbackProfileBioAiConfig.apiKeyEnv,
+    model: data.model?.trim() || fallbackProfileBioAiConfig.model,
+    systemPrompt:
+      data.system_prompt?.trim() || fallbackProfileBioAiConfig.systemPrompt,
+    isEnabled: data.is_enabled,
+    extraPayload: {
+      ...fallbackProfileBioAiConfig.extraPayload,
+      ...(data.extra_payload ?? {}),
+    },
+  };
+}
+
 function getReviewSettingKey(userId: string) {
   return `profile.bio-review.${userId}`;
 }
@@ -138,7 +200,25 @@ function compactText(value: string) {
     .replace(/[._\-·:：,，。!！?？]/g, "");
 }
 
-function findBlockedKeyword(value: string) {
+function parseCustomBlockedKeywords(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(/[\n,，、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function findBlockedKeyword(value: string, customKeywords: string[] = []) {
   const compact = compactText(value);
   const phonePattern = /1[3-9]\d{9}/;
   const qqPattern = /(?:qq|q群|群号)?[1-9]\d{5,11}/i;
@@ -180,27 +260,44 @@ function findBlockedKeyword(value: string) {
     }
   }
 
+  const customKeyword = customKeywords.find((item) =>
+    compact.includes(compactText(item)),
+  );
+
+  if (customKeyword) {
+    return {
+      keyword: customKeyword,
+      reason: "简介包含后台配置的拦截关键词，平台不允许发布。",
+    };
+  }
+
   return null;
 }
 
-function buildProfileBioModerationPrompt(input: {
+function buildProfileBioModerationUserContent(input: {
   displayName: string;
   bio: string;
 }) {
-  return [
-    "你是一名非常严格的中国未成年人平台个人资料审核员，只允许返回 JSON。",
-    "请审核用户昵称和个人简介是否允许在儿童/青少年 AI 创作平台公开展示。",
-    "审核目标：优先保护小朋友，宁可转人工复审，也不要放过可疑内容。",
-    "必须重点拦截：微信、QQ、小红书、抖音、快手、微博、群号、手机号、网址、邮箱、二维码、私聊私信等任何引流或私下联系信息。",
-    "也要拦截：色情低俗、擦边、暴力伤害、自杀自残、毒品赌博诈骗、政治敏感、违法违规、辱骂霸凌、诱导未成年人危险行为。",
-    "如果明确安全，返回 decision=approved。",
-    "如果明显违规，返回 decision=rejected。",
-    "如果存在较大概率风险、隐晦表达、谐音变体、疑似联系方式或你不确定，返回 decision=pending，交给人工审核。",
-    "你必须只返回 JSON，格式：{\"decision\":\"approved|pending|rejected\",\"confidence\":\"low|medium|high\",\"reason\":\"一句中文原因\"}。",
-    "",
-    `昵称：${input.displayName}`,
-    `个人简介：${input.bio}`,
-  ].join("\n");
+  return [`昵称：${input.displayName}`, `个人简介：${input.bio}`].join("\n");
+}
+
+function resolveChatCompletionEndpoint(endpointUrl: string) {
+  const trimmedEndpoint = endpointUrl.trim();
+  const normalizedEndpoint = trimmedEndpoint.toLowerCase();
+
+  if (normalizedEndpoint.endsWith("/chat/completions")) {
+    return trimmedEndpoint;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1")) {
+    return `${trimmedEndpoint}/chat/completions`;
+  }
+
+  if (normalizedEndpoint.endsWith("/v1/")) {
+    return `${trimmedEndpoint}chat/completions`;
+  }
+
+  return trimmedEndpoint;
 }
 
 async function upsertProfileBioReviewRecord(
@@ -297,7 +394,14 @@ export async function moderateProfileBio(input: {
     return record;
   }
 
-  const keywordHit = findBlockedKeyword(`${input.displayName}\n${bio}`);
+  const aiConfig = await resolveProfileBioAiConfig();
+  const customBlockedKeywords = parseCustomBlockedKeywords(
+    aiConfig.extraPayload.customBlockedKeywords,
+  );
+  const keywordHit = findBlockedKeyword(
+    `${input.displayName}\n${bio}`,
+    customBlockedKeywords,
+  );
 
   if (keywordHit) {
     const record: ProfileBioReviewRecord = {
@@ -317,14 +421,12 @@ export async function moderateProfileBio(input: {
     return record;
   }
 
-  const aiApiKey = await getAiSecret("AI_API_KEY");
-
-  if (!aiApiKey) {
+  if (!aiConfig.isEnabled) {
     const record: ProfileBioReviewRecord = {
       status: "pending",
       approvedBio: input.currentApprovedBio,
       pendingBio: bio,
-      reason: "AI 审核服务暂时不可用，已转入人工审核。",
+      reason: "个人简介 AI 审核功能暂未启用，已转入人工审核。",
       stage: "fallback",
       matchedKeyword: null,
       aiRaw: null,
@@ -337,9 +439,31 @@ export async function moderateProfileBio(input: {
     return record;
   }
 
-  const aiApiUrl =
-    process.env.AI_API_URL ??
-    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions";
+  const aiApiKey = await getAiSecret(aiConfig.apiKeyEnv);
+
+  if (!aiApiKey) {
+    const record: ProfileBioReviewRecord = {
+      status: "pending",
+      approvedBio: input.currentApprovedBio,
+      pendingBio: bio,
+      reason: `缺少 ${aiConfig.apiKeyEnv}，AI 审核服务暂时不可用，已转入人工审核。`,
+      stage: "fallback",
+      matchedKeyword: null,
+      aiRaw: null,
+      updatedAt: now,
+      reviewedAt: null,
+      reviewedBy: null,
+    };
+
+    await upsertProfileBioReviewRecord(input.userId, record);
+    return record;
+  }
+
+  const aiApiUrl = resolveChatCompletionEndpoint(aiConfig.endpointUrl);
+  const maxCompletionTokens =
+    typeof aiConfig.extraPayload.maxCompletionTokens === "number"
+      ? Math.max(1, Math.floor(aiConfig.extraPayload.maxCompletionTokens))
+      : 300;
 
   try {
     const response = await fetch(aiApiUrl, {
@@ -349,16 +473,18 @@ export async function moderateProfileBio(input: {
         Authorization: `Bearer ${aiApiKey}`,
       },
       body: JSON.stringify({
-        model: "mimo-v2.5-pro",
+        model: aiConfig.model,
+        max_tokens: maxCompletionTokens,
         messages: [
           {
             role: "system",
             content:
+              aiConfig.systemPrompt ||
               "你是一名极其严格的未成年人平台资料审核助手，只允许返回 JSON。",
           },
           {
             role: "user",
-            content: buildProfileBioModerationPrompt({
+            content: buildProfileBioModerationUserContent({
               displayName: input.displayName,
               bio,
             }),

@@ -32,6 +32,11 @@ import {
   type ProfileBioModerationStatus,
   type ProfileBioReviewRecord,
 } from "@/lib/profile-bio-moderation";
+import {
+  PROFILE_BIO_MODERATION_DEFAULT_BLOCKED_KEYWORDS,
+  PROFILE_BIO_MODERATION_DEFAULT_PROMPT,
+  PROFILE_BIO_MODERATION_MODE_KEY,
+} from "@/lib/profile-moderation-defaults";
 
 export type SiteSettingRecord = {
   setting_key: string;
@@ -564,6 +569,24 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         modelChain: [],
       },
     },
+    {
+      mode_key: PROFILE_BIO_MODERATION_MODE_KEY,
+      mode_name: "个人简介审核",
+      provider: "mimo",
+      endpoint_url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+      api_key_env: "AI_API_KEY",
+      model: "mimo-v2.5-pro",
+      system_prompt: PROFILE_BIO_MODERATION_DEFAULT_PROMPT,
+      is_enabled: true,
+      extra_payload: {
+        creditEnabled: false,
+        creditCost: 0,
+        reasoningEffort: "low",
+        maxCompletionTokens: 300,
+        customBlockedKeywords: PROFILE_BIO_MODERATION_DEFAULT_BLOCKED_KEYWORDS.join("\n"),
+        modelChain: [],
+      },
+    },
   ];
 
   return requiredFallbackConfigs.map(
@@ -670,6 +693,7 @@ function getAiModelChainStatsLabel(modeKey: string) {
     speech: "AI 语音",
     transcribe: "语音识别",
     promptOptimize: "提示词优化",
+    [PROFILE_BIO_MODERATION_MODE_KEY]: "个人简介审核",
   };
 
   return labelMap[modeKey] ?? modeKey;

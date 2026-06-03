@@ -11,6 +11,7 @@ import type {
   AiSecretSecuritySummary,
   AiSecretStatusRecord,
 } from "./types";
+import { PROFILE_BIO_MODERATION_MODE_KEY } from "@/lib/profile-moderation-defaults";
 
 type SaveStatus = "idle" | "saving" | "success" | "error";
 
@@ -69,6 +70,7 @@ const MODE_OPTIONS = [
   { key: "speech", label: "AI语音" },
   { key: "transcribe", label: "语音识别" },
   { key: "promptOptimize", label: "提示词优化" },
+  { key: PROFILE_BIO_MODERATION_MODE_KEY, label: "个人简介审核" },
 ] as const;
 
 const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
@@ -255,6 +257,28 @@ const DEFAULT_MODEL_PRESETS: AiModelPresetRecord[] = [
     description: "适合提示词润色、结构化改写和表达增强。",
     badge: "高阶优化",
   },
+  {
+    id: "mimo-profile-moderation",
+    mode_key: PROFILE_BIO_MODERATION_MODE_KEY,
+    label: "Mimo 简介审核",
+    provider: "小米 Mimo",
+    endpoint_url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    api_key_env: "AI_API_KEY",
+    model: "mimo-v2.5-pro",
+    description: "用于用户昵称和个人简介审核，适合先跑严格 JSON 判定。",
+    badge: "审核默认",
+  },
+  {
+    id: "qlcode-gpt-5.5-profile-moderation",
+    mode_key: PROFILE_BIO_MODERATION_MODE_KEY,
+    label: "GPT-5.5 简介审核",
+    provider: "OpenAI",
+    endpoint_url: "https://api.qlcodeapi.com/v1",
+    api_key_env: "AI_API_KEY",
+    model: "gpt-5.5",
+    description: "OpenAI 兼容接口模板，用于更严格的个人资料安全审核。",
+    badge: "严格审核",
+  },
 ];
 
 function createEmptyModelChainStatsRecord(): AiModelChainStatsRecord {
@@ -378,7 +402,10 @@ function getModeLabel(modeKey: string) {
 }
 
 function supportsModelChain(modeKey: string) {
-  return MODE_OPTIONS.some((item) => item.key === modeKey);
+  return (
+    modeKey !== PROFILE_BIO_MODERATION_MODE_KEY &&
+    MODE_OPTIONS.some((item) => item.key === modeKey)
+  );
 }
 
 function getPresetsForMode(presets: AiModelPresetRecord[], modeKey: string) {
@@ -1811,6 +1838,14 @@ export function AiConfigForm({
             typeof config.extra_payload.image_size === "string"
               ? config.extra_payload.image_size
               : "";
+          const customBlockedKeywords =
+            typeof config.extra_payload.customBlockedKeywords === "string"
+              ? config.extra_payload.customBlockedKeywords
+              : Array.isArray(config.extra_payload.customBlockedKeywords)
+                ? config.extra_payload.customBlockedKeywords
+                    .filter((item): item is string => typeof item === "string")
+                    .join("\n")
+                : "";
           const modePresets = getPresetsForMode(presets, config.mode_key);
           const selectedPresetId = findMatchingPresetId(config, presets);
           const selectedPreset = getPresetById(
@@ -2852,6 +2887,39 @@ export function AiConfigForm({
                       <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-500">
                         勾选后，用户端 AI 绘画会出现“上传参考图”入口，可以进行图生图或局部参考编辑；不勾选时，只允许文生图。
                       </div>
+                    </div>
+                  ) : null}
+
+                  {config.mode_key === PROFILE_BIO_MODERATION_MODE_KEY ? (
+                    <div className="mt-5 rounded-[24px] border border-[#ffe2d1] bg-[#fffaf5] p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="max-w-3xl">
+                          <p className="text-sm font-black tracking-[0.14em] text-[#c76b2a]">
+                            简介审核关键词
+                          </p>
+                          <h4 className="mt-2 text-lg font-black text-slate-800">
+                            AI 前置拦截词
+                          </h4>
+                          <p className="mt-2 text-sm leading-7 text-slate-500">
+                            一行一个词。这里配置的是额外拦截词，会和系统内置的微信、QQ、色情、暴力等基础安全词一起生效。
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-[#c76b2a]">
+                          先关键词，再 AI
+                        </span>
+                      </div>
+                      <textarea
+                        value={customBlockedKeywords}
+                        onChange={(event) =>
+                          handleExtraPayloadChange(
+                            config.mode_key,
+                            "customBlockedKeywords",
+                            event.target.value,
+                          )
+                        }
+                        className="mt-4 h-40 w-full rounded-[18px] border border-[#ffd8bd] bg-white p-4 text-sm leading-7 text-slate-800 outline-none"
+                        placeholder={"例如：加微信\n小红书号\n私聊"}
+                      />
                     </div>
                   ) : null}
 
