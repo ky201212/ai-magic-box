@@ -25,6 +25,7 @@ import { normalizeChinaPhone } from "@/lib/phone";
 import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { getSmsAuthRiskControlSetting } from "@/lib/sms-auth-security";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { moderateProfileBio } from "@/lib/profile-bio-moderation";
 
 type PhoneOtpRow = {
   phone: string;
@@ -219,6 +220,13 @@ export async function PATCH(request: Request) {
     }
 
     const isPhoneChanged = phone !== currentUser.users.phone;
+    const currentProfile = await getUserProfile(currentUser.user_id);
+    const normalizedBio = bio || null;
+    const currentApprovedBio = currentProfile?.bio ?? null;
+    const isBioChanged = normalizedBio !== currentApprovedBio;
+    let bioToSave = normalizedBio;
+    let bioReviewStatus: "approved" | "pending" | "rejected" = "approved";
+    let bioReviewReason: string | null = null;
 
     if (isPhoneChanged) {
       if (!phoneCode) {
@@ -242,12 +250,34 @@ export async function PATCH(request: Request) {
       }
     }
 
+    if (isBioChanged) {
+      const review = await moderateProfileBio({
+        userId: currentUser.user_id,
+        displayName: displayNameValidation.value,
+        bio,
+        currentApprovedBio,
+      });
+      bioReviewStatus = review.status;
+      bioReviewReason = review.reason;
+
+      if (review.status === "rejected") {
+        return NextResponse.json(
+          { error: review.reason ?? "个人简介不适合公开展示，请修改后再试。" },
+          { status: 400 },
+        );
+      }
+
+      if (review.status === "pending") {
+        bioToSave = currentApprovedBio;
+      }
+    }
+
     const result = await updateUserProfileSettings({
       userId: currentUser.user_id,
       currentPhone: currentUser.users.phone,
       nextPhone: phone,
       displayName: displayNameValidation.value,
-      bio,
+      bio: bioToSave,
       avatarUrl,
       avatarColor,
     });
@@ -261,6 +291,8 @@ export async function PATCH(request: Request) {
       profile: result.profile,
       phone: result.phone,
       avatarUrl: result.avatarUrl,
+      bioReviewStatus,
+      bioReviewReason,
     });
   } catch (error) {
     console.error("【更新个人资料失败】:", error);

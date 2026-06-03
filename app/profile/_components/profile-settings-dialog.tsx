@@ -156,6 +156,8 @@ export function ProfileSettingsDialog({
                   };
                   phone?: string;
                   avatarUrl?: string;
+                  bioReviewStatus?: "approved" | "pending" | "rejected";
+                  bioReviewReason?: string | null;
                 };
 
                 if (!response.ok || !payload.profile || !payload.phone || !payload.avatarUrl) {
@@ -167,7 +169,14 @@ export function ProfileSettingsDialog({
                   phone: payload.phone,
                   avatarUrl: payload.avatarUrl,
                 });
-                onClose();
+                if (payload.bioReviewStatus === "pending") {
+                  setMessage(
+                    payload.bioReviewReason ??
+                      "资料已保存，新的个人简介已进入人工审核，通过前暂不展示。",
+                  );
+                } else {
+                  onClose();
+                }
               } catch (requestError) {
                 setMessage(
                   requestError instanceof Error

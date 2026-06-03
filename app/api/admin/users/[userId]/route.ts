@@ -65,6 +65,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       action?: "cancel_subscription";
       subscriptionId?: string;
       nickname?: string | null;
+      profileDisplayName?: string | null;
+      profileBio?: string | null;
+      profileBioAction?: "approve" | "reject" | "clear" | "update";
+      profileBioReason?: string | null;
       status?: "active" | "disabled";
       notes?: string | null;
       credits?: number;
@@ -114,7 +118,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       });
     }
 
-    await updateAdminUser(userId, body);
+    await updateAdminUser(userId, {
+      ...body,
+      adminUserId: adminContext.userId,
+    });
     await appendSecurityEventLog({
       request,
       userId: adminContext.userId,

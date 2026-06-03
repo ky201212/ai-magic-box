@@ -26,6 +26,12 @@ import {
   normalizeInfoContentPosts,
   type InfoContentPost,
 } from "@/lib/info-content";
+import {
+  listProfileBioReviewRecords,
+  resolveProfileBioReview,
+  type ProfileBioModerationStatus,
+  type ProfileBioReviewRecord,
+} from "@/lib/profile-bio-moderation";
 
 export type SiteSettingRecord = {
   setting_key: string;
@@ -178,6 +184,13 @@ export type AdminUserRecord = {
   id: string;
   phone: string;
   nickname: string | null;
+  profile_display_name: string | null;
+  profile_bio: string | null;
+  profile_bio_pending: string | null;
+  profile_bio_status: ProfileBioModerationStatus;
+  profile_bio_reason: string | null;
+  profile_bio_stage: ProfileBioReviewRecord["stage"];
+  profile_bio_updated_at: string | null;
   status: "active" | "disabled";
   last_login_at: string | null;
   avatar_url: string | null;
@@ -1133,6 +1146,13 @@ export async function deleteAdminCommunityPost(postId: string) {
 
 type AdminUserBaseRow = Omit<
   AdminUserRecord,
+  | "profile_display_name"
+  | "profile_bio"
+  | "profile_bio_pending"
+  | "profile_bio_status"
+  | "profile_bio_reason"
+  | "profile_bio_stage"
+  | "profile_bio_updated_at"
   | "credits"
   | "postsCount"
   | "approvedPostsCount"
@@ -1151,6 +1171,12 @@ type AdminUserPostRow = {
   user_id: string;
   moderation_status: "draft" | "pending" | "approved" | "rejected";
   created_at: string;
+};
+
+type AdminUserProfileRow = {
+  user_id: string;
+  display_name: string | null;
+  bio: string | null;
 };
 
 function isMissingModerationDetailSchemaError(error: unknown) {
@@ -1336,21 +1362,37 @@ export async function listAdminUsers(input?: {
 
   const userIds = (users ?? []).map((user) => user.id);
   let posts: AdminUserPostRow[] = [];
+  let profilesMap = new Map<string, AdminUserProfileRow>();
+  let profileBioReviewsMap = new Map<string, ProfileBioReviewRecord>();
 
   if (userIds.length) {
-    const postsQuery = supabaseAdmin
-      .from("community_posts")
-      .select("user_id, moderation_status, created_at")
-      .in("user_id", userIds);
+    const [postsResult, profilesResult, bioReviewsResult] = await Promise.all([
+      supabaseAdmin
+        .from("community_posts")
+        .select("user_id, moderation_status, created_at")
+        .in("user_id", userIds)
+        .returns<AdminUserPostRow[]>(),
+      supabaseAdmin
+        .from("user_profiles")
+        .select("user_id, display_name, bio")
+        .in("user_id", userIds)
+        .returns<AdminUserProfileRow[]>(),
+      listProfileBioReviewRecords(userIds),
+    ]);
 
-    const { data: postsData, error: postsError } =
-      await postsQuery.returns<AdminUserPostRow[]>();
-
-    if (postsError) {
-      throw postsError;
+    if (postsResult.error) {
+      throw postsResult.error;
     }
 
-    posts = postsData ?? [];
+    if (profilesResult.error) {
+      throw profilesResult.error;
+    }
+
+    posts = postsResult.data ?? [];
+    profilesMap = new Map(
+      (profilesResult.data ?? []).map((profile) => [profile.user_id, profile]),
+    );
+    profileBioReviewsMap = bioReviewsResult;
   }
 
   const postsByUser = new Map<
@@ -1435,6 +1477,8 @@ export async function listAdminUsers(input?: {
     };
     const creditLogs = creditLogsByUser.get(user.id) ?? [];
     const paymentOrders = paymentOrdersByUser.get(user.id) ?? [];
+    const profile = profilesMap.get(user.id);
+    const bioReview = profileBioReviewsMap.get(user.id);
     const totalCreditsAdded = creditLogs.reduce(
       (total, item) => total + Math.max(0, item.change_amount),
       0,
@@ -1446,6 +1490,13 @@ export async function listAdminUsers(input?: {
 
     return {
       ...user,
+      profile_display_name: profile?.display_name ?? null,
+      profile_bio: profile?.bio ?? null,
+      profile_bio_pending: bioReview?.pendingBio ?? null,
+      profile_bio_status: bioReview?.status ?? "approved",
+      profile_bio_reason: bioReview?.reason ?? null,
+      profile_bio_stage: bioReview?.stage ?? "manual",
+      profile_bio_updated_at: bioReview?.updatedAt ?? null,
       credits:
         creditsMap.get(user.id as string) ??
         Math.max(0, creditPolicy.initialCredits ?? 50),
@@ -1464,6 +1515,11 @@ export async function updateAdminUser(
   userId: string,
   input: {
     nickname?: string | null;
+    profileDisplayName?: string | null;
+    profileBio?: string | null;
+    profileBioAction?: "approve" | "reject" | "clear" | "update";
+    profileBioReason?: string | null;
+    adminUserId?: string;
     status?: "active" | "disabled";
     notes?: string | null;
     credits?: number;
@@ -1514,6 +1570,32 @@ export async function updateAdminUser(
         throw sessionError;
       }
     }
+  }
+
+  if (input.profileDisplayName !== undefined) {
+    const { error: profileError } = await supabaseAdmin
+      .from("user_profiles")
+      .upsert(
+        {
+          user_id: userId,
+          display_name: input.profileDisplayName?.trim() || null,
+        } as never,
+        { onConflict: "user_id" },
+      );
+
+    if (profileError) {
+      throw profileError;
+    }
+  }
+
+  if (input.profileBioAction) {
+    await resolveProfileBioReview({
+      userId,
+      action: input.profileBioAction,
+      approvedBio: input.profileBio?.trim() || null,
+      reason: input.profileBioReason?.trim() || null,
+      adminUserId: input.adminUserId ?? "admin",
+    });
   }
 
   if (typeof input.credits === "number") {

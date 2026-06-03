@@ -132,6 +132,30 @@ function getSubscriptionStatusTone(status: "active" | "expired" | "cancelled") {
   return "bg-rose-50 text-rose-700";
 }
 
+function getProfileBioStatusLabel(status: AdminUserRecord["profile_bio_status"]) {
+  if (status === "pending") {
+    return "简介待人工审核";
+  }
+
+  if (status === "rejected") {
+    return "简介已驳回";
+  }
+
+  return "简介已通过";
+}
+
+function getProfileBioStatusTone(status: AdminUserRecord["profile_bio_status"]) {
+  if (status === "pending") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (status === "rejected") {
+    return "bg-rose-50 text-rose-700";
+  }
+
+  return "bg-emerald-50 text-emerald-700";
+}
+
 function getSubscriptionPlanName(
   subscription: AdminUserRecord["subscriptions"][number] | undefined,
 ) {
@@ -222,6 +246,10 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
       [
         user.phone,
         user.nickname ?? "",
+        user.profile_display_name ?? "",
+        user.profile_bio ?? "",
+        user.profile_bio_pending ?? "",
+        user.profile_bio_reason ?? "",
         user.notes ?? "",
         ...user.paymentOrders.map(
           (order) =>
@@ -238,6 +266,10 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
     userId: string,
     payload: {
       nickname?: string | null;
+      profileDisplayName?: string | null;
+      profileBio?: string | null;
+      profileBioAction?: "approve" | "reject" | "clear" | "update";
+      profileBioReason?: string | null;
       status?: "active" | "disabled";
       notes?: string | null;
       credits?: number;
@@ -474,6 +506,24 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
     replaceUser(updatedUser);
   };
 
+  const handleProfilePatch = async (
+    user: AdminUserRecord,
+    payload: {
+      profileDisplayName?: string | null;
+      profileBio?: string | null;
+      profileBioAction?: "approve" | "reject" | "clear" | "update";
+      profileBioReason?: string | null;
+    },
+  ) => {
+    const updatedUser = await handleUserPatch(user.id, payload);
+
+    if (!updatedUser) {
+      return;
+    }
+
+    replaceUser(updatedUser);
+  };
+
   const handleCancelSubscription = async (
     user: AdminUserRecord,
     subscriptionId: string,
@@ -595,6 +645,13 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
                       {user.nickname ? `昵称：${user.nickname}` : "未设置昵称"}
                     </span>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${getProfileBioStatusTone(
+                        user.profile_bio_status,
+                      )}`}
+                    >
+                      {getProfileBioStatusLabel(user.profile_bio_status)}
+                    </span>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2 text-sm text-slate-500">
@@ -613,6 +670,11 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                     <span className="rounded-full bg-slate-50 px-3 py-1">
                       订阅：{activeSubscription ? getSubscriptionPlanName(activeSubscription) : "暂无"}
                     </span>
+                    {user.profile_display_name && (
+                      <span className="rounded-full bg-slate-50 px-3 py-1">
+                        主页名：{user.profile_display_name}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1010,6 +1072,142 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                           </div>
                         )}
                       </div>
+                    </section>
+
+                    <section className="rounded-[24px] bg-[#f8fbff] p-5 xl:col-span-2">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">主页资料审核</p>
+                          <p className="mt-2 text-sm leading-7 text-slate-500">
+                            这里能看到用户公开展示的主页名称和简介，也能处理自动审核转来的待审简介。
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${getProfileBioStatusTone(
+                            user.profile_bio_status,
+                          )}`}
+                        >
+                          {getProfileBioStatusLabel(user.profile_bio_status)}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+                        <label className="block rounded-[20px] border border-[#dfe8ff] bg-white p-4">
+                          <span className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                            主页名称
+                          </span>
+                          <input
+                            key={`${user.id}-profile-name-${user.profile_display_name ?? ""}`}
+                            defaultValue={user.profile_display_name ?? ""}
+                            onBlur={(event) => {
+                              const nextName = event.target.value.trim();
+
+                              if ((user.profile_display_name ?? "") !== nextName) {
+                                void handleProfilePatch(user, {
+                                  profileDisplayName: nextName || null,
+                                });
+                              }
+                            }}
+                            className="mt-3 h-12 w-full rounded-[16px] border border-[#dfe8ff] bg-slate-50 px-4 text-sm font-bold text-slate-800 outline-none"
+                          />
+                          <p className="mt-2 text-xs leading-6 text-slate-500">
+                            这是用户主页卡片展示名，管理员可以人工修正。
+                          </p>
+                        </label>
+
+                        <div className="rounded-[20px] border border-[#dfe8ff] bg-white p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs font-bold tracking-[0.14em] text-slate-400">
+                              已展示简介
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!window.confirm("确定清空这个用户的公开简介吗？")) {
+                                  return;
+                                }
+
+                                void handleProfilePatch(user, {
+                                  profileBioAction: "clear",
+                                  profileBioReason: "管理员清空了不适合展示的简介。",
+                                });
+                              }}
+                              className="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-black text-rose-600"
+                            >
+                              清空简介
+                            </button>
+                          </div>
+                          <textarea
+                            key={`${user.id}-profile-bio-${user.profile_bio ?? ""}`}
+                            defaultValue={user.profile_bio ?? ""}
+                            className="mt-3 h-28 w-full rounded-[16px] border border-[#dfe8ff] bg-slate-50 p-4 text-sm leading-7 text-slate-700 outline-none"
+                            onBlur={(event) => {
+                              const nextBio = event.target.value.trim();
+
+                              if ((user.profile_bio ?? "") !== nextBio) {
+                                void handleProfilePatch(user, {
+                                  profileBioAction: "update",
+                                  profileBio: nextBio || null,
+                                  profileBioReason: "管理员人工修改简介。",
+                                });
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {user.profile_bio_pending && (
+                        <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold tracking-[0.14em] text-amber-700">
+                                {user.profile_bio_status === "pending"
+                                  ? "待审简介"
+                                  : "被拦截/驳回简介"}
+                              </p>
+                              <p className="mt-3 rounded-[16px] bg-white px-4 py-3 text-sm leading-7 text-slate-700">
+                                {user.profile_bio_pending}
+                              </p>
+                              <p className="mt-3 text-sm leading-7 text-amber-800">
+                                {user.profile_bio_reason || "自动审核认为需要人工复审。"}
+                              </p>
+                              <p className="mt-2 text-xs text-amber-700">
+                                审核来源：{user.profile_bio_stage}，更新时间：
+                                {formatDateTime(user.profile_bio_updated_at)}
+                              </p>
+                            </div>
+                            {user.profile_bio_status === "pending" && (
+                              <div className="flex shrink-0 flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleProfilePatch(user, {
+                                      profileBioAction: "approve",
+                                      profileBio: user.profile_bio_pending,
+                                      profileBioReason: "管理员人工通过简介。",
+                                    })
+                                  }
+                                  className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-black text-white"
+                                >
+                                  通过简介
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleProfilePatch(user, {
+                                      profileBioAction: "reject",
+                                      profileBioReason: "管理员人工驳回简介。",
+                                    })
+                                  }
+                                  className="rounded-full bg-white px-4 py-2 text-xs font-black text-rose-600"
+                                >
+                                  驳回简介
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </section>
 
                     <section className="rounded-[24px] bg-slate-50 p-5">

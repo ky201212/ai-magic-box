@@ -160,6 +160,13 @@ export type AdminUserRecord = {
   id: string;
   phone: string;
   nickname: string | null;
+  profile_display_name: string | null;
+  profile_bio: string | null;
+  profile_bio_pending: string | null;
+  profile_bio_status: "approved" | "pending" | "rejected";
+  profile_bio_reason: string | null;
+  profile_bio_stage: "rule" | "ai" | "fallback" | "manual";
+  profile_bio_updated_at: string | null;
   status: "active" | "disabled";
   last_login_at: string | null;
   avatar_url: string | null;
