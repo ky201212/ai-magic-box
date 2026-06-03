@@ -24,6 +24,23 @@ type SiteFormState = {
   brandSummaryHighlight: string;
   brandSummaryDescription: string;
   initialCredits: number;
+  smsHumanVerificationProvider: "builtin" | "turnstile" | "disabled";
+  smsCaptchaLength: number;
+  smsCaptchaExpiresSeconds: number;
+  smsCaptchaMaxAttempts: number;
+  smsCaptchaIssuePerIpWindowSeconds: number;
+  smsCaptchaIssuePerIpLimit: number;
+  smsTurnstileSiteKey: string;
+  smsTurnstileWidgetMode: "managed" | "non-interactive" | "invisible";
+  smsOtpExpiresMinutes: number;
+  smsResendCooldownSeconds: number;
+  smsMaxSendsPerPhonePerHour: number;
+  smsMaxSendsPerPhonePerDay: number;
+  smsSendPerIpWindowSeconds: number;
+  smsSendPerIpLimit: number;
+  smsMaxVerifyAttemptsPerCode: number;
+  smsVerifyPerIpWindowSeconds: number;
+  smsVerifyPerIpLimit: number;
 };
 
 function getSettingValue<T extends Record<string, unknown>>(
@@ -57,6 +74,25 @@ function createInitialState(settings: SiteSettingRecord[]): SiteFormState {
   const credits = getSettingValue(settings, "credits.policy", {
     initialCredits: 50,
   });
+  const smsRiskControl = getSettingValue(settings, "auth.sms-risk-control", {
+    humanVerificationProvider: "builtin",
+    captchaLength: 4,
+    captchaExpiresSeconds: 180,
+    captchaMaxAttempts: 5,
+    captchaIssuePerIpWindowSeconds: 600,
+    captchaIssuePerIpLimit: 30,
+    turnstileSiteKey: "",
+    turnstileWidgetMode: "managed",
+    otpExpiresMinutes: 5,
+    resendCooldownSeconds: 60,
+    maxSendsPerPhonePerHour: 5,
+    maxSendsPerPhonePerDay: 10,
+    sendPerIpWindowSeconds: 600,
+    sendPerIpLimit: 12,
+    maxVerifyAttemptsPerCode: 5,
+    verifyPerIpWindowSeconds: 600,
+    verifyPerIpLimit: 20,
+  });
 
   return {
     heroTitle: String(hero.title ?? ""),
@@ -72,6 +108,43 @@ function createInitialState(settings: SiteSettingRecord[]): SiteFormState {
     brandSummaryHighlight: String(summary.highlight ?? ""),
     brandSummaryDescription: String(summary.description ?? ""),
     initialCredits: Number(credits.initialCredits ?? 50),
+    smsHumanVerificationProvider:
+      smsRiskControl.humanVerificationProvider === "turnstile" ||
+      smsRiskControl.humanVerificationProvider === "disabled"
+        ? smsRiskControl.humanVerificationProvider
+        : "builtin",
+    smsCaptchaLength: Number(smsRiskControl.captchaLength ?? 4),
+    smsCaptchaExpiresSeconds: Number(smsRiskControl.captchaExpiresSeconds ?? 180),
+    smsCaptchaMaxAttempts: Number(smsRiskControl.captchaMaxAttempts ?? 5),
+    smsCaptchaIssuePerIpWindowSeconds: Number(
+      smsRiskControl.captchaIssuePerIpWindowSeconds ?? 600,
+    ),
+    smsCaptchaIssuePerIpLimit: Number(smsRiskControl.captchaIssuePerIpLimit ?? 30),
+    smsTurnstileSiteKey: String(smsRiskControl.turnstileSiteKey ?? ""),
+    smsTurnstileWidgetMode:
+      smsRiskControl.turnstileWidgetMode === "non-interactive" ||
+      smsRiskControl.turnstileWidgetMode === "invisible"
+        ? smsRiskControl.turnstileWidgetMode
+        : "managed",
+    smsOtpExpiresMinutes: Number(smsRiskControl.otpExpiresMinutes ?? 5),
+    smsResendCooldownSeconds: Number(smsRiskControl.resendCooldownSeconds ?? 60),
+    smsMaxSendsPerPhonePerHour: Number(
+      smsRiskControl.maxSendsPerPhonePerHour ?? 5,
+    ),
+    smsMaxSendsPerPhonePerDay: Number(
+      smsRiskControl.maxSendsPerPhonePerDay ?? 10,
+    ),
+    smsSendPerIpWindowSeconds: Number(
+      smsRiskControl.sendPerIpWindowSeconds ?? 600,
+    ),
+    smsSendPerIpLimit: Number(smsRiskControl.sendPerIpLimit ?? 12),
+    smsMaxVerifyAttemptsPerCode: Number(
+      smsRiskControl.maxVerifyAttemptsPerCode ?? 5,
+    ),
+    smsVerifyPerIpWindowSeconds: Number(
+      smsRiskControl.verifyPerIpWindowSeconds ?? 600,
+    ),
+    smsVerifyPerIpLimit: Number(smsRiskControl.verifyPerIpLimit ?? 20),
   };
 }
 
@@ -85,7 +158,10 @@ export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
     return new Map(initialSettings.map((item) => [item.setting_key, item]));
   }, [initialSettings]);
 
-  const handleFieldChange = (field: keyof SiteFormState, value: string | number) => {
+  const handleFieldChange = (
+    field: keyof SiteFormState,
+    value: string | number | boolean,
+  ) => {
     setFormState((current) => ({
       ...current,
       [field]: value,
@@ -188,6 +264,70 @@ export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
           settingMap.get("credits.policy")?.description ?? "新用户初始赠送的魔法币数量",
         value: {
           initialCredits: Math.max(0, Number(formState.initialCredits) || 0),
+        },
+      },
+      {
+        setting_key: "auth.sms-risk-control",
+        setting_group:
+          settingMap.get("auth.sms-risk-control")?.setting_group ?? "security",
+        label: settingMap.get("auth.sms-risk-control")?.label ?? "短信验证码风控",
+        description:
+          settingMap.get("auth.sms-risk-control")?.description ??
+          "图形验证码、手机号限频、IP 限频和验证码尝试次数等风控策略。",
+        value: {
+          humanVerificationProvider: formState.smsHumanVerificationProvider,
+          captchaLength: Math.max(4, Math.min(6, Number(formState.smsCaptchaLength) || 4)),
+          captchaExpiresSeconds: Math.max(
+            60,
+            Number(formState.smsCaptchaExpiresSeconds) || 180,
+          ),
+          captchaMaxAttempts: Math.max(
+            1,
+            Number(formState.smsCaptchaMaxAttempts) || 5,
+          ),
+          captchaIssuePerIpWindowSeconds: Math.max(
+            60,
+            Number(formState.smsCaptchaIssuePerIpWindowSeconds) || 600,
+          ),
+          captchaIssuePerIpLimit: Math.max(
+            1,
+            Number(formState.smsCaptchaIssuePerIpLimit) || 30,
+          ),
+          turnstileSiteKey: formState.smsTurnstileSiteKey.trim(),
+          turnstileWidgetMode: formState.smsTurnstileWidgetMode,
+          otpExpiresMinutes: Math.max(
+            1,
+            Number(formState.smsOtpExpiresMinutes) || 5,
+          ),
+          resendCooldownSeconds: Math.max(
+            10,
+            Number(formState.smsResendCooldownSeconds) || 60,
+          ),
+          maxSendsPerPhonePerHour: Math.max(
+            1,
+            Number(formState.smsMaxSendsPerPhonePerHour) || 5,
+          ),
+          maxSendsPerPhonePerDay: Math.max(
+            1,
+            Number(formState.smsMaxSendsPerPhonePerDay) || 10,
+          ),
+          sendPerIpWindowSeconds: Math.max(
+            60,
+            Number(formState.smsSendPerIpWindowSeconds) || 600,
+          ),
+          sendPerIpLimit: Math.max(1, Number(formState.smsSendPerIpLimit) || 12),
+          maxVerifyAttemptsPerCode: Math.max(
+            1,
+            Number(formState.smsMaxVerifyAttemptsPerCode) || 5,
+          ),
+          verifyPerIpWindowSeconds: Math.max(
+            60,
+            Number(formState.smsVerifyPerIpWindowSeconds) || 600,
+          ),
+          verifyPerIpLimit: Math.max(
+            1,
+            Number(formState.smsVerifyPerIpLimit) || 20,
+          ),
         },
       },
     ];
@@ -434,22 +574,353 @@ export function SiteSettingsForm({ initialSettings }: SiteSettingsFormProps) {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSave}
-              className="inline-flex h-12 items-center justify-center rounded-full bg-slate-900 px-6 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
-            >
-              {saveStatus === "saving"
-                ? "保存中"
-                : saveStatus === "success"
-                  ? "保存成功"
-                  : saveStatus === "error"
-                    ? "保存失败"
-                    : "保存站点设置"}
-            </button>
           </div>
         </article>
       </section>
+
+      <section>
+        <article className="rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-lg font-black text-slate-800">短信验证码风控策略</p>
+              <p className="mt-2 max-w-[72ch] text-sm leading-7 text-slate-500">
+                获取短信验证码前先做人机验证，再按手机号和 IP 做限频。这里的数字保存后会实时作用到登录接口，方便你随时收紧或放宽风控。
+              </p>
+            </div>
+            <label className="block text-sm font-bold text-slate-600">
+              人机验证方式
+              <select
+                value={formState.smsHumanVerificationProvider}
+                onChange={(event) =>
+                  handleFieldChange(
+                    "smsHumanVerificationProvider",
+                    event.target.value as SiteFormState["smsHumanVerificationProvider"],
+                  )
+                }
+                className="mt-2 h-12 min-w-[240px] rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+              >
+                <option value="turnstile">Cloudflare Turnstile</option>
+                <option value="builtin">内置图形验证码</option>
+                <option value="disabled">关闭人机验证</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-6 grid gap-5 xl:grid-cols-4">
+            <div className="rounded-[24px] bg-slate-50 p-5">
+              <p className="text-sm font-black text-slate-800">Cloudflare Turnstile</p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                推荐生产环境优先使用。后台保存 Site Key，服务端 Secret Key 放环境变量 `TURNSTILE_SECRET_KEY`。
+              </p>
+              <div className="mt-5 grid gap-4">
+                <label className="block text-sm font-bold text-slate-600">
+                  Site Key
+                  <input
+                    value={formState.smsTurnstileSiteKey}
+                    onChange={(event) =>
+                      handleFieldChange("smsTurnstileSiteKey", event.target.value)
+                    }
+                    placeholder="输入 Cloudflare Turnstile Site Key"
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <label className="block text-sm font-bold text-slate-600">
+                  组件模式
+                  <select
+                    value={formState.smsTurnstileWidgetMode}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsTurnstileWidgetMode",
+                        event.target.value as SiteFormState["smsTurnstileWidgetMode"],
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  >
+                    <option value="managed">Managed（推荐）</option>
+                    <option value="non-interactive">Non-interactive</option>
+                    <option value="invisible">Invisible</option>
+                  </select>
+                </label>
+                <div className="rounded-[20px] border border-dashed border-slate-200 bg-white p-4">
+                  <p className="text-sm font-black text-slate-700">接入提醒</p>
+                  <p className="mt-2 text-sm leading-7 text-slate-500">
+                    只填 Site Key 还不够，服务器还要配置 Secret Key。两边都配好后，登录页就会自动显示 Turnstile 勾选框。
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[24px] bg-slate-50 p-5">
+              <p className="text-sm font-black text-slate-800">图形验证码</p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                这是内置兜底方案。只有当你把人机验证方式切到“内置图形验证码”时，这组参数才会生效。
+              </p>
+              <div className="mt-5 grid gap-4">
+                <label className="block text-sm font-bold text-slate-600">
+                  验证码位数
+                  <input
+                    type="number"
+                    min={4}
+                    max={6}
+                    value={formState.smsCaptchaLength}
+                    onChange={(event) =>
+                      handleFieldChange("smsCaptchaLength", Number(event.target.value))
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <label className="block text-sm font-bold text-slate-600">
+                  验证码有效期（秒）
+                  <input
+                    type="number"
+                    min={60}
+                    value={formState.smsCaptchaExpiresSeconds}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsCaptchaExpiresSeconds",
+                        Number(event.target.value),
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <label className="block text-sm font-bold text-slate-600">
+                  单图最大尝试次数
+                  <input
+                    type="number"
+                    min={1}
+                    value={formState.smsCaptchaMaxAttempts}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsCaptchaMaxAttempts",
+                        Number(event.target.value),
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block text-sm font-bold text-slate-600">
+                    图片刷新窗口（秒）
+                    <input
+                      type="number"
+                      min={60}
+                      value={formState.smsCaptchaIssuePerIpWindowSeconds}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsCaptchaIssuePerIpWindowSeconds",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                  <label className="block text-sm font-bold text-slate-600">
+                    单 IP 刷新上限
+                    <input
+                      type="number"
+                      min={1}
+                      value={formState.smsCaptchaIssuePerIpLimit}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsCaptchaIssuePerIpLimit",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[24px] bg-slate-50 p-5">
+              <p className="text-sm font-black text-slate-800">短信发送限频</p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                发送前先做人机校验，再限制同手机号和同 IP 的请求频率。
+              </p>
+              <div className="mt-5 grid gap-4">
+                <label className="block text-sm font-bold text-slate-600">
+                  短信验证码有效期（分钟）
+                  <input
+                    type="number"
+                    min={1}
+                    value={formState.smsOtpExpiresMinutes}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsOtpExpiresMinutes",
+                        Number(event.target.value),
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <label className="block text-sm font-bold text-slate-600">
+                  同手机号重发冷却（秒）
+                  <input
+                    type="number"
+                    min={10}
+                    value={formState.smsResendCooldownSeconds}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsResendCooldownSeconds",
+                        Number(event.target.value),
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block text-sm font-bold text-slate-600">
+                    单手机号每小时上限
+                    <input
+                      type="number"
+                      min={1}
+                      value={formState.smsMaxSendsPerPhonePerHour}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsMaxSendsPerPhonePerHour",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                  <label className="block text-sm font-bold text-slate-600">
+                    单手机号每天上限
+                    <input
+                      type="number"
+                      min={1}
+                      value={formState.smsMaxSendsPerPhonePerDay}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsMaxSendsPerPhonePerDay",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block text-sm font-bold text-slate-600">
+                    单 IP 统计窗口（秒）
+                    <input
+                      type="number"
+                      min={60}
+                      value={formState.smsSendPerIpWindowSeconds}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsSendPerIpWindowSeconds",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                  <label className="block text-sm font-bold text-slate-600">
+                    单 IP 发送上限
+                    <input
+                      type="number"
+                      min={1}
+                      value={formState.smsSendPerIpLimit}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsSendPerIpLimit",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[24px] bg-slate-50 p-5">
+              <p className="text-sm font-black text-slate-800">验证码校验保护</p>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                限制验证码试错和暴力猜码，防止有人反复撞库。
+              </p>
+              <div className="mt-5 grid gap-4">
+                <label className="block text-sm font-bold text-slate-600">
+                  单条验证码最大输错次数
+                  <input
+                    type="number"
+                    min={1}
+                    value={formState.smsMaxVerifyAttemptsPerCode}
+                    onChange={(event) =>
+                      handleFieldChange(
+                        "smsMaxVerifyAttemptsPerCode",
+                        Number(event.target.value),
+                      )
+                    }
+                    className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                  />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block text-sm font-bold text-slate-600">
+                    校验统计窗口（秒）
+                    <input
+                      type="number"
+                      min={60}
+                      value={formState.smsVerifyPerIpWindowSeconds}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsVerifyPerIpWindowSeconds",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                  <label className="block text-sm font-bold text-slate-600">
+                    单 IP 校验上限
+                    <input
+                      type="number"
+                      min={1}
+                      value={formState.smsVerifyPerIpLimit}
+                      onChange={(event) =>
+                        handleFieldChange(
+                          "smsVerifyPerIpLimit",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="mt-2 h-12 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-800 outline-none"
+                    />
+                  </label>
+                </div>
+
+                <div className="rounded-[20px] bg-[#fff7ed] p-4">
+                  <p className="text-sm font-black text-[#b86a12]">默认建议</p>
+                  <p className="mt-2 text-sm leading-7 text-[#b86a12]">
+                    建议优先使用 Turnstile 的 `Managed` 模式；如果先用内置图形码，则建议手机号 60 秒冷却、每小时 5 次、每天 10 次、单 IP 10 分钟 12 次。后面如果遇到真实攻击，再逐步收紧。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <div className="flex flex-wrap items-center gap-4 rounded-[28px] border border-white/80 bg-white px-6 py-5 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+        <button
+          type="button"
+          onClick={handleSave}
+          className="inline-flex h-12 items-center justify-center rounded-full bg-slate-900 px-6 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
+        >
+          {saveStatus === "saving"
+            ? "保存中"
+            : saveStatus === "success"
+              ? "保存成功"
+              : saveStatus === "error"
+                ? "保存失败"
+                : "保存站点设置"}
+        </button>
+        <p className="text-sm leading-7 text-slate-500">
+          保存后新策略会直接作用到短信验证码接口，不需要重新发版。
+        </p>
+      </div>
     </div>
   );
 }

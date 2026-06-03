@@ -4,11 +4,10 @@ import { normalizeChinaPhone } from "@/lib/phone";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { sendVerificationSms } from "@/lib/aliyun-sms";
 import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
-
-const OTP_EXPIRES_MINUTES = 5;
-const RESEND_COOLDOWN_SECONDS = 60;
-const MAX_SENDS_PER_HOUR = 5;
-const MAX_SENDS_PER_IP_PER_10_MINUTES = 12;
+import {
+  getSmsAuthRiskControlSetting,
+  verifySmsCaptchaChallenge,
+} from "@/lib/sms-auth-security";
 
 type PhoneOtpRow = {
   phone: string;
@@ -32,10 +31,11 @@ type PhoneOtpWritePayload = {
 export async function POST(request: Request) {
   try {
     const ip = getRequestIp(request);
+    const settings = await getSmsAuthRiskControlSetting();
     const ipRateLimit = consumeRateLimit({
       key: `auth:send-code:${ip}`,
-      limit: MAX_SENDS_PER_IP_PER_10_MINUTES,
-      windowMs: 10 * 60 * 1000,
+      limit: settings.sendPerIpLimit,
+      windowMs: settings.sendPerIpWindowSeconds * 1000,
     });
 
     if (!ipRateLimit.allowed) {
@@ -45,12 +45,46 @@ export async function POST(request: Request) {
       );
     }
 
-    const { phone } = (await request.json()) as { phone?: string };
+    const { phone, captchaId, captchaCode, turnstileToken } =
+      (await request.json()) as {
+      phone?: string;
+      captchaId?: string;
+      captchaCode?: string;
+      turnstileToken?: string;
+    };
     const normalizedPhone = normalizeChinaPhone(phone ?? "");
 
     if (!normalizedPhone) {
       return NextResponse.json(
         { error: "请输入有效的中国大陆手机号。" },
+        { status: 400 },
+      );
+    }
+
+    const dailyPhoneRateLimit = consumeRateLimit({
+      key: `auth:send-code:phone-day:${normalizedPhone}`,
+      limit: settings.maxSendsPerPhonePerDay,
+      windowMs: 24 * 60 * 60 * 1000,
+    });
+
+    if (!dailyPhoneRateLimit.allowed) {
+      return NextResponse.json(
+        { error: "该手机号今天获取验证码次数过多，请明天再试。" },
+        { status: 429 },
+      );
+    }
+
+    const captchaResult = await verifySmsCaptchaChallenge({
+      challengeId: captchaId,
+      answer: captchaCode,
+      turnstileToken,
+      ip,
+      settings,
+    });
+
+    if (!captchaResult.ok) {
+      return NextResponse.json(
+        { error: captchaResult.error ?? "图形验证码校验失败，请稍后再试。" },
         { status: 400 },
       );
     }
@@ -74,7 +108,7 @@ export async function POST(request: Request) {
       const lastSentAt = new Date(existingOtp.last_sent_at).getTime();
       const firstSentAt = new Date(existingOtp.first_sent_at).getTime();
       const cooldownRemaining =
-        RESEND_COOLDOWN_SECONDS - Math.floor((now - lastSentAt) / 1000);
+        settings.resendCooldownSeconds - Math.floor((now - lastSentAt) / 1000);
 
       if (cooldownRemaining > 0) {
         return NextResponse.json(
@@ -85,7 +119,10 @@ export async function POST(request: Request) {
 
       const isWithinOneHour = now - firstSentAt < 60 * 60 * 1000;
 
-      if (isWithinOneHour && existingOtp.send_count >= MAX_SENDS_PER_HOUR) {
+      if (
+        isWithinOneHour &&
+        existingOtp.send_count >= settings.maxSendsPerPhonePerHour
+      ) {
         return NextResponse.json(
           { error: "该手机号发送次数过多，请 1 小时后再试。" },
           { status: 429 },
@@ -96,19 +133,20 @@ export async function POST(request: Request) {
     const code = generateOtpCode();
     const codeHash = await hashOtpCode(code);
     const expiresAt = new Date(
-      now + OTP_EXPIRES_MINUTES * 60 * 1000,
+      now + settings.otpExpiresMinutes * 60 * 1000,
     ).toISOString();
 
-    await sendVerificationSms(normalizedPhone, code, OTP_EXPIRES_MINUTES);
+    await sendVerificationSms(normalizedPhone, code, settings.otpExpiresMinutes);
 
     if (!existingOtp) {
+      const nowIso = new Date(now).toISOString();
       const insertPayload: PhoneOtpWritePayload = {
         phone: normalizedPhone,
         code_hash: codeHash,
         expires_at: expiresAt,
         send_count: 1,
-        first_sent_at: new Date(now).toISOString(),
-        last_sent_at: new Date(now).toISOString(),
+        first_sent_at: nowIso,
+        last_sent_at: nowIso,
         failed_attempts: 0,
       };
 
@@ -122,13 +160,14 @@ export async function POST(request: Request) {
     } else {
       const firstSentAt = new Date(existingOtp.first_sent_at).getTime();
       const isWithinOneHour = now - firstSentAt < 60 * 60 * 1000;
+      const nowIso = new Date(now).toISOString();
       const updatePayload: PhoneOtpWritePayload = {
         code_hash: codeHash,
         expires_at: expiresAt,
-        last_sent_at: new Date(now).toISOString(),
+        last_sent_at: nowIso,
         first_sent_at: isWithinOneHour
           ? existingOtp.first_sent_at
-          : new Date(now).toISOString(),
+          : nowIso,
         send_count: isWithinOneHour ? existingOtp.send_count + 1 : 1,
         failed_attempts: 0,
       };

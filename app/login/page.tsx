@@ -3,7 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import Script from "next/script";
+import { useEffect, useRef, useState } from "react";
 
 type BrandIdentity = {
   siteName: string;
@@ -11,20 +12,130 @@ type BrandIdentity = {
   logoUrl: string;
 };
 
+type HumanVerificationPayload =
+  | {
+      enabled: false;
+      provider: "disabled";
+      error?: string;
+    }
+  | {
+      enabled: true;
+      provider: "builtin";
+      challengeId?: string;
+      imageDataUrl?: string;
+      expiresInSeconds?: number;
+      error?: string;
+    }
+  | {
+      enabled: true;
+      provider: "turnstile";
+      siteKey?: string;
+      widgetMode?: "managed" | "non-interactive" | "invisible";
+      error?: string;
+    };
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (
+        container: HTMLElement,
+        options: Record<string, unknown>,
+      ) => string;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId?: string) => void;
+    };
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [captchaCode, setCaptchaCode] = useState("");
+  const [captchaProvider, setCaptchaProvider] = useState<
+    "builtin" | "turnstile" | "disabled"
+  >("builtin");
+  const [captchaChallengeId, setCaptchaChallengeId] = useState("");
+  const [captchaImageUrl, setCaptchaImageUrl] = useState("");
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileWidgetMode, setTurnstileWidgetMode] = useState<
+    "managed" | "non-interactive" | "invisible"
+  >("managed");
+  const [isTurnstileScriptReady, setIsTurnstileScriptReady] = useState(false);
+  const [captchaMessage, setCaptchaMessage] = useState("");
+  const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [message, setMessage] = useState("");
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const [brand, setBrand] = useState<BrandIdentity>({
     siteName: "小红车魔法工坊",
     tagline: "下一代儿童AI创造力平台",
     logoUrl: "/logo.png",
   });
   const redirectTarget = searchParams.get("redirect") || "/workshop";
+
+  const loadCaptcha = async () => {
+    setIsLoadingCaptcha(true);
+    setCaptchaMessage("");
+
+    try {
+      const response = await fetch("/api/auth/captcha", {
+        cache: "no-store",
+      });
+      const data = (await response.json()) as HumanVerificationPayload;
+
+      if (!response.ok) {
+        setCaptchaProvider("builtin");
+        setCaptchaChallengeId("");
+        setCaptchaImageUrl("");
+        setTurnstileSiteKey("");
+        setTurnstileToken("");
+        setCaptchaMessage(data.error ?? "图形验证码加载失败，请稍后刷新。");
+        return;
+      }
+
+      if (!data.enabled) {
+        setCaptchaProvider("disabled");
+        setCaptchaChallengeId("");
+        setCaptchaImageUrl("");
+        setCaptchaCode("");
+        setTurnstileSiteKey("");
+        setTurnstileToken("");
+        return;
+      }
+
+      if (data.provider === "turnstile") {
+        setCaptchaProvider("turnstile");
+        setTurnstileSiteKey(data.siteKey ?? "");
+        setTurnstileWidgetMode(data.widgetMode ?? "managed");
+        setTurnstileToken("");
+        setCaptchaChallengeId("");
+        setCaptchaImageUrl("");
+        setCaptchaCode("");
+        return;
+      }
+
+      setCaptchaProvider("builtin");
+      setCaptchaChallengeId(data.challengeId ?? "");
+      setCaptchaImageUrl(data.imageDataUrl ?? "");
+      setCaptchaCode("");
+      setTurnstileSiteKey("");
+      setTurnstileToken("");
+    } catch {
+      setCaptchaProvider("builtin");
+      setCaptchaChallengeId("");
+      setCaptchaImageUrl("");
+      setTurnstileSiteKey("");
+      setTurnstileToken("");
+      setCaptchaMessage("图形验证码加载失败，请稍后刷新。");
+    } finally {
+      setIsLoadingCaptcha(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -69,9 +180,85 @@ export default function LoginPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadCaptcha();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      captchaProvider !== "turnstile" ||
+      !isTurnstileScriptReady ||
+      !turnstileSiteKey ||
+      !turnstileContainerRef.current ||
+      !window.turnstile
+    ) {
+      return;
+    }
+
+    if (turnstileWidgetIdRef.current) {
+      window.turnstile.remove(turnstileWidgetIdRef.current);
+      turnstileWidgetIdRef.current = null;
+    }
+
+    turnstileContainerRef.current.innerHTML = "";
+
+    const widgetId = window.turnstile.render(turnstileContainerRef.current, {
+      sitekey: turnstileSiteKey,
+      theme: "light",
+      action: "send_sms_code",
+      appearance: turnstileWidgetMode === "invisible" ? "interaction-only" : "always",
+      callback: (token: string) => {
+        setTurnstileToken(token);
+        setCaptchaMessage("");
+      },
+      "expired-callback": () => {
+        setTurnstileToken("");
+        setCaptchaMessage("人机验证已过期，请重新勾选验证框。");
+      },
+      "error-callback": () => {
+        setTurnstileToken("");
+        setCaptchaMessage("人机验证加载失败，请刷新后再试。");
+      },
+    });
+
+    turnstileWidgetIdRef.current = widgetId;
+    setTurnstileToken("");
+
+    return () => {
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetIdRef.current);
+        turnstileWidgetIdRef.current = null;
+      }
+    };
+  }, [
+    captchaProvider,
+    isTurnstileScriptReady,
+    turnstileSiteKey,
+    turnstileWidgetMode,
+  ]);
+
   const handleSendCode = async () => {
     if (!phone.trim()) {
       setMessage("先输入手机号，再继续下一步。");
+      return;
+    }
+
+    if (
+      captchaProvider === "builtin" &&
+      (!captchaChallengeId || !captchaCode.trim())
+    ) {
+      setMessage("先完成图形验证码，再获取短信验证码。");
+      return;
+    }
+
+    if (captchaProvider === "turnstile" && !turnstileToken.trim()) {
+      setMessage("先勾选人机验证，再获取短信验证码。");
       return;
     }
 
@@ -84,7 +271,12 @@ export default function LoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({
+          phone,
+          captchaId: captchaChallengeId,
+          captchaCode,
+          turnstileToken,
+        }),
       });
 
       const data = (await response.json()) as { message?: string; error?: string };
@@ -99,6 +291,19 @@ export default function LoginPage() {
       setMessage("刚刚有一点网络波动，请稍后再试。");
     } finally {
       setIsSending(false);
+
+      if (captchaProvider === "builtin") {
+        setCaptchaCode("");
+        await loadCaptcha();
+      }
+
+      if (captchaProvider === "turnstile") {
+        setTurnstileToken("");
+
+        if (turnstileWidgetIdRef.current && window.turnstile) {
+          window.turnstile.reset(turnstileWidgetIdRef.current);
+        }
+      }
     }
   };
 
@@ -138,6 +343,15 @@ export default function LoginPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#f7f8ff] text-[#18213f]">
+      {captchaProvider === "turnstile" && turnstileSiteKey && (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+          onLoad={() => {
+            setIsTurnstileScriptReady(true);
+          }}
+        />
+      )}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_10%,rgba(126,171,255,0.34),transparent_28%),radial-gradient(circle_at_82%_14%,rgba(255,159,211,0.3),transparent_24%),linear-gradient(180deg,#ffffff_0%,#f7f8ff_48%,#eff5ff_100%)]" />
         <div className="home-grid absolute inset-0 opacity-80" />
@@ -246,6 +460,84 @@ export default function LoginPage() {
                     />
                   </div>
 
+                  {captchaProvider === "builtin" && (
+                    <div>
+                      <label
+                        htmlFor="captcha"
+                        className="mb-2 block text-sm font-semibold text-[#52607e]"
+                      >
+                        图形验证码
+                      </label>
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <input
+                          id="captcha"
+                          type="text"
+                          value={captchaCode}
+                          onChange={(event) => setCaptchaCode(event.target.value)}
+                          placeholder="输入图片里的字符"
+                          autoComplete="off"
+                          className="h-14 min-w-0 flex-1 rounded-[22px] border border-[#dfe7ff] bg-white/86 px-5 text-[15px] uppercase text-[#17213f] outline-none placeholder:text-[#9aa6c4] transition focus:border-[#bccaff] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void loadCaptcha();
+                          }}
+                          disabled={isLoadingCaptcha}
+                          className="h-14 rounded-[22px] border border-[#dfe7ff] bg-white px-5 text-sm font-semibold text-[#52607e] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isLoadingCaptcha ? "刷新中" : "换一张"}
+                        </button>
+                      </div>
+                      <div className="mt-3 flex items-center gap-3 rounded-[22px] border border-[#dfe7ff] bg-[#f7f9ff] px-4 py-3">
+                        {captchaImageUrl ? (
+                          <Image
+                            src={captchaImageUrl}
+                            alt="图形验证码"
+                            width={160}
+                            height={58}
+                            unoptimized
+                            className="h-[58px] w-[160px] rounded-[18px] border border-white bg-white shadow-[0_10px_24px_rgba(148,163,184,0.12)]"
+                          />
+                        ) : (
+                          <div className="grid h-[58px] w-[160px] place-items-center rounded-[18px] border border-dashed border-[#dfe7ff] bg-white text-sm text-[#7f8bac]">
+                            {isLoadingCaptcha ? "加载中" : "点击刷新"}
+                          </div>
+                        )}
+                        <p className="text-sm leading-7 text-[#667392]">
+                          先完成人机验证，系统才会发送短信验证码。
+                        </p>
+                      </div>
+                      {captchaMessage && (
+                        <p className="mt-3 text-sm font-medium text-[#d4557c]">
+                          {captchaMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {captchaProvider === "turnstile" && (
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-[#52607e]">
+                        人机验证
+                      </label>
+                      <div className="rounded-[22px] border border-[#dfe7ff] bg-[#f7f9ff] px-4 py-4">
+                        <div
+                          ref={turnstileContainerRef}
+                          className="min-h-[70px]"
+                        />
+                        <p className="mt-3 text-sm leading-7 text-[#667392]">
+                          先通过 Cloudflare Turnstile 人机验证，系统才会发送短信验证码。
+                        </p>
+                      </div>
+                      {captchaMessage && (
+                        <p className="mt-3 text-sm font-medium text-[#d4557c]">
+                          {captchaMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <div>
                     <label
                       htmlFor="code"
@@ -265,7 +557,13 @@ export default function LoginPage() {
                       <button
                         type="button"
                         onClick={handleSendCode}
-                        disabled={isSending}
+                        disabled={
+                          isSending ||
+                          (captchaProvider === "builtin" &&
+                            (isLoadingCaptcha || !captchaChallengeId)) ||
+                          (captchaProvider === "turnstile" &&
+                            (!turnstileSiteKey || !isTurnstileScriptReady))
+                        }
                         className="h-14 rounded-[22px] border border-[#dfe7ff] bg-white px-5 text-sm font-semibold text-[#52607e] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-60 sm:h-auto"
                       >
                         {isSending ? "发送中" : "获取验证码"}

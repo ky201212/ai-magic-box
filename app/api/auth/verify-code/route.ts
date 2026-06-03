@@ -5,9 +5,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { hashOtpCode, setSession } from "@/lib/auth";
 import { normalizeChinaPhone } from "@/lib/phone";
 import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
-
-const MAX_VERIFY_ATTEMPTS = 5;
-const MAX_VERIFY_PER_IP_PER_10_MINUTES = 20;
+import { getSmsAuthRiskControlSetting } from "@/lib/sms-auth-security";
 
 type PhoneOtpRow = {
   phone: string;
@@ -23,10 +21,11 @@ type PhoneOtpUpdatePayload = {
 export async function POST(request: Request) {
   try {
     const ip = getRequestIp(request);
+    const settings = await getSmsAuthRiskControlSetting();
     const ipRateLimit = consumeRateLimit({
       key: `auth:verify-code:${ip}`,
-      limit: MAX_VERIFY_PER_IP_PER_10_MINUTES,
-      windowMs: 10 * 60 * 1000,
+      limit: settings.verifyPerIpLimit,
+      windowMs: settings.verifyPerIpWindowSeconds * 1000,
     });
 
     if (!ipRateLimit.allowed) {
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (otpRow.failed_attempts >= MAX_VERIFY_ATTEMPTS) {
+    if (otpRow.failed_attempts >= settings.maxVerifyAttemptsPerCode) {
       return NextResponse.json(
         { error: "验证码尝试次数过多，请重新获取验证码。" },
         { status: 429 },

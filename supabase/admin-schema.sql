@@ -186,6 +186,31 @@ values
       "description": "小红车魔法工坊相信，真正好的 AI 教育平台，不该先要求孩子适应技术，而应该先让技术适应孩子的好奇心、表达欲、想象力与创造力。"
     }'::jsonb,
     '品牌页头图文案'
+  ),
+  (
+    'auth.sms-risk-control',
+    'security',
+    '短信验证码风控',
+    '{
+      "humanVerificationProvider": "builtin",
+      "captchaLength": 4,
+      "captchaExpiresSeconds": 180,
+      "captchaMaxAttempts": 5,
+      "captchaIssuePerIpWindowSeconds": 600,
+      "captchaIssuePerIpLimit": 30,
+      "turnstileSiteKey": "",
+      "turnstileWidgetMode": "managed",
+      "otpExpiresMinutes": 5,
+      "resendCooldownSeconds": 60,
+      "maxSendsPerPhonePerHour": 5,
+      "maxSendsPerPhonePerDay": 10,
+      "sendPerIpWindowSeconds": 600,
+      "sendPerIpLimit": 12,
+      "maxVerifyAttemptsPerCode": 5,
+      "verifyPerIpWindowSeconds": 600,
+      "verifyPerIpLimit": 20
+    }'::jsonb,
+    'Cloudflare Turnstile、内置图形验证码、手机号限频、IP 限频和验证码尝试次数等风控策略。'
   )
 on conflict (setting_key) do nothing;
 
