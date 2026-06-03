@@ -10,15 +10,110 @@ import {
   ensureUserCredits,
   listUserCreditLogsByWindow,
 } from "@/lib/credits";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, hashOtpCode } from "@/lib/auth";
 import {
   listUserPaymentOrders,
   listUserSubscriptions,
   toPublicPaymentOrder,
 } from "@/lib/payments";
 import { getDefaultProfileAvatarPreset } from "@/lib/profile-avatar-presets";
+import {
+  CHINA_MAINLAND_PHONE_PATTERN,
+  validateProfileDisplayName,
+} from "@/lib/profile-settings-validation";
+import { normalizeChinaPhone } from "@/lib/phone";
+import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
+import { getSmsAuthRiskControlSetting } from "@/lib/sms-auth-security";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
-const CHINA_MAINLAND_PHONE_PATTERN = /^1[3-9]\d{9}$/;
+type PhoneOtpRow = {
+  phone: string;
+  code_hash: string;
+  expires_at: string;
+  failed_attempts: number;
+};
+
+type PhoneOtpUpdatePayload = {
+  failed_attempts?: number;
+};
+
+async function verifyPhoneChangeCode(input: {
+  request: Request;
+  phone: string;
+  code: string;
+}) {
+  const ip = getRequestIp(input.request);
+  const settings = await getSmsAuthRiskControlSetting();
+  const ipRateLimit = consumeRateLimit({
+    key: `profile:phone-code:verify:${ip}`,
+    limit: settings.verifyPerIpLimit,
+    windowMs: settings.verifyPerIpWindowSeconds * 1000,
+  });
+
+  if (!ipRateLimit.allowed) {
+    return {
+      ok: false as const,
+      status: 429,
+      error: `尝试太频繁了，请 ${ipRateLimit.retryAfterSeconds} 秒后再试。`,
+    };
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: otpRow, error: fetchError } = await supabaseAdmin
+    .from("phone_otps")
+    .select("phone, code_hash, expires_at, failed_attempts")
+    .eq("phone", input.phone)
+    .maybeSingle<PhoneOtpRow>();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  if (!otpRow) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "验证码不存在，请重新获取。",
+    };
+  }
+
+  if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "验证码已过期，请重新获取。",
+    };
+  }
+
+  if (otpRow.failed_attempts >= settings.maxVerifyAttemptsPerCode) {
+    return {
+      ok: false as const,
+      status: 429,
+      error: "验证码尝试次数过多，请重新获取验证码。",
+    };
+  }
+
+  const codeHash = await hashOtpCode(input.code.trim());
+
+  if (codeHash !== otpRow.code_hash) {
+    const updatePayload: PhoneOtpUpdatePayload = {
+      failed_attempts: otpRow.failed_attempts + 1,
+    };
+
+    await supabaseAdmin
+      .from("phone_otps")
+      .update(updatePayload as never)
+      .eq("phone", input.phone);
+
+    return {
+      ok: false as const,
+      status: 400,
+      error: "验证码不正确，请重新输入。",
+    };
+  }
+
+  return { ok: true as const };
+}
 
 export async function GET() {
   try {
@@ -88,17 +183,19 @@ export async function PATCH(request: Request) {
       bio?: string | null;
       avatarUrl?: string;
       avatarColor?: string;
+      phoneCode?: string;
     };
 
-    const displayName = body.displayName?.trim() ?? "";
-    const phone = body.phone?.trim() ?? "";
+    const displayNameValidation = validateProfileDisplayName(body.displayName ?? "");
+    const phone = normalizeChinaPhone(body.phone ?? "") ?? "";
     const bio = body.bio?.trim() ?? "";
     const avatarUrl = body.avatarUrl?.trim() ?? "";
     const avatarColor = body.avatarColor?.trim() ?? "";
+    const phoneCode = body.phoneCode?.trim() ?? "";
 
-    if (displayName.length < 2 || displayName.length > 24) {
+    if (!displayNameValidation.ok) {
       return NextResponse.json(
-        { error: "用户名需要 2 到 24 个字。" },
+        { error: displayNameValidation.error },
         { status: 400 },
       );
     }
@@ -121,15 +218,43 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "请先选择一个头像。" }, { status: 400 });
     }
 
+    const isPhoneChanged = phone !== currentUser.users.phone;
+
+    if (isPhoneChanged) {
+      if (!phoneCode) {
+        return NextResponse.json(
+          { error: "更换手机号前，请先输入短信验证码。" },
+          { status: 400 },
+        );
+      }
+
+      const verification = await verifyPhoneChangeCode({
+        request,
+        phone,
+        code: phoneCode,
+      });
+
+      if (!verification.ok) {
+        return NextResponse.json(
+          { error: verification.error },
+          { status: verification.status },
+        );
+      }
+    }
+
     const result = await updateUserProfileSettings({
       userId: currentUser.user_id,
       currentPhone: currentUser.users.phone,
       nextPhone: phone,
-      displayName,
+      displayName: displayNameValidation.value,
       bio,
       avatarUrl,
       avatarColor,
     });
+
+    if (isPhoneChanged) {
+      await getSupabaseAdmin().from("phone_otps").delete().eq("phone", phone);
+    }
 
     return NextResponse.json({
       success: true,

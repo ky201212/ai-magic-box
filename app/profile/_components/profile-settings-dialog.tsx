@@ -1,12 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getDefaultProfileAvatarPreset,
   getProfileAvatarPresetByUrl,
   PROFILE_AVATAR_PRESETS,
 } from "@/lib/profile-avatar-presets";
+import {
+  CHINA_MAINLAND_PHONE_PATTERN,
+  validateProfileDisplayName,
+} from "@/lib/profile-settings-validation";
 
 export type ProfileSettingsSnapshot = {
   displayName: string;
@@ -38,8 +42,23 @@ export function ProfileSettingsDialog({
   onSaved,
 }: ProfileSettingsDialogProps) {
   const [form, setForm] = useState<ProfileSettingsSnapshot>(initialSettings);
+  const [phoneCode, setPhoneCode] = useState("");
   const [message, setMessage] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
+
+  useEffect(() => {
+    if (codeCooldownSeconds <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCodeCooldownSeconds((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [codeCooldownSeconds]);
 
   if (!isOpen) {
     return null;
@@ -47,6 +66,8 @@ export function ProfileSettingsDialog({
 
   const activePreset =
     getProfileAvatarPresetByUrl(form.avatarUrl) ?? getDefaultProfileAvatarPreset();
+  const isPhoneChanged = form.phone !== initialSettings.phone;
+  const displayNameValidation = validateProfileDisplayName(form.displayName);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#17213f]/32 px-4 py-4 backdrop-blur-md sm:px-5">
@@ -123,6 +144,7 @@ export function ProfileSettingsDialog({
                     bio: form.bio,
                     avatarUrl: form.avatarUrl,
                     avatarColor: form.avatarColor,
+                    phoneCode: isPhoneChanged ? phoneCode : undefined,
                   }),
                 });
                 const payload = (await response.json()) as {
@@ -170,33 +192,120 @@ export function ProfileSettingsDialog({
                       displayName: event.target.value,
                     }))
                   }
-                  maxLength={24}
+                  maxLength={16}
                   placeholder="例如：火箭小创客"
                   className="mt-3 w-full rounded-[18px] border border-[#dce5ff] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17213f] outline-none transition placeholder:text-[#9ba6c5] focus:border-[#98aaff] focus:bg-white"
                 />
-                <p className="mt-2 text-xs text-[#8b97b8]">支持 2 到 24 个字。</p>
+                <p
+                  className={`mt-2 text-xs ${
+                    displayNameValidation.ok ? "text-[#8b97b8]" : "font-semibold text-[#c45a7e]"
+                  }`}
+                >
+                  {displayNameValidation.ok
+                    ? "支持 2 到 16 个字，不能使用官方、系统、AI 或不文明词。"
+                    : displayNameValidation.error}
+                </p>
               </label>
 
               <label className="block rounded-[24px] border border-white/80 bg-white/88 p-5 shadow-[0_14px_34px_rgba(92,116,189,0.08)]">
                 <span className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
                   手机号码
                 </span>
-                <input
-                  value={form.phone}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      phone: event.target.value.replace(/\D/g, "").slice(0, 11),
-                    }))
-                  }
-                  inputMode="numeric"
-                  maxLength={11}
-                  placeholder="请输入 11 位手机号"
-                  className="mt-3 w-full rounded-[18px] border border-[#dce5ff] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17213f] outline-none transition placeholder:text-[#9ba6c5] focus:border-[#98aaff] focus:bg-white"
-                />
-                <p className="mt-2 text-xs text-[#8b97b8]">保存后将作为当前账号登录手机号。</p>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={form.phone}
+                    onChange={(event) => {
+                      const nextPhone = event.target.value.replace(/\D/g, "").slice(0, 11);
+                      setForm((current) => ({
+                        ...current,
+                        phone: nextPhone,
+                      }));
+                      setPhoneCode("");
+                    }}
+                    inputMode="numeric"
+                    maxLength={11}
+                    placeholder="请输入 11 位手机号"
+                    className="min-w-0 flex-1 rounded-[18px] border border-[#dce5ff] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17213f] outline-none transition placeholder:text-[#9ba6c5] focus:border-[#98aaff] focus:bg-white"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      !isPhoneChanged ||
+                      isSendingCode ||
+                      codeCooldownSeconds > 0 ||
+                      !CHINA_MAINLAND_PHONE_PATTERN.test(form.phone)
+                    }
+                    onClick={async () => {
+                      setIsSendingCode(true);
+                      setMessage("");
+
+                      try {
+                        const response = await fetch("/api/community/me/phone-code", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ phone: form.phone }),
+                        });
+                        const payload = (await response.json()) as {
+                          error?: string;
+                          message?: string;
+                        };
+
+                        if (!response.ok) {
+                          throw new Error(payload.error ?? "验证码发送失败。");
+                        }
+
+                        setPhoneCode("");
+                        setCodeCooldownSeconds(60);
+                        setMessage(payload.message ?? "验证码已发送，请注意查收短信。");
+                      } catch (requestError) {
+                        setMessage(
+                          requestError instanceof Error
+                            ? requestError.message
+                            : "验证码发送失败。",
+                        );
+                      } finally {
+                        setIsSendingCode(false);
+                      }
+                    }}
+                    className="shrink-0 rounded-[18px] border border-[#dce5ff] bg-white px-4 py-3 text-xs font-black text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSendingCode
+                      ? "发送中"
+                      : codeCooldownSeconds > 0
+                        ? `${codeCooldownSeconds}s`
+                        : "获取验证码"}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-[#8b97b8]">
+                  {isPhoneChanged
+                    ? "更换手机号必须先验证新手机号，验证码每小时最多发送 5 条。"
+                    : "当前手机号未改变，保存资料时不需要验证码。"}
+                </p>
               </label>
             </div>
+
+            {isPhoneChanged && (
+              <label className="block rounded-[24px] border border-[#e1e8ff] bg-[#f8faff] p-5">
+                <span className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
+                  短信验证码
+                </span>
+                <input
+                  value={phoneCode}
+                  onChange={(event) =>
+                    setPhoneCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="输入新手机号收到的验证码"
+                  className="mt-3 w-full rounded-[18px] border border-[#dce5ff] bg-white px-4 py-3 text-sm font-semibold text-[#17213f] outline-none transition placeholder:text-[#9ba6c5] focus:border-[#98aaff]"
+                />
+                <p className="mt-2 text-xs text-[#8b97b8]">
+                  验证通过后，这个手机号才会成为新的登录手机号。
+                </p>
+              </label>
+            )}
 
             <label className="block rounded-[24px] border border-white/80 bg-white/88 p-5 shadow-[0_14px_34px_rgba(92,116,189,0.08)]">
               <span className="text-sm font-black tracking-[0.14em] text-[#7782a4]">

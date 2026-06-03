@@ -4,6 +4,7 @@ import {
   getDefaultProfileAvatarPreset,
   isProfileAvatarPresetUrl,
 } from "@/lib/profile-avatar-presets";
+import { validateProfileDisplayName } from "@/lib/profile-settings-validation";
 import {
   normalizeCommunityCategory,
   type CommunityCategory,
@@ -672,14 +673,14 @@ export async function updateUserProfileSettings(input: {
   avatarColor: string;
 }) {
   const supabaseAdmin = getSupabaseAdmin();
-  const trimmedDisplayName = input.displayName.trim();
+  const displayNameValidation = validateProfileDisplayName(input.displayName);
   const trimmedPhone = input.nextPhone.trim();
   const trimmedBio = input.bio?.trim() || null;
   const trimmedAvatarUrl = input.avatarUrl.trim();
   const trimmedAvatarColor = input.avatarColor.trim() || "#7b72ff";
 
-  if (!trimmedDisplayName) {
-    throw new Error("请先填写用户名。");
+  if (!displayNameValidation.ok) {
+    throw new Error(displayNameValidation.error);
   }
 
   if (!isProfileAvatarPresetUrl(trimmedAvatarUrl)) {
@@ -693,7 +694,7 @@ export async function updateUserProfileSettings(input: {
     .update(
       {
         phone: trimmedPhone,
-        nickname: trimmedDisplayName,
+        nickname: displayNameValidation.value,
         avatar_url: trimmedAvatarUrl,
       } as never,
     )
@@ -716,7 +717,7 @@ export async function updateUserProfileSettings(input: {
     .from("user_profiles")
     .update(
       {
-        display_name: trimmedDisplayName,
+        display_name: displayNameValidation.value,
         bio: trimmedBio,
         avatar_color: trimmedAvatarColor,
       } as never,
