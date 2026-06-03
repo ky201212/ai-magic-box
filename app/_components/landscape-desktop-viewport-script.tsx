@@ -37,6 +37,76 @@ const headBootstrapScript = `
     );
   };
 
+  const isBareCssAssetPath = (href) => {
+    if (!href || typeof href !== "string") {
+      return false;
+    }
+
+    if (
+      href.startsWith("/") ||
+      href.startsWith("http://") ||
+      href.startsWith("https://") ||
+      href.startsWith("//") ||
+      href.startsWith("blob:") ||
+      href.startsWith("data:")
+    ) {
+      return false;
+    }
+
+    const cleanHref = href.split("#")[0]?.split("?")[0] ?? href;
+    return /^[A-Za-z0-9._-]+\\.css$/.test(cleanHref);
+  };
+
+  const toNormalizedNextStylesheetHref = (href) => {
+    if (!href || typeof href !== "string") {
+      return null;
+    }
+
+    if (href.includes("/_next/static/")) {
+      return href;
+    }
+
+    if (isBareCssAssetPath(href)) {
+      return "/_next/static/chunks/" + href.replace(/^\\/+/, "");
+    }
+
+    if (href.startsWith("static/")) {
+      return "/_next/" + href.replace(/^\\/+/, "");
+    }
+
+    return null;
+  };
+
+  const retryStylesheetWithNormalizedHref = (link) => {
+    if (!(link instanceof HTMLLinkElement)) {
+      return false;
+    }
+
+    if (link.dataset.nextStylesheetRetry === "1") {
+      return false;
+    }
+
+    const rawHref =
+      link.getAttribute("href") ||
+      (typeof link.href === "string" ? link.href : "");
+    const normalizedHref = toNormalizedNextStylesheetHref(rawHref);
+
+    if (!normalizedHref || normalizedHref === rawHref) {
+      return false;
+    }
+
+    link.dataset.nextStylesheetRetry = "1";
+    link.setAttribute("href", normalizedHref);
+    return true;
+  };
+
+  const normalizeExistingStylesheetLinks = () => {
+    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+    links.forEach((link) => {
+      retryStylesheetWithNormalizedHref(link);
+    });
+  };
+
   const recoverOnce = (storageKey) => {
     if (sessionStorage.getItem(storageKey) === "1") {
       return false;
@@ -65,9 +135,7 @@ const headBootstrapScript = `
     }
 
     const rel = typeof target.rel === "string" ? target.rel : "";
-    const href = typeof target.href === "string" ? target.href : "";
-
-    return rel.includes("stylesheet") && href.includes("/_next/static/");
+    return rel.includes("stylesheet");
   };
 
   const hasLoadedNextStylesheet = () => {
@@ -99,6 +167,9 @@ const headBootstrapScript = `
 
   window.addEventListener("error", (event) => {
     if (shouldRecoverStylesheetError(event.target)) {
+      if (retryStylesheetWithNormalizedHref(event.target)) {
+        return;
+      }
       recoverStylesheetErrorOnce();
       return;
     }
@@ -168,6 +239,7 @@ const headBootstrapScript = `
   }
 
   applyViewport();
+  normalizeExistingStylesheetLinks();
   window.addEventListener("load", verifyStylesheetsAfterLoad, { once: true });
   window.addEventListener("pageshow", applyViewport);
   window.addEventListener("resize", applyViewport);
