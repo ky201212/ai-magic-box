@@ -237,10 +237,9 @@ function normalizeCaptchaAnswer(value: string) {
 }
 
 export async function getSmsAuthRiskControlSetting() {
-  const setting = await getSiteSettingValue<Partial<SmsAuthRiskControlSetting>>(
-    "auth.sms-risk-control",
-    SMS_AUTH_RISK_CONTROL_DEFAULTS,
-  );
+  const setting = await getSiteSettingValue<
+    Partial<SmsAuthRiskControlSetting> & { captchaEnabled?: boolean }
+  >("auth.sms-risk-control", SMS_AUTH_RISK_CONTROL_DEFAULTS);
 
   return {
     humanVerificationProvider: normalizeProvider(
