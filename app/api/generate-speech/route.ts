@@ -9,6 +9,8 @@ import {
   resolveAiModelChainPolicy,
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 const ALLOWED_VOICES = new Set([
   "alex",
@@ -93,6 +95,23 @@ export async function POST(request: Request) {
         { error: "文字太长了，请先控制在 1200 字以内。" },
         { status: 400 },
       );
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "ai-generate-speech",
+      limit: 10,
+      windowMs: 60 * 1000,
+      message: "AI 语音请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "ai-generate-speech",
+        message: "AI 语音请求太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const aiConfig = await resolveAiModeConfig("speech");

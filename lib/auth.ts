@@ -11,6 +11,8 @@ type CurrentUser = {
   users: {
     id: string;
     phone: string;
+    nickname?: string | null;
+    avatar_url?: string | null;
     status?: "active" | "disabled";
   } | null;
 };
@@ -138,7 +140,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
   const { data, error } = await supabaseAdmin
     .from("user_sessions")
-    .select("user_id, users(id, phone, status)")
+    .select("user_id, users(id, phone, nickname, avatar_url, status)")
     .eq("token_hash", tokenHash)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle<CurrentUser>();

@@ -11,6 +11,8 @@ import {
   resolveAiModelChainPolicy,
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -238,6 +240,23 @@ export async function POST(request: Request) {
         { error: "缺少需要优化的文本内容。" },
         { status: 400 },
       );
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "ai-optimize-prompt",
+      limit: 10,
+      windowMs: 60 * 1000,
+      message: "提示词优化请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "ai-optimize-prompt",
+        message: "提示词优化请求太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const aiConfig = await resolveAiModeConfig("promptOptimize");

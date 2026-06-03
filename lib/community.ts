@@ -1,6 +1,10 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
+  getDefaultProfileAvatarPreset,
+  isProfileAvatarPresetUrl,
+} from "@/lib/profile-avatar-presets";
+import {
   normalizeCommunityCategory,
   type CommunityCategory,
 } from "@/lib/community-config";
@@ -56,6 +60,7 @@ type CommunityUserRow = {
   id: string;
   phone: string;
   nickname: string | null;
+  avatar_url?: string | null;
 };
 
 type CommunityProfileRow = {
@@ -655,6 +660,80 @@ export async function getUserProfile(userId: string) {
   }
 
   return data;
+}
+
+export async function updateUserProfileSettings(input: {
+  userId: string;
+  currentPhone: string;
+  nextPhone: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string;
+  avatarColor: string;
+}) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const trimmedDisplayName = input.displayName.trim();
+  const trimmedPhone = input.nextPhone.trim();
+  const trimmedBio = input.bio?.trim() || null;
+  const trimmedAvatarUrl = input.avatarUrl.trim();
+  const trimmedAvatarColor = input.avatarColor.trim() || "#7b72ff";
+
+  if (!trimmedDisplayName) {
+    throw new Error("请先填写用户名。");
+  }
+
+  if (!isProfileAvatarPresetUrl(trimmedAvatarUrl)) {
+    throw new Error("头像选择无效，请重新选择系统提供的头像。");
+  }
+
+  await ensureUserProfile(input.userId, input.currentPhone);
+
+  const { error: userError } = await supabaseAdmin
+    .from("users")
+    .update(
+      {
+        phone: trimmedPhone,
+        nickname: trimmedDisplayName,
+        avatar_url: trimmedAvatarUrl,
+      } as never,
+    )
+    .eq("id", input.userId);
+
+  if (userError) {
+    if (
+      typeof userError === "object" &&
+      userError &&
+      "code" in userError &&
+      userError.code === "23505"
+    ) {
+      throw new Error("这个手机号已经绑定其他账号了，请换一个手机号。");
+    }
+
+    throw userError;
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("user_profiles")
+    .update(
+      {
+        display_name: trimmedDisplayName,
+        bio: trimmedBio,
+        avatar_color: trimmedAvatarColor,
+      } as never,
+    )
+    .eq("user_id", input.userId)
+    .select("user_id, display_name, avatar_color, bio")
+    .single<UserProfile>();
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  return {
+    profile,
+    phone: trimmedPhone,
+    avatarUrl: trimmedAvatarUrl || getDefaultProfileAvatarPreset().url,
+  };
 }
 
 export async function createCommunityPost(input: CommunityPostInsert) {

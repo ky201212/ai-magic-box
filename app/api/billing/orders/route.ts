@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { rejectWhenRateLimited } from "@/lib/request-security";
 import { appendSecurityEventLog } from "@/lib/security-audit";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 import {
   createCoinPurchaseOrder,
   createSubscriptionOrder,
+  toPublicPaymentOrder,
   type PaymentMethod,
 } from "@/lib/payments";
 
@@ -13,6 +16,25 @@ export async function POST(request: Request) {
 
     if (!currentUser?.user_id) {
       return NextResponse.json({ error: "请先登录后再创建订单。" }, { status: 401 });
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "billing-orders",
+      userId: currentUser.user_id,
+      limit: 8,
+      windowMs: 10 * 60 * 1000,
+      message: "创建订单太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "billing-orders",
+        userId: currentUser.user_id,
+        message: "创建订单太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const body = (await request.json()) as {
@@ -26,7 +48,7 @@ export async function POST(request: Request) {
       const result = await createCoinPurchaseOrder({
         userId: currentUser.user_id,
         packageId: body.packageId,
-        paymentMethod: body.paymentMethod ?? "mock",
+        paymentMethod: body.paymentMethod,
       });
 
       await appendSecurityEventLog({
@@ -38,20 +60,23 @@ export async function POST(request: Request) {
         detail: {
           orderId: result.order.order_id,
           packageId: body.packageId,
-          paymentMethod: body.paymentMethod ?? "mock",
+          paymentMethod: result.order.payment_method,
         },
       }).catch((auditError) => {
         console.error("【创建充值订单安全日志写入失败】:", auditError);
       });
 
-      return NextResponse.json(result);
+      return NextResponse.json({
+        ...result,
+        order: toPublicPaymentOrder(result.order),
+      });
     }
 
     if (body.orderType === "subscription" && body.planId) {
       const result = await createSubscriptionOrder({
         userId: currentUser.user_id,
         planId: body.planId,
-        paymentMethod: body.paymentMethod ?? "mock",
+        paymentMethod: body.paymentMethod,
       });
 
       await appendSecurityEventLog({
@@ -63,13 +88,16 @@ export async function POST(request: Request) {
         detail: {
           orderId: result.order.order_id,
           planId: body.planId,
-          paymentMethod: body.paymentMethod ?? "mock",
+          paymentMethod: result.order.payment_method,
         },
       }).catch((auditError) => {
         console.error("【创建订阅订单安全日志写入失败】:", auditError);
       });
 
-      return NextResponse.json(result);
+      return NextResponse.json({
+        ...result,
+        order: toPublicPaymentOrder(result.order),
+      });
     }
 
     return NextResponse.json(

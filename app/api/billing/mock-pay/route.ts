@@ -1,13 +1,45 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { completeMockPayment } from "@/lib/payments";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
+import {
+  completeMockPayment,
+  isMockPaymentEnabled,
+  toPublicPaymentOrder,
+} from "@/lib/payments";
 
 export async function POST(request: Request) {
   try {
+    if (!isMockPaymentEnabled()) {
+      return NextResponse.json(
+        { error: "Mock 支付未启用。" },
+        { status: 404 },
+      );
+    }
+
     const currentUser = await getCurrentUser();
 
     if (!currentUser?.user_id) {
       return NextResponse.json({ error: "请先登录后再支付。" }, { status: 401 });
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "billing-mock-pay",
+      userId: currentUser.user_id,
+      limit: 6,
+      windowMs: 5 * 60 * 1000,
+      message: "支付确认请求过于频繁，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "billing-mock-pay",
+        userId: currentUser.user_id,
+        message: "支付确认请求过于频繁，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const body = (await request.json()) as {
@@ -22,7 +54,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      order,
+      order: toPublicPaymentOrder(order),
     });
   } catch (error) {
     console.error("【Mock 支付失败】:", error);

@@ -11,6 +11,7 @@ import {
   listSubscriptionPlans,
   listUserPaymentOrders,
   listUserSubscriptions,
+  toPublicPaymentOrder,
 } from "@/lib/payments";
 import { getBrandIdentitySetting } from "@/lib/site-config";
 import { BillingClient, type BillingPayload } from "./billing-client";
@@ -43,7 +44,7 @@ export default async function BillingPage() {
     rate,
     packages,
     plans,
-    orders,
+    orders: orders.map(toPublicPaymentOrder),
     subscriptions,
   };
 

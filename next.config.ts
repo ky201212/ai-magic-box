@@ -1,7 +1,5 @@
 import type { NextConfig } from "next";
 
-const shouldUpgradeInsecureRequests =
-  process.env.ENABLE_UPGRADE_INSECURE_REQUESTS === "true";
 const extraAllowedDevOrigins =
   process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",")
     .map((item) => item.trim())
@@ -14,22 +12,6 @@ const allowedDevOrigins = Array.from(
     ...extraAllowedDevOrigins,
   ]),
 );
-
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
-  "style-src 'self' 'unsafe-inline' https:",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' blob: data: https:",
-  "font-src 'self' data: https:",
-  "connect-src 'self' https:",
-  "frame-src 'self' https://challenges.cloudflare.com",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'self'",
-  ...(shouldUpgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
-].join("; ");
 
 const nextConfig: NextConfig = {
   allowedDevOrigins,
@@ -62,10 +44,6 @@ const nextConfig: NextConfig = {
           {
             key: "Cross-Origin-Resource-Policy",
             value: "same-origin",
-          },
-          {
-            key: "Content-Security-Policy",
-            value: contentSecurityPolicy,
           },
         ],
       },

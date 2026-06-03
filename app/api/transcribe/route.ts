@@ -9,6 +9,8 @@ import {
   resolveAiModelChainPolicy,
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 type SiliconFlowTranscribeResponse = {
   text?: string;
@@ -71,6 +73,23 @@ export async function POST(request: Request) {
         { error: "缺少有效的音频文件 file。" },
         { status: 400 },
       );
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "ai-transcribe",
+      limit: 8,
+      windowMs: 60 * 1000,
+      message: "语音识别请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "ai-transcribe",
+        message: "语音识别请求太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const aiConfig = await resolveAiModeConfig("transcribe");

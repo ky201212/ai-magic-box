@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { cancelPaymentOrder, getPaymentOrderById } from "@/lib/payments";
+import {
+  cancelPaymentOrder,
+  getPaymentOrderById,
+  toPublicPaymentOrder,
+} from "@/lib/payments";
 
 type RouteContext = {
   params: Promise<{
@@ -23,7 +27,7 @@ export async function GET(_request: Request, context: RouteContext) {
       return NextResponse.json({ error: "没有找到这个订单。" }, { status: 404 });
     }
 
-    return NextResponse.json({ order });
+    return NextResponse.json({ order: toPublicPaymentOrder(order) });
   } catch (error) {
     console.error("【读取订单详情失败】:", error);
     return NextResponse.json(
@@ -54,7 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json({
       success: true,
-      order,
+      order: toPublicPaymentOrder(order),
     });
   } catch (error) {
     console.error("【更新订单状态失败】:", error);

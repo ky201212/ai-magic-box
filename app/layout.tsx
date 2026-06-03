@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import "./globals.css";
 import { LandscapeDesktopStage } from "./_components/landscape-desktop-stage";
 import { LandscapeDesktopViewportScript } from "./_components/landscape-desktop-viewport-script";
@@ -31,11 +31,12 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   await cookies();
+  const nonce = (await headers()).get("x-nonce");
 
   return (
     <html lang="zh-CN" className="h-full antialiased">
       <body className="flex min-h-full flex-col overflow-x-hidden bg-[#12061f]">
-        <LandscapeDesktopViewportScript />
+        <LandscapeDesktopViewportScript nonce={nonce} />
         <LandscapeDesktopStage>
           <main className="min-w-0 flex-1">{children}</main>
           <SiteFooter />

@@ -9,6 +9,8 @@ import {
   resolveAiModelChainPolicy,
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 type VideoSubmitResponse = {
   requestId?: string;
@@ -360,6 +362,32 @@ export async function POST(request: Request) {
       endpointUrl?: string;
       model?: string;
     };
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: existingRequestId?.trim() ? "ai-generate-video-poll" : "ai-generate-video",
+      limit: existingRequestId?.trim() ? 20 : 4,
+      windowMs: 60 * 1000,
+      message: existingRequestId?.trim()
+        ? "视频结果查询太频繁了，请稍后再试。"
+        : "AI 视频请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: existingRequestId?.trim()
+          ? "ai-generate-video-poll"
+          : "ai-generate-video",
+        message: existingRequestId?.trim()
+          ? "视频结果查询太频繁了，请稍后再试。"
+          : "AI 视频请求太频繁了，请稍后再试。",
+        detail: {
+          phase: existingRequestId?.trim() ? "poll" : "submit",
+        },
+      });
+      return rateLimitError;
+    }
 
     const aiConfig = await resolveAiModeConfig("video");
     const submitModel = resolveVideoSubmitModel({

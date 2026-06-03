@@ -11,6 +11,7 @@ import {
   listSubscriptionPlans,
   listUserPaymentOrders,
   listUserSubscriptions,
+  toPublicPaymentOrder,
 } from "@/lib/payments";
 
 export async function GET() {
@@ -50,7 +51,7 @@ export async function GET() {
       rate,
       packages,
       plans,
-      orders,
+      orders: orders.map(toPublicPaymentOrder),
       subscriptions,
     });
   } catch (error) {

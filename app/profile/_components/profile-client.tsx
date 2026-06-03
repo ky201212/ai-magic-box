@@ -1,9 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MarketingHeader } from "@/app/_components/marketing-header";
+import { ProfileSettingsDialog } from "./profile-settings-dialog";
+import {
+  getDefaultProfileAvatarPreset,
+  getProfileAvatarPresetByUrl,
+} from "@/lib/profile-avatar-presets";
 
 type BrandIdentity = {
   siteName: string;
@@ -65,6 +71,7 @@ type ProfilePayload = {
     } | null;
   }>;
   phone: string;
+  avatarUrl: string | null;
 };
 
 function maskPhone(phone: string) {
@@ -154,6 +161,7 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [isCreditPanelOpen, setIsCreditPanelOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -210,6 +218,10 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
     () => data?.profile?.avatar_color || "#7b72ff",
     [data],
   );
+  const avatarUrl = useMemo(
+    () => data?.avatarUrl || getDefaultProfileAvatarPreset().url,
+    [data?.avatarUrl],
+  );
   const postStats = useMemo(() => {
     const posts = data?.posts ?? [];
     return {
@@ -223,6 +235,20 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
   const activeSubscription = useMemo(
     () => data?.subscriptions.find((item) => item.status === "active") ?? null,
     [data?.subscriptions],
+  );
+  const avatarPreset = useMemo(
+    () => getProfileAvatarPresetByUrl(avatarUrl) ?? getDefaultProfileAvatarPreset(),
+    [avatarUrl],
+  );
+  const settingsSnapshot = useMemo(
+    () => ({
+      displayName,
+      phone: data?.phone ?? "",
+      bio: data?.profile?.bio || "",
+      avatarUrl,
+      avatarColor,
+    }),
+    [avatarColor, avatarUrl, data?.phone, data?.profile?.bio, displayName],
   );
 
   if (isLoading) {
@@ -284,21 +310,39 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
             <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
               <div className="relative overflow-hidden rounded-[24px] border border-white/80 bg-white/82 p-5 shadow-[0_20px_56px_rgba(92,116,189,0.13)] backdrop-blur-2xl">
                 <div className="absolute right-[-42px] top-[-48px] h-36 w-36 rounded-full bg-[#e9ddff]/80" />
-                <div className="relative flex items-start gap-4">
-                  <div
-                    className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl text-2xl font-black text-white shadow-[0_16px_34px_rgba(91,111,185,0.18)]"
-                    style={{ backgroundColor: avatarColor }}
+                <div className="relative flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-start gap-4">
+                    <div
+                      className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border-2 border-white shadow-[0_16px_34px_rgba(91,111,185,0.18)]"
+                      style={{ boxShadow: `0 16px 34px ${avatarColor}33` }}
+                    >
+                      <Image
+                        src={avatarUrl}
+                        alt={`${displayName} 的头像`}
+                        fill
+                        className="object-cover"
+                        sizes="64px"
+                      />
+                    </div>
+                    <div className="min-w-0 pt-1">
+                      <h1 className="truncate text-[26px] font-black tracking-[-0.04em] text-[#17213f]">
+                        {displayName}
+                      </h1>
+                      <p className="mt-1 text-sm font-semibold text-[#7782a4]">
+                        {maskPhone(data.phone)}
+                      </p>
+                      <p className="mt-2 text-xs font-black tracking-[0.14em] text-[#8a97bc]">
+                        当前头像：{avatarPreset.name}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="shrink-0 rounded-full border border-[#dce5ff] bg-white px-4 py-2 text-xs font-black text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
                   >
-                    {displayName.slice(0, 1)}
-                  </div>
-                  <div className="min-w-0 pt-1">
-                    <h1 className="truncate text-[26px] font-black tracking-[-0.04em] text-[#17213f]">
-                      {displayName}
-                    </h1>
-                    <p className="mt-1 text-sm font-semibold text-[#7782a4]">
-                      {maskPhone(data.phone)}
-                    </p>
-                  </div>
+                    资料设置
+                  </button>
                 </div>
                 <p className="relative mt-5 text-[14px] leading-7 text-[#687394]">
                   {data.profile?.bio || "这里会记录你的创作投稿和社区展示进度。"}
@@ -439,23 +483,32 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
               <div className="rounded-[28px] border border-white/80 bg-white/62 p-6 shadow-[0_18px_54px_rgba(91,111,185,0.1)] backdrop-blur-2xl sm:p-7">
                 <div className="flex flex-wrap items-start justify-between gap-5">
                   <div className="max-w-3xl">
-                  <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
-                    我的主页 PROFILE
-                  </div>
+                    <div className="inline-flex rounded-full border border-[#d9e2ff] bg-white/72 px-4 py-2 text-xs font-black tracking-[0.18em] text-[#6875a5] shadow-[0_12px_34px_rgba(112,138,215,0.12)]">
+                      我的主页 PROFILE
+                    </div>
                     <h2 className="mt-5 text-[32px] font-black leading-[1.05] tracking-[-0.06em] text-[#151f3d] sm:text-[52px]">
-                    我的创作档案
-                  </h2>
+                      我的创作档案
+                    </h2>
                     <p className="mt-4 text-sm leading-7 text-[#687394]">
-                      按时间整理你的社区投稿、审核状态和展示进度，最新作品会排在最前面。
+                      这里也加入了资料设置入口，可以修改用户名、手机号、个人简介和头像。
                     </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(true)}
+                      className="rounded-full border border-[#dce5ff] bg-white px-6 py-3 text-sm font-black text-[#5c6688] transition hover:border-[#bccaff] hover:text-[#273252]"
+                    >
+                      修改资料
+                    </button>
+                    <Link
+                      href="/workshop?mode=coding"
+                      className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white shadow-[0_14px_32px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
+                    >
+                      去做新作品
+                    </Link>
+                  </div>
                 </div>
-                <Link
-                  href="/workshop?mode=coding"
-                    className="rounded-full bg-[#625cff] px-6 py-3 text-sm font-black text-white shadow-[0_14px_32px_rgba(98,92,255,0.22)] transition hover:bg-[#544cf4]"
-                >
-                  去做新作品
-                </Link>
-              </div>
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-5">
                   {[
@@ -494,11 +547,14 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
                         key={post.id}
                         className="group grid gap-4 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_14px_42px_rgba(91,111,185,0.1)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:shadow-[0_24px_62px_rgba(91,111,185,0.16)] md:grid-cols-[154px_minmax(0,1fr)]"
                       >
-                        <div className="overflow-hidden rounded-[20px] bg-[#edf2ff]">
-                          <img
+                        <div className="relative aspect-[4/3] overflow-hidden rounded-[20px] bg-[#edf2ff] md:aspect-square">
+                          <Image
                             src={post.preview_image_url}
                             alt={post.title}
-                            className="aspect-[4/3] h-full w-full object-cover transition duration-500 group-hover:scale-[1.03] md:aspect-square"
+                            fill
+                            unoptimized
+                            sizes="(max-width: 768px) 100vw, 154px"
+                            className="object-cover transition duration-500 group-hover:scale-[1.03]"
                           />
                         </div>
 
@@ -632,6 +688,26 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
           </section>
         </div>
       </div>
+
+      {isSettingsOpen ? (
+        <ProfileSettingsDialog
+          isOpen={isSettingsOpen}
+          initialSettings={settingsSnapshot}
+          onClose={() => setIsSettingsOpen(false)}
+          onSaved={(nextSettings) => {
+            setData((current) =>
+              current
+                ? {
+                    ...current,
+                    profile: nextSettings.profile,
+                    phone: nextSettings.phone,
+                    avatarUrl: nextSettings.avatarUrl,
+                  }
+                : current,
+            );
+          }}
+        />
+      ) : null}
 
       {isCreditPanelOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#17213f]/28 px-4 py-4 backdrop-blur-md sm:px-5">

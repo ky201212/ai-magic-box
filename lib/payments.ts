@@ -76,6 +76,18 @@ export type AdminPaymentOrder = PaymentOrder & {
   } | null;
 };
 
+export type PublicPaymentOrder = Pick<
+  PaymentOrder,
+  | "order_id"
+  | "order_type"
+  | "amount"
+  | "status"
+  | "payment_method"
+  | "detail"
+  | "paid_at"
+  | "created_at"
+>;
+
 export type ActivationCodeBatch = {
   id: string;
   name: string;
@@ -274,6 +286,40 @@ function isPaidGatewayStatus(status: string | null | undefined) {
 
 function createRefundRequestId(orderId: string) {
   return `refund_${orderId.replaceAll("-", "").slice(0, 24)}_${Date.now()}`;
+}
+
+export function isMockPaymentEnabled() {
+  return (
+    process.env.ENABLE_MOCK_PAYMENTS === "true" ||
+    process.env.NODE_ENV !== "production"
+  );
+}
+
+function resolveRequestedPaymentMethod(method?: PaymentMethod) {
+  const resolvedMethod = method ?? "alipay_pc";
+
+  if (resolvedMethod === "mock" && !isMockPaymentEnabled()) {
+    throw new Error("Mock 支付仅在开发环境或显式启用时可用。");
+  }
+
+  if (resolvedMethod === "wechat_pc") {
+    throw new Error("微信支付暂未启用。");
+  }
+
+  return resolvedMethod;
+}
+
+export function toPublicPaymentOrder(order: PaymentOrder): PublicPaymentOrder {
+  return {
+    order_id: order.order_id,
+    order_type: order.order_type,
+    amount: order.amount,
+    status: order.status,
+    payment_method: order.payment_method,
+    detail: order.detail,
+    paid_at: order.paid_at,
+    created_at: order.created_at,
+  };
 }
 
 const PAYMENT_ORDER_SELECT = `
@@ -782,7 +828,7 @@ export async function createCoinPurchaseOrder(input: {
   paymentMethod?: PaymentMethod;
 }) {
   const supabase = getSupabaseAdmin();
-  const paymentMethod = input.paymentMethod ?? "mock";
+  const paymentMethod = resolveRequestedPaymentMethod(input.paymentMethod);
   const { data: packageRecord, error: packageError } = await supabase
     .from("coin_recharge_packages")
     .select("id, name, coins, price, sort_order, is_active, created_at, updated_at")
@@ -845,7 +891,7 @@ export async function createSubscriptionOrder(input: {
   paymentMethod?: PaymentMethod;
 }) {
   const supabase = getSupabaseAdmin();
-  const paymentMethod = input.paymentMethod ?? "mock";
+  const paymentMethod = resolveRequestedPaymentMethod(input.paymentMethod);
   const { data: plan, error: planError } = await supabase
     .from("subscription_plans")
     .select(
@@ -1879,7 +1925,7 @@ export async function redeemActivationCode(userId: string, code: string) {
     throw new Error("激活码签名校验失败。");
   }
 
-  const { error: updateError } = await supabase
+  const { data: updatedActivationCode, error: updateError } = await supabase
     .from("activation_codes")
     .update({
       status: "used",
@@ -1887,10 +1933,16 @@ export async function redeemActivationCode(userId: string, code: string) {
       used_at: new Date().toISOString(),
     } as never)
     .eq("id", activationCode.id)
-    .eq("status", "unused");
+    .eq("status", "unused")
+    .select("id")
+    .maybeSingle<{ id: string }>();
 
   if (updateError) {
     throw updateError;
+  }
+
+  if (!updatedActivationCode) {
+    throw new Error("这个激活码已经被使用，请刷新后再试。");
   }
 
   if (activationCode.type === "coin") {

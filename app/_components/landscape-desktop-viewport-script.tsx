@@ -247,9 +247,15 @@ const headBootstrapScript = `
 })();
 `;
 
-export function LandscapeDesktopViewportScript() {
+export function LandscapeDesktopViewportScript(input: {
+  nonce?: string | null;
+}) {
   return (
-    <Script id="landscape-desktop-viewport" strategy="beforeInteractive">
+    <Script
+      id="landscape-desktop-viewport"
+      nonce={input.nonce ?? undefined}
+      strategy="beforeInteractive"
+    >
       {headBootstrapScript}
     </Script>
   );

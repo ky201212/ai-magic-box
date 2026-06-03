@@ -9,6 +9,8 @@ import {
   resolveAiModelChainPolicy,
   shouldContinueAiModelChain,
 } from "@/lib/ai-model-chain";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 type SiliconFlowImageResponse = {
   images?: Array<{
@@ -203,6 +205,23 @@ export async function POST(request: Request) {
         { error: "缺少有效的 prompt 参数。" },
         { status: 400 },
       );
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "ai-generate-image",
+      limit: 6,
+      windowMs: 60 * 1000,
+      message: "AI 绘画请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "ai-generate-image",
+        message: "AI 绘画请求太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     const aiConfig = await resolveAiModeConfig("painting");

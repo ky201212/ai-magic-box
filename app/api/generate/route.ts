@@ -26,6 +26,8 @@ import {
   writeCodingGenerationTask,
   type CodingGenerationTaskRecord,
 } from "@/lib/coding-generation-tasks";
+import { rejectWhenRateLimited } from "@/lib/request-security";
+import { recordRateLimitSignal } from "@/lib/security-monitoring";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -2836,6 +2838,23 @@ export async function POST(request: Request) {
       );
       response.headers.set("x-ai-request-id", requestId);
       return response;
+    }
+
+    const rateLimitError = rejectWhenRateLimited({
+      request,
+      scope: "ai-generate",
+      limit: 6,
+      windowMs: 60 * 1000,
+      message: "生成请求太频繁了，请稍后再试。",
+    });
+
+    if (rateLimitError) {
+      await recordRateLimitSignal({
+        request,
+        scope: "ai-generate",
+        message: "生成请求太频繁了，请稍后再试。",
+      });
+      return rateLimitError;
     }
 
     if (!prompt?.trim()) {
