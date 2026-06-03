@@ -1803,6 +1803,10 @@ export function AiConfigForm({
             config.mode_key === "coding"
               ? config.extra_payload.streamPreviewEnabled !== false
               : false;
+          const showModelRelayStatus =
+            config.mode_key === "coding"
+              ? config.extra_payload.showModelRelayStatus === true
+              : false;
           const imageSize =
             typeof config.extra_payload.image_size === "string"
               ? config.extra_payload.image_size
@@ -2159,7 +2163,7 @@ export function AiConfigForm({
                   </div>
 
                   {config.mode_key === "coding" ? (
-                    <div className="mt-4 rounded-[22px] bg-slate-50 px-4 py-4">
+                    <div className="mt-4 space-y-3 rounded-[22px] bg-slate-50 px-4 py-4">
                       <label className="flex items-start gap-3 text-sm font-bold text-slate-600">
                         <input
                           type="checkbox"
@@ -2177,6 +2181,27 @@ export function AiConfigForm({
                           开启 AI 编程流式预览
                           <span className="mt-1 block text-sm font-normal leading-7 text-slate-500">
                             开启后，预览区会边生成边显示代码，但服务器 CPU 和内存占用更高。关闭后只等待最终结果，更省资源、更稳。
+                          </span>
+                        </span>
+                      </label>
+
+                      <label className="flex items-start gap-3 text-sm font-bold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={showModelRelayStatus}
+                          onChange={(event) =>
+                            handleExtraPayloadChange(
+                              config.mode_key,
+                              "showModelRelayStatus",
+                              event.target.checked,
+                            )
+                          }
+                          className="mt-1 h-4 w-4"
+                        />
+                        <span>
+                          前台显示模型接力状态
+                          <span className="mt-1 block text-sm font-normal leading-7 text-slate-500">
+                            默认关闭。关闭后，普通用户不会看到 A / B / C 模型接力和模型名称；只在你需要排查时再打开。
                           </span>
                         </span>
                       </label>

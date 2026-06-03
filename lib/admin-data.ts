@@ -440,6 +440,7 @@ export async function listAiModeConfigs(): Promise<AiModeConfigRecord[]> {
         reasoningEffort: "none",
         maxCompletionTokens: 900,
         streamPreviewEnabled: true,
+        showModelRelayStatus: false,
         modelChain: [],
       },
     },

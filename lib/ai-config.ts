@@ -28,6 +28,7 @@ const modeFallbacks: Record<
       reasoningEffort: "none",
       maxCompletionTokens: 1400,
       streamPreviewEnabled: true,
+      showModelRelayStatus: false,
       modelChain: [],
     },
   },

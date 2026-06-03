@@ -1970,6 +1970,8 @@ function WorkshopContent() {
     aiCapabilities.promptOptimize?.isEnabled !== false;
   const paintingSupportsImageEditing =
     aiCapabilities.painting?.extraPayload?.supportsImageEditing === true;
+  const showCodingRelayStatus =
+    aiCapabilities.coding?.extraPayload?.showModelRelayStatus === true;
   const selectedCompositionGroup =
     compositionTopicBank.find((item) => item.grade === selectedCompositionGrade) ??
     compositionTopicBank[2];
@@ -4453,7 +4455,8 @@ function WorkshopContent() {
                         </div>
                       </div>
 
-                      {isLoading || codingModelAttempts.length ? (
+                      {showCodingRelayStatus &&
+                      (isLoading || codingModelAttempts.length) ? (
                         <div className="mt-4 rounded-[18px] bg-[#f8fbff] px-4 py-4">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-[11px] font-bold tracking-[0.14em] text-slate-400">
