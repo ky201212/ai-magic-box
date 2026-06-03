@@ -23,7 +23,7 @@ const contentSecurityPolicy = [
   "media-src 'self' blob: data: https:",
   "font-src 'self' data: https:",
   "connect-src 'self' https:",
-  "frame-src 'self'",
+  "frame-src 'self' https://challenges.cloudflare.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
