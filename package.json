@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:turbo": "next dev --turbopack",
-    "build": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next build",
+    "build": "next build",
+    "build:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "lint": "eslint"
   },

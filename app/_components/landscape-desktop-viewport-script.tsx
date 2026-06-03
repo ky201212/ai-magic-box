@@ -7,15 +7,19 @@ const headBootstrapScript = `
   const CLASS_NAME = "landscape-desktop-viewport";
   const STORAGE_KEY = "landscape-desktop-viewport-state";
   const CHUNK_RELOAD_KEY = "chunk-load-recovery-once";
+  const ACTION_RELOAD_KEY = "server-action-recovery-once";
+  const STYLESHEET_RELOAD_KEY = "stylesheet-recovery-once";
+
+  const getErrorMessage = (error) => {
+    if (!error) return "";
+    if (typeof error === "string") return error;
+    if (typeof error.message === "string") return error.message;
+    return "";
+  };
 
   const shouldRecoverChunkError = (error) => {
-    if (!error) return false;
-    const message =
-      typeof error === "string"
-        ? error
-        : typeof error.message === "string"
-          ? error.message
-          : "";
+    const message = getErrorMessage(error);
+    if (!message) return false;
     return (
       message.includes("ChunkLoadError") ||
       message.includes("Loading chunk") ||
@@ -23,24 +27,100 @@ const headBootstrapScript = `
     );
   };
 
-  const recoverChunkErrorOnce = () => {
-    if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") {
-      return;
+  const shouldRecoverServerActionError = (error) => {
+    const message = getErrorMessage(error);
+    if (!message) return false;
+    return (
+      message.includes("Failed to find Server Action") ||
+      message.includes("failed to find the requested server action") ||
+      message.includes("This request might be from an older or newer deployment")
+    );
+  };
+
+  const recoverOnce = (storageKey) => {
+    if (sessionStorage.getItem(storageKey) === "1") {
+      return false;
     }
 
-    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+    sessionStorage.setItem(storageKey, "1");
     window.location.reload();
+    return true;
+  };
+
+  const recoverChunkErrorOnce = () => {
+    recoverOnce(CHUNK_RELOAD_KEY);
+  };
+
+  const recoverServerActionErrorOnce = () => {
+    recoverOnce(ACTION_RELOAD_KEY);
+  };
+
+  const recoverStylesheetErrorOnce = () => {
+    recoverOnce(STYLESHEET_RELOAD_KEY);
+  };
+
+  const shouldRecoverStylesheetError = (target) => {
+    if (!(target instanceof HTMLLinkElement)) {
+      return false;
+    }
+
+    const rel = typeof target.rel === "string" ? target.rel : "";
+    const href = typeof target.href === "string" ? target.href : "";
+
+    return rel.includes("stylesheet") && href.includes("/_next/static/");
+  };
+
+  const hasLoadedNextStylesheet = () => {
+    const links = Array.from(
+      document.querySelectorAll('link[rel="stylesheet"][href*="/_next/static/"]')
+    );
+
+    if (!links.length) {
+      return false;
+    }
+
+    return links.some((link) => {
+      try {
+        const sheet = link.sheet;
+        return Boolean(sheet && sheet.cssRules && sheet.cssRules.length >= 0);
+      } catch {
+        return Boolean(link.sheet);
+      }
+    });
+  };
+
+  const verifyStylesheetsAfterLoad = () => {
+    window.setTimeout(() => {
+      if (!hasLoadedNextStylesheet()) {
+        recoverStylesheetErrorOnce();
+      }
+    }, 1200);
   };
 
   window.addEventListener("error", (event) => {
+    if (shouldRecoverStylesheetError(event.target)) {
+      recoverStylesheetErrorOnce();
+      return;
+    }
+
     if (shouldRecoverChunkError(event.error)) {
       recoverChunkErrorOnce();
+      return;
     }
-  });
+
+    if (shouldRecoverServerActionError(event.error)) {
+      recoverServerActionErrorOnce();
+    }
+  }, true);
 
   window.addEventListener("unhandledrejection", (event) => {
     if (shouldRecoverChunkError(event.reason)) {
       recoverChunkErrorOnce();
+      return;
+    }
+
+    if (shouldRecoverServerActionError(event.reason)) {
+      recoverServerActionErrorOnce();
     }
   });
 
@@ -80,8 +160,15 @@ const headBootstrapScript = `
   if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") {
     sessionStorage.removeItem(CHUNK_RELOAD_KEY);
   }
+  if (sessionStorage.getItem(ACTION_RELOAD_KEY) === "1") {
+    sessionStorage.removeItem(ACTION_RELOAD_KEY);
+  }
+  if (sessionStorage.getItem(STYLESHEET_RELOAD_KEY) === "1") {
+    sessionStorage.removeItem(STYLESHEET_RELOAD_KEY);
+  }
 
   applyViewport();
+  window.addEventListener("load", verifyStylesheetsAfterLoad, { once: true });
   window.addEventListener("pageshow", applyViewport);
   window.addEventListener("resize", applyViewport);
   window.addEventListener("orientationchange", applyViewport);
