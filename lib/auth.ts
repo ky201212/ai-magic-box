@@ -106,7 +106,7 @@ export async function setSession(userId: string) {
   const secure = await resolveCookieSecureFlag();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: "strict",
+    sameSite: "lax",
     secure,
     path: "/",
     maxAge,

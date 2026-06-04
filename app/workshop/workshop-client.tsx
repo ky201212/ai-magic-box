@@ -5428,6 +5428,35 @@ function WorkshopContent() {
                                 </div>
                               </div>
                             </div>
+                          ) : !hasGeneratedCode ? (
+                            <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-[linear-gradient(180deg,rgba(239,246,255,0.86),rgba(248,251,255,0.96))] p-4 lg:p-5 2xl:p-6">
+                              <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(191,219,254,0.55),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(255,228,230,0.44),transparent_28%),radial-gradient(circle_at_50%_86%,rgba(254,243,199,0.36),transparent_34%)]" />
+                              <div className="absolute left-8 top-8 hidden h-40 w-40 rounded-full border border-white/55 lg:block" />
+                              <div className="absolute right-8 bottom-8 hidden h-48 w-48 rounded-full border border-white/45 lg:block" />
+
+                              <div className="relative flex h-full min-h-0 w-full rounded-[26px] bg-gradient-to-br from-[#f8fbff] via-white to-[#eef6ff] p-4 shadow-[0_20px_50px_rgba(96,165,250,0.10)]">
+                                <div className="mx-auto flex h-full min-h-0 w-full flex-col items-center justify-center rounded-[22px] border border-[#dce8ff] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,255,0.98))] p-6 text-center shadow-[inset_0_0_0_1px_rgba(255,255,255,0.88)]">
+                                  <div className="grid h-28 w-28 place-items-center rounded-[30px] bg-gradient-to-br from-[#dcecff] via-[#eef4ff] to-[#ffe4ef] shadow-[0_16px_36px_rgba(96,165,250,0.16)]">
+                                    <Image
+                                      src="/landing-assets/icon-code.png"
+                                      alt="编程图标"
+                                      width={44}
+                                      height={44}
+                                      className="h-11 w-11 object-contain"
+                                    />
+                                  </div>
+                                  <p className="mt-6 text-3xl font-black tracking-[-0.04em] text-slate-800">
+                                    手机预览台
+                                  </p>
+                                  <p className="mt-3 max-w-lg text-base leading-8 text-slate-500">
+                                    选择一个主题，或者写下你想做的小程序。点击生成后，右边会实时展示可以互动的页面。
+                                  </p>
+                                  <div className="mt-6 inline-flex rounded-full bg-[#eef4ff] px-4 py-2 text-sm font-black text-[#4b6fcc]">
+                                    预览待命中
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           ) : (
                             <iframe
                               ref={previewIframeRef}
