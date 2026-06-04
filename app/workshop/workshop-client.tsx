@@ -1907,6 +1907,7 @@ function WorkshopContent() {
   const [speechError, setSpeechError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [codingTaskMessage, setCodingTaskMessage] = useState("");
+  const [codingDegradedNotice, setCodingDegradedNotice] = useState("");
   const [codingModelAttempts, setCodingModelAttempts] = useState<
     CodingModelAttempt[]
   >([]);
@@ -2229,11 +2230,13 @@ function WorkshopContent() {
           setGeneratedVideoUrl("");
           setPromptText("");
           setGeneratedCode(defaultPreviewHtml);
+          setCodingDegradedNotice("");
         } else if (sourcePost.mode === "painting") {
           setDrawingPrompt(sourcePost.prompt);
           setGeneratedImageUrl(sourcePost.preview_image_url);
           setPromptText("");
           setGeneratedCode(defaultPreviewHtml);
+          setCodingDegradedNotice("");
           setWritingPrompt("");
           setWritingResult("");
           setSpeechText("");
@@ -2245,6 +2248,7 @@ function WorkshopContent() {
           setGeneratedCode(
             sourcePost.preview_code.trim() ? sourcePost.preview_code : defaultPreviewHtml,
           );
+          setCodingDegradedNotice("");
           setWritingPrompt("");
           setWritingResult("");
           setDrawingPrompt("");
@@ -3218,6 +3222,7 @@ function WorkshopContent() {
     setIsCodingCompiling(false);
     setCodingCompileMessageIndex(0);
     setCodingTaskMessage("正在准备创作任务，请稍等。");
+    setCodingDegradedNotice("");
     setCodingModelAttempts([]);
     setLoadingMessageIndex(0);
     setIsLoading(true);
@@ -3326,6 +3331,7 @@ function WorkshopContent() {
 
       if (response.status === 401) {
         if (isUpstreamCredentialError(normalizedData?.error)) {
+          setCodingDegradedNotice("");
           setGeneratedCode(
             createMessagePreviewHtml(
               "模型密钥需要检查",
@@ -3335,6 +3341,7 @@ function WorkshopContent() {
           return;
         }
 
+        setCodingDegradedNotice("");
         setGeneratedCode(
           createMessagePreviewHtml(
             "需要重新确认登录",
@@ -3368,6 +3375,7 @@ function WorkshopContent() {
       }
 
       if (!response.ok || !normalizedData?.code) {
+        setCodingDegradedNotice("");
         setGeneratedCode(
           createMessagePreviewHtml(
             "生成未完成",
@@ -3396,6 +3404,12 @@ function WorkshopContent() {
       setStreamingCodePreview("");
       setIsCodingCompiling(false);
       setCodingTaskMessage("");
+      setCodingDegradedNotice(
+        normalizedData.degraded
+          ? normalizedData.degradedReason ||
+              "这次没有拿到完整模型结果，已自动切换到站内兜底模板。"
+          : "",
+      );
 
       if (normalizedData.requestId) {
         window.console.info("AI 编程请求号：", normalizedData.requestId);
@@ -3414,6 +3428,7 @@ function WorkshopContent() {
       }
     } catch {
       setCodingTaskMessage("");
+      setCodingDegradedNotice("");
       setCodingModelAttempts([]);
       setStreamingCodePreview("");
       setIsCodingCompiling(false);
@@ -5188,6 +5203,7 @@ function WorkshopContent() {
                         type="button"
                         onClick={() => {
                           setGeneratedCode(defaultPreviewHtml);
+                          setCodingDegradedNotice("");
                           setShareMessage("");
                           setShareFeedback(null);
                         }}
@@ -5199,6 +5215,7 @@ function WorkshopContent() {
                         type="button"
                         onClick={() => {
                           setGeneratedCode(defaultPreviewHtml);
+                          setCodingDegradedNotice("");
                           setShareMessage("");
                           setShareFeedback(null);
                         }}
@@ -5340,6 +5357,20 @@ function WorkshopContent() {
                   )}
                 </div>
               </div>
+
+              {isCodingMode && codingDegradedNotice ? (
+                <div className="relative z-10 border-t border-[#fff7ed] bg-[linear-gradient(180deg,rgba(255,248,235,0.96),rgba(255,244,220,0.92))] px-5 py-4 text-[#b7791f] lg:px-7 2xl:px-8">
+                  <p className="text-[11px] font-black tracking-[0.14em]">
+                    本次已切换兜底生成
+                  </p>
+                  <p className="mt-2 text-sm font-bold leading-7">
+                    {codingDegradedNotice}
+                  </p>
+                  <p className="mt-1 text-xs leading-6 text-[#c48b33]">
+                    这说明本次没有拿到完整模型结果。请优先检查后台 AI 编程的接口地址、模型名、密钥和超时配置。
+                  </p>
+                </div>
+              ) : null}
 
               {isCodingMode ? (
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
