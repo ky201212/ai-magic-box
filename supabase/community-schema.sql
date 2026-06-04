@@ -18,6 +18,13 @@ alter table public.community_posts
   add column if not exists reviewed_by uuid references public.users(id) on delete set null,
   add column if not exists reviewed_at timestamptz,
   add column if not exists is_featured boolean not null default false,
+  add column if not exists view_count integer not null default 0,
+  add column if not exists share_count integer not null default 0,
+  add column if not exists category text,
+  add column if not exists manual_sort_order integer not null default 1000,
+  add column if not exists creator_score integer not null default 0,
+  add column if not exists manual_creator_rank integer,
+  add column if not exists is_creator_star boolean not null default false,
   add column if not exists moderation_detail jsonb not null default '{}'::jsonb;
 
 alter table public.community_posts

@@ -1714,6 +1714,77 @@ function uniqueIds(ids: string[]) {
   return Array.from(new Set(ids.filter((id) => id.trim().length > 0)));
 }
 
+function isMissingDatabaseField(error: unknown, fieldName: string) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const details =
+    "details" in error && typeof error.details === "string"
+      ? error.details
+      : "";
+
+  return (
+    ("code" in error &&
+      (error.code === "42703" ||
+        error.code === "PGRST204" ||
+        error.code === "PGRST205")) ||
+    message.includes(fieldName) ||
+    details.includes(fieldName)
+  );
+}
+
+async function listNotificationCommunityPostRows(userIds: string[]) {
+  if (!userIds.length) {
+    return [];
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const result = await supabaseAdmin
+    .from("community_posts")
+    .select("user_id, moderation_status, is_creator_star")
+    .in("user_id", userIds)
+    .returns<
+      Array<{
+        user_id: string;
+        moderation_status: "draft" | "pending" | "approved" | "rejected";
+        is_creator_star?: boolean | null;
+      }>
+    >();
+
+  if (!result.error) {
+    return result.data ?? [];
+  }
+
+  if (!isMissingDatabaseField(result.error, "is_creator_star")) {
+    throw result.error;
+  }
+
+  const fallback = await supabaseAdmin
+    .from("community_posts")
+    .select("user_id, moderation_status")
+    .in("user_id", userIds)
+    .returns<
+      Array<{
+        user_id: string;
+        moderation_status: "draft" | "pending" | "approved" | "rejected";
+      }>
+    >();
+
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
+  return (fallback.data ?? []).map((post) => ({
+    ...post,
+    is_creator_star: false,
+  }));
+}
+
 async function listProfileRowsForNotificationUsers(userIds: string[]) {
   if (!userIds.length) {
     return new Map<string, { display_name: string | null; gender: "male" | "female" | "unspecified" }>();
@@ -1802,22 +1873,10 @@ async function buildNotificationTargetUsers(input?: {
   }
 
   const userIds = (users ?? []).map((user) => user.id);
-  const [profilesMap, postsResult, adminsResult, subscriptionsByUser] =
+  const [profilesMap, posts, adminsResult, subscriptionsByUser] =
     await Promise.all([
       listProfileRowsForNotificationUsers(userIds),
-      userIds.length
-        ? supabaseAdmin
-            .from("community_posts")
-            .select("user_id, moderation_status, is_creator_star")
-            .in("user_id", userIds)
-            .returns<
-              Array<{
-                user_id: string;
-                moderation_status: "draft" | "pending" | "approved" | "rejected";
-                is_creator_star?: boolean | null;
-              }>
-            >()
-        : Promise.resolve({ data: [], error: null }),
+      listNotificationCommunityPostRows(userIds),
       supabaseAdmin
         .from("admin_users")
         .select("user_id")
@@ -1825,10 +1884,6 @@ async function buildNotificationTargetUsers(input?: {
         .returns<Array<{ user_id: string }>>(),
       listAdminSubscriptionsForUsers(userIds).catch(() => new Map<string, UserSubscription[]>()),
     ]);
-
-  if (postsResult.error) {
-    throw postsResult.error;
-  }
 
   if (adminsResult.error) {
     throw adminsResult.error;
@@ -1846,7 +1901,7 @@ async function buildNotificationTargetUsers(input?: {
     }
   >();
 
-  for (const post of postsResult.data ?? []) {
+  for (const post of posts) {
     const current = postsByUser.get(post.user_id) ?? {
       postsCount: 0,
       pendingPostsCount: 0,
