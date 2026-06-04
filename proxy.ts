@@ -8,17 +8,37 @@ function getRequestHeader(request: NextRequest, name: string) {
   return request.headers.get(name)?.trim() || null;
 }
 
-function buildContentSecurityPolicy(nonce: string) {
+function buildContentSecurityPolicy(input: {
+  nonce: string;
+  pathname: string;
+}) {
   const isDevelopment = process.env.NODE_ENV !== "production";
   const shouldUpgradeInsecureRequests =
     process.env.ENABLE_UPGRADE_INSECURE_REQUESTS === "true";
+  const isWorkshopPreviewRoute = input.pathname.startsWith("/workshop");
+  const scriptSrc = isWorkshopPreviewRoute
+    ? `script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://challenges.cloudflare.com${
+        isDevelopment ? " 'unsafe-eval'" : ""
+      }`
+    : `script-src 'self' 'nonce-${input.nonce}' https://challenges.cloudflare.com${
+        isDevelopment ? " 'unsafe-eval'" : ""
+      }`;
+  const scriptSrcElem = isWorkshopPreviewRoute
+    ? "script-src-elem 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://challenges.cloudflare.com"
+    : `script-src-elem 'self' 'nonce-${input.nonce}' https://challenges.cloudflare.com`;
+  const styleSrc = isWorkshopPreviewRoute
+    ? "style-src 'self' 'unsafe-inline' https:"
+    : `style-src 'self' ${isDevelopment ? "'unsafe-inline'" : `'nonce-${input.nonce}'`} https:`;
+  const styleSrcElem = isWorkshopPreviewRoute
+    ? "style-src-elem 'self' 'unsafe-inline' https:"
+    : `style-src-elem 'self' ${isDevelopment ? "'unsafe-inline'" : `'nonce-${input.nonce}'`} https:`;
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com${
-      isDevelopment ? " 'unsafe-eval'" : ""
-    }`,
-    `style-src 'self' ${isDevelopment ? "'unsafe-inline'" : `'nonce-${nonce}'`} https:`,
+    scriptSrc,
+    scriptSrcElem,
+    styleSrc,
+    styleSrcElem,
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob: data: https:",
     "font-src 'self' data: https:",
@@ -34,7 +54,10 @@ function buildContentSecurityPolicy(nonce: string) {
 
 function withCspHeaders(request: NextRequest) {
   const nonce = crypto.randomUUID().replace(/-/g, "");
-  const contentSecurityPolicy = buildContentSecurityPolicy(nonce);
+  const contentSecurityPolicy = buildContentSecurityPolicy({
+    nonce,
+    pathname: request.nextUrl.pathname,
+  });
   const requestHeaders = new Headers(request.headers);
 
   requestHeaders.set("x-nonce", nonce);
