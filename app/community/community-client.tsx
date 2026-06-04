@@ -36,6 +36,7 @@ type CommunityPost = {
     id: string;
     phone: string;
     nickname: string | null;
+    avatar_url: string | null;
   } | null;
   user_profiles: {
     user_id: string;
@@ -47,6 +48,7 @@ type CommunityPost = {
 type CommunityCreator = {
   user_id: string;
   name: string;
+  avatar_url: string | null;
   avatar_color: string | null;
   works_count: number;
   total_likes: number;
@@ -120,6 +122,33 @@ function authorName(post: CommunityPost) {
 
 function authorInitial(name: string) {
   return name.trim().slice(0, 1) || "创";
+}
+
+function CommunityAvatar({
+  avatarUrl,
+  name,
+  color,
+  className,
+}: {
+  avatarUrl?: string | null;
+  name: string;
+  color?: string | null;
+  className: string;
+}) {
+  const normalizedAvatarUrl = avatarUrl?.trim();
+
+  return (
+    <span
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-cover bg-center bg-no-repeat font-black text-white ${className}`}
+      style={
+        normalizedAvatarUrl
+          ? { backgroundImage: `url(${JSON.stringify(normalizedAvatarUrl)})` }
+          : { backgroundColor: color ?? "#7b72ff" }
+      }
+    >
+      {normalizedAvatarUrl ? <span className="sr-only">{name}</span> : authorInitial(name)}
+    </span>
+  );
 }
 
 function getReuseHref(post: CommunityPost, isLoggedIn: boolean) {
@@ -467,12 +496,15 @@ export function CommunityClient({
                               current === post.user_id ? null : post.user_id,
                             )
                           }
-                          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-black text-white"
-                          style={{
-                            backgroundColor: post.user_profiles?.avatar_color ?? "#7b72ff",
-                          }}
+                          className="shrink-0 rounded-full transition hover:scale-105"
+                          aria-label={`筛选 ${name} 的作品`}
                         >
-                          {authorInitial(name)}
+                          <CommunityAvatar
+                            avatarUrl={post.users?.avatar_url}
+                            name={name}
+                            color={post.user_profiles?.avatar_color}
+                            className="h-10 w-10 text-sm"
+                          />
                         </button>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-black text-[#3f4b6f]">{name}</p>
@@ -540,12 +572,12 @@ export function CommunityClient({
                       <div
                         className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(255,201,229,0.78),rgba(255,255,255,0.02)_72%)]"
                       />
-                      <div
-                        className="absolute inset-[6px] grid place-items-center rounded-full text-lg font-black text-white shadow-[0_10px_20px_rgba(91,111,185,0.12)]"
-                        style={{ backgroundColor: creator.avatar_color ?? "#7b72ff" }}
-                      >
-                        {authorInitial(creator.name)}
-                      </div>
+                      <CommunityAvatar
+                        avatarUrl={creator.avatar_url}
+                        name={creator.name}
+                        color={creator.avatar_color}
+                        className="absolute inset-[6px] text-lg shadow-[0_10px_20px_rgba(91,111,185,0.12)]"
+                      />
                     </div>
                     <p className="mt-4 truncate text-[17px] font-black text-[#17213f]">
                       {creator.name}
@@ -606,12 +638,12 @@ export function CommunityClient({
                     <div className="w-7 text-center text-[20px] font-black text-[#8c82ff]">
                       {index + 1}
                     </div>
-                    <div
-                      className="grid h-11 w-11 place-items-center rounded-full text-sm font-black text-white"
-                      style={{ backgroundColor: creator.avatar_color ?? "#7b72ff" }}
-                    >
-                      {authorInitial(creator.name)}
-                    </div>
+                    <CommunityAvatar
+                      avatarUrl={creator.avatar_url}
+                      name={creator.name}
+                      color={creator.avatar_color}
+                      className="h-11 w-11 text-sm"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[16px] font-black text-[#17213f]">
                         {creator.name}

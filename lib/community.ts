@@ -62,7 +62,7 @@ type CommunityUserRow = {
   id: string;
   phone: string;
   nickname: string | null;
-  avatar_url?: string | null;
+  avatar_url: string | null;
 };
 
 type CommunityProfileRow = {
@@ -114,6 +114,7 @@ export type CommunityActivityLog = {
 export type CommunityCreatorSummary = {
   user_id: string;
   name: string;
+  avatar_url: string | null;
   avatar_color: string | null;
   works_count: number;
   total_likes: number;
@@ -538,7 +539,7 @@ async function loadCommunityUsers(userIds: string[]) {
     await Promise.all([
       supabaseAdmin
         .from("users")
-        .select("id, phone, nickname")
+        .select("id, phone, nickname, avatar_url")
         .in("id", userIds)
         .returns<CommunityUserRow[]>(),
       supabaseAdmin
@@ -1658,6 +1659,7 @@ export async function getCommunityOverview() {
         post.users?.nickname ||
         post.users?.phone ||
         "小创作者",
+      avatar_url: post.users?.avatar_url ?? null,
       avatar_color: post.user_profiles?.avatar_color ?? null,
       works_count: 1,
       total_likes: post.like_count,

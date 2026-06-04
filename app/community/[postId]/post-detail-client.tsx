@@ -28,6 +28,7 @@ type CommunityPostDetail = {
     id: string;
     phone: string;
     nickname: string | null;
+    avatar_url: string | null;
   } | null;
   user_profiles: {
     user_id: string;
@@ -51,6 +52,37 @@ function getAuthorName(post: CommunityPostDetail) {
     post.users?.nickname ||
     post.users?.phone ||
     "小创作者"
+  );
+}
+
+function authorInitial(name: string) {
+  return name.trim().slice(0, 1) || "创";
+}
+
+function CommunityAvatar({
+  avatarUrl,
+  name,
+  color,
+  className,
+}: {
+  avatarUrl?: string | null;
+  name: string;
+  color?: string | null;
+  className: string;
+}) {
+  const normalizedAvatarUrl = avatarUrl?.trim();
+
+  return (
+    <span
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-cover bg-center bg-no-repeat font-black text-white ${className}`}
+      style={
+        normalizedAvatarUrl
+          ? { backgroundImage: `url(${JSON.stringify(normalizedAvatarUrl)})` }
+          : { backgroundColor: color ?? "#7b72ff" }
+      }
+    >
+      {normalizedAvatarUrl ? <span className="sr-only">{name}</span> : authorInitial(name)}
+    </span>
   );
 }
 
@@ -410,9 +442,17 @@ export function CommunityDetailClient({
               <h2 className="mt-4 text-[30px] font-black leading-[1.08] tracking-[-0.06em] text-[#17213f] sm:text-[42px]">
                 {post.title}
               </h2>
-              <p className="mt-4 text-sm text-[#8a95b5]">
-                @{authorName} · 发布于 {formatDate(post.created_at)}
-              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <CommunityAvatar
+                  avatarUrl={post.users?.avatar_url}
+                  name={authorName}
+                  color={post.user_profiles?.avatar_color}
+                  className="h-11 w-11 text-sm shadow-[0_10px_20px_rgba(91,111,185,0.12)]"
+                />
+                <p className="min-w-0 text-sm text-[#8a95b5]">
+                  @{authorName} · 发布于 {formatDate(post.created_at)}
+                </p>
+              </div>
               {post.description && (
                 <p className="mt-5 max-w-3xl text-[16px] leading-8 text-[#516089]">
                   {post.description}
