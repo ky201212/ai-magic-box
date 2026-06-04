@@ -30,10 +30,15 @@ create table if not exists public.user_profiles (
   user_id uuid primary key references public.users(id) on delete cascade,
   display_name text,
   avatar_color text not null default '#8b5cf6',
+  gender text not null default 'unspecified' check (gender in ('male', 'female', 'unspecified')),
   bio text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.user_profiles
+  add column if not exists gender text not null default 'unspecified'
+    check (gender in ('male', 'female', 'unspecified'));
 
 create table if not exists public.community_post_likes (
   post_id uuid not null references public.community_posts(id) on delete cascade,

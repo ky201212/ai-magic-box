@@ -21,6 +21,7 @@ type ProfilePayload = {
   profile: {
     display_name: string | null;
     avatar_color: string | null;
+    gender: "male" | "female" | "unspecified";
     bio: string | null;
   } | null;
   credits: {
@@ -244,11 +245,19 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
     () => ({
       displayName,
       phone: data?.phone ?? "",
+      gender: data?.profile?.gender ?? "unspecified",
       bio: data?.profile?.bio || "",
       avatarUrl,
       avatarColor,
     }),
-    [avatarColor, avatarUrl, data?.phone, data?.profile?.bio, displayName],
+    [
+      avatarColor,
+      avatarUrl,
+      data?.phone,
+      data?.profile?.bio,
+      data?.profile?.gender,
+      displayName,
+    ],
   );
 
   if (isLoading) {

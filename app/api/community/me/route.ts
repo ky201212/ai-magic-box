@@ -181,6 +181,7 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       displayName?: string;
       phone?: string;
+      gender?: "male" | "female" | "unspecified";
       bio?: string | null;
       avatarUrl?: string;
       avatarColor?: string;
@@ -192,6 +193,10 @@ export async function PATCH(request: Request) {
     const bio = body.bio?.trim() ?? "";
     const avatarUrl = body.avatarUrl?.trim() ?? "";
     const avatarColor = body.avatarColor?.trim() ?? "";
+    const gender =
+      body.gender === "male" || body.gender === "female"
+        ? body.gender
+        : "unspecified";
     const phoneCode = body.phoneCode?.trim() ?? "";
 
     if (!displayNameValidation.ok) {
@@ -277,6 +282,7 @@ export async function PATCH(request: Request) {
       currentPhone: currentUser.users.phone,
       nextPhone: phone,
       displayName: displayNameValidation.value,
+      gender,
       bio: bioToSave,
       avatarUrl,
       avatarColor,

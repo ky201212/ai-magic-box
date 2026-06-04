@@ -15,6 +15,7 @@ import {
 export type ProfileSettingsSnapshot = {
   displayName: string;
   phone: string;
+  gender: "male" | "female" | "unspecified";
   bio: string;
   avatarUrl: string;
   avatarColor: string;
@@ -28,6 +29,7 @@ type ProfileSettingsDialogProps = {
     profile: {
       display_name: string | null;
       avatar_color: string | null;
+      gender: "male" | "female" | "unspecified";
       bio: string | null;
     };
     phone: string;
@@ -141,6 +143,7 @@ export function ProfileSettingsDialog({
                   body: JSON.stringify({
                     displayName: form.displayName,
                     phone: form.phone,
+                    gender: form.gender,
                     bio: form.bio,
                     avatarUrl: form.avatarUrl,
                     avatarColor: form.avatarColor,
@@ -152,6 +155,7 @@ export function ProfileSettingsDialog({
                   profile?: {
                     display_name: string | null;
                     avatar_color: string | null;
+                    gender: "male" | "female" | "unspecified";
                     bio: string | null;
                   };
                   phone?: string;
@@ -294,6 +298,29 @@ export function ProfileSettingsDialog({
                 </p>
               </label>
             </div>
+
+            <label className="block rounded-[24px] border border-white/80 bg-white/88 p-5 shadow-[0_14px_34px_rgba(92,116,189,0.08)]">
+              <span className="text-sm font-black tracking-[0.14em] text-[#7782a4]">
+                性别
+              </span>
+              <select
+                value={form.gender}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    gender: event.target.value as "male" | "female" | "unspecified",
+                  }))
+                }
+                className="mt-3 w-full rounded-[18px] border border-[#dce5ff] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17213f] outline-none transition focus:border-[#98aaff] focus:bg-white"
+              >
+                <option value="unspecified">不透露</option>
+                <option value="male">男</option>
+                <option value="female">女</option>
+              </select>
+              <p className="mt-2 text-xs text-[#8b97b8]">
+                这个信息只用于平台运营分组通知，不会在社区公开展示。
+              </p>
+            </label>
 
             {isPhoneChanged && (
               <label className="block rounded-[24px] border border-[#e1e8ff] bg-[#f8faff] p-5">

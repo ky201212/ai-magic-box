@@ -5,7 +5,7 @@ import { NotificationsConsole } from "../_components/notifications-console";
 
 export default async function AdminNotificationsPage() {
   await assertAdminPagePermission("notifications");
-  const notifications = await listNotifications().catch(() => []);
+  const notifications = await listNotifications(20).catch(() => []);
 
   return (
     <div className="space-y-5">

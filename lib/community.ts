@@ -14,6 +14,7 @@ export type UserProfile = {
   user_id: string;
   display_name: string | null;
   avatar_color: string | null;
+  gender: "male" | "female" | "unspecified";
   bio: string | null;
 };
 
@@ -617,7 +618,7 @@ export async function ensureUserProfile(userId: string, phone: string) {
 
   const { data: existingProfile, error: fetchError } = await supabaseAdmin
     .from("user_profiles")
-    .select("user_id, display_name, avatar_color, bio")
+    .select("user_id, display_name, avatar_color, gender, bio")
     .eq("user_id", userId)
     .maybeSingle<UserProfile>();
 
@@ -636,9 +637,10 @@ export async function ensureUserProfile(userId: string, phone: string) {
       {
         user_id: userId,
         display_name: `小创作者${suffix}`,
+        gender: "unspecified",
       } as never,
     )
-    .select("user_id, display_name, avatar_color, bio")
+    .select("user_id, display_name, avatar_color, gender, bio")
     .single<UserProfile>();
 
   if (insertError) {
@@ -652,7 +654,7 @@ export async function getUserProfile(userId: string) {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("user_profiles")
-    .select("user_id, display_name, avatar_color, bio")
+    .select("user_id, display_name, avatar_color, gender, bio")
     .eq("user_id", userId)
     .maybeSingle<UserProfile>();
 
@@ -668,6 +670,7 @@ export async function updateUserProfileSettings(input: {
   currentPhone: string;
   nextPhone: string;
   displayName: string;
+  gender?: "male" | "female" | "unspecified";
   bio: string | null;
   avatarUrl: string;
   avatarColor: string;
@@ -678,6 +681,10 @@ export async function updateUserProfileSettings(input: {
   const trimmedBio = input.bio?.trim() || null;
   const trimmedAvatarUrl = input.avatarUrl.trim();
   const trimmedAvatarColor = input.avatarColor.trim() || "#7b72ff";
+  const normalizedGender =
+    input.gender === "male" || input.gender === "female"
+      ? input.gender
+      : "unspecified";
 
   if (!displayNameValidation.ok) {
     throw new Error(displayNameValidation.error);
@@ -718,12 +725,13 @@ export async function updateUserProfileSettings(input: {
     .update(
       {
         display_name: displayNameValidation.value,
+        gender: normalizedGender,
         bio: trimmedBio,
         avatar_color: trimmedAvatarColor,
       } as never,
     )
     .eq("user_id", input.userId)
-    .select("user_id, display_name, avatar_color, bio")
+    .select("user_id, display_name, avatar_color, gender, bio")
     .single<UserProfile>();
 
   if (profileError) {

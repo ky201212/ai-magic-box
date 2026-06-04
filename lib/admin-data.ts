@@ -225,6 +225,51 @@ export type NotificationRecord = {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+  target_label?: string;
+  recipient_count?: number;
+  recipient_preview?: NotificationRecipientRecord[];
+};
+
+export type NotificationTargetAudience = "all" | "admins" | "selected" | "segment";
+
+export type NotificationTargetFilters = {
+  audience?: NotificationTargetAudience;
+  query?: string;
+  gender?: "any" | "male" | "female" | "unspecified";
+  status?: "any" | "active" | "disabled";
+  group?:
+    | "all"
+    | "active_subscription"
+    | "no_subscription"
+    | "creators"
+    | "creator_stars"
+    | "pending_review"
+    | "rejected_posts"
+    | "no_posts";
+};
+
+export type NotificationTargetUserRecord = {
+  id: string;
+  phone: string;
+  nickname: string | null;
+  status: "active" | "disabled";
+  created_at: string;
+  profile_display_name: string | null;
+  gender: "male" | "female" | "unspecified";
+  posts_count: number;
+  pending_posts_count: number;
+  rejected_posts_count: number;
+  approved_posts_count: number;
+  has_active_subscription: boolean;
+  is_admin: boolean;
+  is_creator_star: boolean;
+};
+
+export type NotificationRecipientRecord = NotificationTargetUserRecord & {
+  notification_user_id?: string;
+  is_read?: boolean;
+  delivered_at?: string;
+  read_at?: string | null;
 };
 
 export type InfoContentSettingRecord = {
@@ -1661,6 +1706,436 @@ export async function updateAdminUser(
   }
 }
 
+function normalizeNotificationQuery(value?: string) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function uniqueIds(ids: string[]) {
+  return Array.from(new Set(ids.filter((id) => id.trim().length > 0)));
+}
+
+async function listProfileRowsForNotificationUsers(userIds: string[]) {
+  if (!userIds.length) {
+    return new Map<string, { display_name: string | null; gender: "male" | "female" | "unspecified" }>();
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const result = await supabaseAdmin
+    .from("user_profiles")
+    .select("user_id, display_name, gender")
+    .in("user_id", userIds)
+    .returns<
+      Array<{
+        user_id: string;
+        display_name: string | null;
+        gender: "male" | "female" | "unspecified" | null;
+      }>
+    >();
+
+  if (result.error) {
+    const fallback = await supabaseAdmin
+      .from("user_profiles")
+      .select("user_id, display_name")
+      .in("user_id", userIds)
+      .returns<Array<{ user_id: string; display_name: string | null }>>();
+
+    if (fallback.error) {
+      throw fallback.error;
+    }
+
+    return new Map(
+      (fallback.data ?? []).map((profile) => [
+        profile.user_id,
+        {
+          display_name: profile.display_name,
+          gender: "unspecified" as const,
+        },
+      ]),
+    );
+  }
+
+  return new Map(
+    (result.data ?? []).map((profile) => [
+      profile.user_id,
+      {
+        display_name: profile.display_name,
+        gender: profile.gender ?? "unspecified",
+      },
+    ]),
+  );
+}
+
+async function buildNotificationTargetUsers(input?: {
+  filters?: NotificationTargetFilters;
+  userIds?: string[];
+  limit?: number;
+}) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const filters = input?.filters ?? {};
+  const limit = input?.limit ?? 5000;
+  const requestedUserIds = uniqueIds(input?.userIds ?? []);
+  const usersQuery = supabaseAdmin
+    .from("users")
+    .select("id, phone, nickname, status, created_at");
+
+  if (requestedUserIds.length) {
+    usersQuery.in("id", requestedUserIds);
+  } else if (filters.status === "active" || filters.status === "disabled") {
+    usersQuery.eq("status", filters.status);
+  }
+
+  const { data: users, error: usersError } = await usersQuery
+    .order("created_at", { ascending: false })
+    .limit(limit)
+    .returns<
+      Array<{
+        id: string;
+        phone: string;
+        nickname: string | null;
+        status: "active" | "disabled";
+        created_at: string;
+      }>
+    >();
+
+  if (usersError) {
+    throw usersError;
+  }
+
+  const userIds = (users ?? []).map((user) => user.id);
+  const [profilesMap, postsResult, adminsResult, subscriptionsByUser] =
+    await Promise.all([
+      listProfileRowsForNotificationUsers(userIds),
+      userIds.length
+        ? supabaseAdmin
+            .from("community_posts")
+            .select("user_id, moderation_status, is_creator_star")
+            .in("user_id", userIds)
+            .returns<
+              Array<{
+                user_id: string;
+                moderation_status: "draft" | "pending" | "approved" | "rejected";
+                is_creator_star?: boolean | null;
+              }>
+            >()
+        : Promise.resolve({ data: [], error: null }),
+      supabaseAdmin
+        .from("admin_users")
+        .select("user_id")
+        .eq("is_active", true)
+        .returns<Array<{ user_id: string }>>(),
+      listAdminSubscriptionsForUsers(userIds).catch(() => new Map<string, UserSubscription[]>()),
+    ]);
+
+  if (postsResult.error) {
+    throw postsResult.error;
+  }
+
+  if (adminsResult.error) {
+    throw adminsResult.error;
+  }
+
+  const adminIds = new Set((adminsResult.data ?? []).map((item) => item.user_id));
+  const postsByUser = new Map<
+    string,
+    {
+      postsCount: number;
+      pendingPostsCount: number;
+      rejectedPostsCount: number;
+      approvedPostsCount: number;
+      isCreatorStar: boolean;
+    }
+  >();
+
+  for (const post of postsResult.data ?? []) {
+    const current = postsByUser.get(post.user_id) ?? {
+      postsCount: 0,
+      pendingPostsCount: 0,
+      rejectedPostsCount: 0,
+      approvedPostsCount: 0,
+      isCreatorStar: false,
+    };
+    current.postsCount += 1;
+    current.isCreatorStar = current.isCreatorStar || post.is_creator_star === true;
+
+    if (post.moderation_status === "pending") {
+      current.pendingPostsCount += 1;
+    } else if (post.moderation_status === "rejected") {
+      current.rejectedPostsCount += 1;
+    } else if (post.moderation_status === "approved") {
+      current.approvedPostsCount += 1;
+    }
+
+    postsByUser.set(post.user_id, current);
+  }
+
+  const query = normalizeNotificationQuery(filters.query);
+  const nowDateOnly = new Date().toISOString().slice(0, 10);
+
+  return (users ?? [])
+    .map<NotificationTargetUserRecord>((user) => {
+      const profile = profilesMap.get(user.id);
+      const posts = postsByUser.get(user.id) ?? {
+        postsCount: 0,
+        pendingPostsCount: 0,
+        rejectedPostsCount: 0,
+        approvedPostsCount: 0,
+        isCreatorStar: false,
+      };
+      const hasActiveSubscription = (subscriptionsByUser.get(user.id) ?? []).some(
+        (subscription) =>
+          subscription.status === "active" && subscription.end_date >= nowDateOnly,
+      );
+
+      return {
+        id: user.id,
+        phone: user.phone,
+        nickname: user.nickname,
+        status: user.status,
+        created_at: user.created_at,
+        profile_display_name: profile?.display_name ?? null,
+        gender: profile?.gender ?? "unspecified",
+        posts_count: posts.postsCount,
+        pending_posts_count: posts.pendingPostsCount,
+        rejected_posts_count: posts.rejectedPostsCount,
+        approved_posts_count: posts.approvedPostsCount,
+        has_active_subscription: hasActiveSubscription,
+        is_admin: adminIds.has(user.id),
+        is_creator_star: posts.isCreatorStar,
+      };
+    })
+    .filter((user) => {
+      if (
+        query &&
+        ![
+          user.phone,
+          user.nickname ?? "",
+          user.profile_display_name ?? "",
+          user.id,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      ) {
+        return false;
+      }
+
+      if (
+        filters.gender &&
+        filters.gender !== "any" &&
+        user.gender !== filters.gender
+      ) {
+        return false;
+      }
+
+      if (filters.audience === "admins" && !user.is_admin) {
+        return false;
+      }
+
+      if (filters.group === "active_subscription" && !user.has_active_subscription) {
+        return false;
+      }
+
+      if (filters.group === "no_subscription" && user.has_active_subscription) {
+        return false;
+      }
+
+      if (filters.group === "creators" && user.posts_count <= 0) {
+        return false;
+      }
+
+      if (filters.group === "creator_stars" && !user.is_creator_star) {
+        return false;
+      }
+
+      if (filters.group === "pending_review" && user.pending_posts_count <= 0) {
+        return false;
+      }
+
+      if (filters.group === "rejected_posts" && user.rejected_posts_count <= 0) {
+        return false;
+      }
+
+      if (filters.group === "no_posts" && user.posts_count > 0) {
+        return false;
+      }
+
+      return true;
+    });
+}
+
+function getNotificationTargetLabel(notification: NotificationRecord) {
+  if (notification.target_type === "all") {
+    return "全部启用用户";
+  }
+
+  if (notification.target_type === "admins") {
+    return "启用管理员";
+  }
+
+  return notification.target_user_ids.length
+    ? `指定/筛选用户 ${notification.target_user_ids.length} 人`
+    : "指定用户";
+}
+
+async function resolveNotificationTargetUserIds(input: {
+  targetType: "all" | "users" | "admins";
+  targetUserIds: string[];
+  targetFilters?: NotificationTargetFilters;
+}) {
+  if (input.targetType === "users" && input.targetUserIds.length) {
+    return uniqueIds(input.targetUserIds);
+  }
+
+  const audience =
+    input.targetType === "all"
+      ? "all"
+      : input.targetType === "admins"
+        ? "admins"
+        : input.targetFilters?.audience ?? "segment";
+  const filters: NotificationTargetFilters = {
+    ...(input.targetFilters ?? {}),
+    audience,
+    status:
+      input.targetFilters?.status ??
+      (audience === "all" || audience === "segment" ? "active" : "any"),
+  };
+
+  const users = await buildNotificationTargetUsers({
+    filters,
+    limit: 5000,
+  });
+
+  return users.map((user) => user.id);
+}
+
+export async function searchNotificationTargetUsers(input: {
+  query?: string;
+  filters?: NotificationTargetFilters;
+  limit?: number;
+}) {
+  return buildNotificationTargetUsers({
+    filters: {
+      status: "active",
+      group: "all",
+      ...(input.filters ?? {}),
+      query: input.query ?? input.filters?.query ?? "",
+    },
+    limit: input.limit ?? 40,
+  });
+}
+
+export async function listNotificationRecipients(
+  notificationId: string,
+  input?: { limit?: number; offset?: number },
+) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const limit = input?.limit ?? 200;
+  const offset = input?.offset ?? 0;
+  const { data, error, count } = await supabaseAdmin
+    .from("user_notifications")
+    .select("id, user_id, is_read, created_at, read_at", { count: "exact" })
+    .eq("notification_id", notificationId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1)
+    .returns<
+      Array<{
+        id: string;
+        user_id: string;
+        is_read: boolean;
+        created_at: string;
+        read_at: string | null;
+      }>
+    >();
+
+  if (error) {
+    throw error;
+  }
+
+  const users = await buildNotificationTargetUsers({
+    userIds: (data ?? []).map((item) => item.user_id),
+    limit,
+  });
+  const usersById = new Map(users.map((user) => [user.id, user]));
+
+  return {
+    recipients: (data ?? []).map<NotificationRecipientRecord>((item) => ({
+      ...(usersById.get(item.user_id) ?? {
+        id: item.user_id,
+        phone: "未知手机号",
+        nickname: null,
+        status: "active" as const,
+        created_at: item.created_at,
+        profile_display_name: null,
+        gender: "unspecified" as const,
+        posts_count: 0,
+        pending_posts_count: 0,
+        rejected_posts_count: 0,
+        approved_posts_count: 0,
+        has_active_subscription: false,
+        is_admin: false,
+        is_creator_star: false,
+      }),
+      notification_user_id: item.id,
+      is_read: item.is_read,
+      delivered_at: item.created_at,
+      read_at: item.read_at,
+    })),
+    total: count ?? 0,
+  };
+}
+
+async function enrichNotificationRecords(notifications: NotificationRecord[]) {
+  if (!notifications.length) {
+    return [];
+  }
+
+  return Promise.all(
+    notifications.map(async (notification) => {
+      const recipientResult =
+        notification.status === "sent"
+          ? await listNotificationRecipients(notification.id, { limit: 3 }).catch(() => ({
+              recipients: [],
+              total: 0,
+            }))
+          : {
+              recipients: await buildNotificationTargetUsers({
+                userIds: notification.target_user_ids,
+                limit: 3,
+              }).catch(() => []),
+              total: notification.target_user_ids.length,
+            };
+
+      return {
+        ...notification,
+        target_label: getNotificationTargetLabel(notification),
+        recipient_count: recipientResult.total,
+        recipient_preview: recipientResult.recipients,
+      };
+    }),
+  );
+}
+
+export async function getNotificationDetail(notificationId: string) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("notifications")
+    .select(
+      "id, title, body, target_type, target_user_ids, status, sent_at, created_at, updated_at",
+    )
+    .eq("id", notificationId)
+    .maybeSingle<NotificationRecord>();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return (await enrichNotificationRecords([data]))[0];
+}
+
 export async function listNotifications(limit = 20): Promise<NotificationRecord[]> {
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -1676,7 +2151,7 @@ export async function listNotifications(limit = 20): Promise<NotificationRecord[
     throw error;
   }
 
-  return data ?? [];
+  return enrichNotificationRecords(data ?? []);
 }
 
 export async function createNotificationDraft(input: {
@@ -1684,9 +2159,15 @@ export async function createNotificationDraft(input: {
   body: string;
   target_type: "all" | "users" | "admins";
   target_user_ids?: string[];
+  target_filters?: NotificationTargetFilters;
   created_by: string;
 }) {
   const supabaseAdmin = getSupabaseAdmin();
+  const targetUserIds = await resolveNotificationTargetUserIds({
+    targetType: input.target_type,
+    targetUserIds: input.target_user_ids ?? [],
+    targetFilters: input.target_filters,
+  });
   const { data, error } = await supabaseAdmin
     .from("notifications")
     .insert(
@@ -1694,7 +2175,7 @@ export async function createNotificationDraft(input: {
         title: input.title,
         body: input.body,
         target_type: input.target_type,
-        target_user_ids: input.target_user_ids ?? [],
+        target_user_ids: targetUserIds,
         status: "draft",
         created_by: input.created_by,
       } as never,
@@ -1708,7 +2189,7 @@ export async function createNotificationDraft(input: {
     throw error;
   }
 
-  return data as NotificationRecord;
+  return (await enrichNotificationRecords([data as NotificationRecord]))[0];
 }
 
 export async function sendNotification(notificationId: string) {
@@ -1730,35 +2211,12 @@ export async function sendNotification(notificationId: string) {
     throw error;
   }
 
-  let targetUserIds: string[] = [];
-
-  if (notification.target_type === "all") {
-    const { data: users, error: usersError } = await supabaseAdmin
-      .from("users")
-      .select("id")
-      .eq("status", "active")
-      .returns<Array<{ id: string }>>();
-
-    if (usersError) {
-      throw usersError;
-    }
-
-    targetUserIds = (users ?? []).map((user) => user.id as string);
-  } else if (notification.target_type === "admins") {
-    const { data: admins, error: adminsError } = await supabaseAdmin
-      .from("admin_users")
-      .select("user_id")
-      .eq("is_active", true)
-      .returns<Array<{ user_id: string }>>();
-
-    if (adminsError) {
-      throw adminsError;
-    }
-
-    targetUserIds = (admins ?? []).map((item) => item.user_id as string);
-  } else {
-    targetUserIds = notification.target_user_ids ?? [];
-  }
+  const targetUserIds = notification.target_user_ids?.length
+    ? uniqueIds(notification.target_user_ids)
+    : await resolveNotificationTargetUserIds({
+        targetType: notification.target_type,
+        targetUserIds: [],
+      });
 
   if (targetUserIds.length) {
     const rows = targetUserIds.map((userId) => ({
@@ -1794,7 +2252,7 @@ export async function sendNotification(notificationId: string) {
   }
 
   return {
-    notification: updatedNotification as NotificationRecord,
+    notification: (await enrichNotificationRecords([updatedNotification as NotificationRecord]))[0],
     recipientCount: targetUserIds.length,
   };
 }

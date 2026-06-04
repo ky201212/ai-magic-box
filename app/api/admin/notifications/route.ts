@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import {
   createNotificationDraft,
   listNotifications,
+  searchNotificationTargetUsers,
   sendNotification,
+  type NotificationTargetFilters,
 } from "@/lib/admin-data";
 import { appendAdminAuditLog } from "@/lib/admin-audit";
 import {
@@ -10,7 +12,7 @@ import {
   requirePermission,
 } from "@/lib/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   const { error, adminContext } = await requireAdminContext();
 
   if (error || !adminContext) {
@@ -24,6 +26,30 @@ export async function GET() {
   }
 
   try {
+    const url = new URL(request.url);
+
+    if (url.searchParams.get("mode") === "user-search") {
+      const filters: NotificationTargetFilters = {
+        query: url.searchParams.get("query") ?? "",
+        gender:
+          (url.searchParams.get("gender") as NotificationTargetFilters["gender"]) ??
+          "any",
+        status:
+          (url.searchParams.get("status") as NotificationTargetFilters["status"]) ??
+          "active",
+        group:
+          (url.searchParams.get("group") as NotificationTargetFilters["group"]) ??
+          "all",
+      };
+      const users = await searchNotificationTargetUsers({
+        query: filters.query,
+        filters,
+        limit: 40,
+      });
+
+      return NextResponse.json({ users });
+    }
+
     const notifications = await listNotifications();
     return NextResponse.json({ notifications });
   } catch (requestError) {
@@ -55,6 +81,7 @@ export async function POST(request: Request) {
       body?: string;
       target_type?: "all" | "users" | "admins";
       target_user_ids?: string[];
+      target_filters?: NotificationTargetFilters;
       action?: "draft" | "send";
       notification_id?: string;
     };
@@ -95,6 +122,7 @@ export async function POST(request: Request) {
       body: body.body.trim(),
       target_type: body.target_type ?? "all",
       target_user_ids: body.target_user_ids ?? [],
+      target_filters: body.target_filters,
       created_by: adminContext.userId,
     });
 
@@ -108,6 +136,7 @@ export async function POST(request: Request) {
       detail: {
         targetType: body.target_type ?? "all",
         targetUserCount: (body.target_user_ids ?? []).length,
+        targetFilters: body.target_filters ?? null,
       },
     });
 

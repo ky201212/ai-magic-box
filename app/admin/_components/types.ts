@@ -245,4 +245,47 @@ export type NotificationRecord = {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+  target_label?: string;
+  recipient_count?: number;
+  recipient_preview?: NotificationRecipientRecord[];
+};
+
+export type NotificationTargetFilters = {
+  audience?: "all" | "admins" | "selected" | "segment";
+  query?: string;
+  gender?: "any" | "male" | "female" | "unspecified";
+  status?: "any" | "active" | "disabled";
+  group?:
+    | "all"
+    | "active_subscription"
+    | "no_subscription"
+    | "creators"
+    | "creator_stars"
+    | "pending_review"
+    | "rejected_posts"
+    | "no_posts";
+};
+
+export type NotificationTargetUserRecord = {
+  id: string;
+  phone: string;
+  nickname: string | null;
+  status: "active" | "disabled";
+  created_at: string;
+  profile_display_name: string | null;
+  gender: "male" | "female" | "unspecified";
+  posts_count: number;
+  pending_posts_count: number;
+  rejected_posts_count: number;
+  approved_posts_count: number;
+  has_active_subscription: boolean;
+  is_admin: boolean;
+  is_creator_star: boolean;
+};
+
+export type NotificationRecipientRecord = NotificationTargetUserRecord & {
+  notification_user_id?: string;
+  is_read?: boolean;
+  delivered_at?: string;
+  read_at?: string | null;
 };
