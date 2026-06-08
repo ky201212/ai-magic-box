@@ -143,25 +143,39 @@ function verifyAlipayRsa2(content: string, signature: string) {
 function resolveAbsoluteUrl(value: string) {
   const trimmed = value.trim();
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed;
+  const resolved = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : (() => {
+        const publicSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+
+        if (!publicSiteUrl) {
+          throw new Error(
+            `支付回调地址 ${trimmed} 不是完整 URL，且缺少 NEXT_PUBLIC_SITE_URL 环境变量。`,
+          );
+        }
+
+        return new URL(trimmed, `${publicSiteUrl.replace(/\/+$/, "")}/`).toString();
+      })();
+
+  if (process.env.NODE_ENV === "production" && !resolved.startsWith("https://")) {
+    throw new Error("生产环境支付回调、返回和站点 URL 必须使用 HTTPS。");
   }
 
-  const publicSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-
-  if (!publicSiteUrl) {
-    throw new Error(
-      `支付回调地址 ${trimmed} 不是完整 URL，且缺少 NEXT_PUBLIC_SITE_URL 环境变量。`,
-    );
-  }
-
-  return new URL(trimmed, `${publicSiteUrl.replace(/\/+$/, "")}/`).toString();
+  return resolved;
 }
 
 function getAlipayGatewayUrl() {
-  return (
-    process.env.ALIPAY_GATEWAY_URL?.trim() || "https://openapi.alipay.com/gateway.do"
-  );
+  const gatewayUrl =
+    process.env.ALIPAY_GATEWAY_URL?.trim() || "https://openapi.alipay.com/gateway.do";
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    gatewayUrl !== "https://openapi.alipay.com/gateway.do"
+  ) {
+    throw new Error("生产环境 ALIPAY_GATEWAY_URL 必须使用支付宝官方 HTTPS 网关。");
+  }
+
+  return gatewayUrl;
 }
 
 function getAlipayNotifyUrl() {
@@ -412,6 +426,16 @@ const alipayGateway: PaymentGateway = {
 
     if (raw.app_id && raw.app_id !== getRequiredEnv("ALIPAY_APP_ID")) {
       throw new Error("支付宝通知的 APP_ID 与当前配置不一致。");
+    }
+
+    const expectedSellerId = process.env.ALIPAY_SELLER_ID?.trim();
+    if (expectedSellerId && raw.seller_id !== expectedSellerId) {
+      throw new Error("支付宝通知的 seller_id 与当前收款商户不一致。");
+    }
+
+    const expectedSellerEmail = process.env.ALIPAY_SELLER_EMAIL?.trim();
+    if (expectedSellerEmail && raw.seller_email !== expectedSellerEmail) {
+      throw new Error("支付宝通知的 seller_email 与当前收款账号不一致。");
     }
 
     if (

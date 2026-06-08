@@ -54,6 +54,9 @@ type ProfilePayload = {
     order_type: "coin_purchase" | "subscription";
     amount: number;
     status: "pending" | "paid" | "cancelled" | "refunded";
+    fulfillment_status: "pending" | "fulfilled" | "failed";
+    fulfilled_at: string | null;
+    fulfillment_error: string | null;
     payment_method: string;
     paid_at: string | null;
     created_at: string;
@@ -88,24 +91,32 @@ function formatDate(date: string) {
   }).format(new Date(date));
 }
 
-function formatOrderStatus(status: ProfilePayload["orders"][number]["status"]) {
-  if (status === "pending") {
+function formatOrderStatus(order: ProfilePayload["orders"][number]) {
+  if (order.status === "pending") {
     return "待支付";
   }
 
-  if (status === "paid") {
-    return "已支付";
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
+    return "已到账";
   }
 
-  if (status === "cancelled") {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "到账失败";
+  }
+
+  if (order.status === "paid") {
+    return "已支付待到账";
+  }
+
+  if (order.status === "cancelled") {
     return "已取消";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "已退款";
   }
 
-  return status;
+  return order.status;
 }
 
 const statusMap = {
@@ -455,7 +466,7 @@ export function ProfileClient({ brandIdentity }: { brandIdentity: BrandIdentity 
                               ¥{(order.amount / 100).toFixed(2)}
                             </p>
                             <p className="mt-1 text-xs text-[#8a95b5]">
-                              {formatOrderStatus(order.status)}
+                              {formatOrderStatus(order)}
                             </p>
                           </div>
                         </div>

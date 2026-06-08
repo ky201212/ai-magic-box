@@ -72,36 +72,48 @@ function formatOrderType(orderType: "coin_purchase" | "subscription") {
   return orderType === "coin_purchase" ? "魔法币充值" : "订阅购买";
 }
 
-function formatOrderStatus(status: string) {
-  if (status === "pending") {
+function formatOrderStatus(order: AdminUserRecord["paymentOrders"][number]) {
+  if (order.status === "pending") {
     return "待支付";
   }
 
-  if (status === "paid") {
-    return "已支付";
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
+    return "已到账";
   }
 
-  if (status === "cancelled") {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "到账失败";
+  }
+
+  if (order.status === "paid") {
+    return "已支付待到账";
+  }
+
+  if (order.status === "cancelled") {
     return "支付失败/已关闭";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "已退款";
   }
 
-  return status;
+  return order.status;
 }
 
-function getOrderStatusTone(status: string) {
-  if (status === "paid") {
+function getOrderStatusTone(order: AdminUserRecord["paymentOrders"][number]) {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "bg-rose-50 text-rose-700";
+  }
+
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
     return "bg-emerald-50 text-emerald-700";
   }
 
-  if (status === "pending") {
+  if (order.status === "paid" || order.status === "pending") {
     return "bg-amber-50 text-amber-700";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "bg-sky-50 text-sky-700";
   }
 
@@ -969,10 +981,10 @@ export function UsersConsole({ initialUsers }: UsersConsoleProps) {
                                   </p>
                                   <span
                                     className={`rounded-full px-2.5 py-1 text-xs font-bold ${getOrderStatusTone(
-                                      order.status,
+                                      order,
                                     )}`}
                                   >
-                                    {formatOrderStatus(order.status)}
+                                    {formatOrderStatus(order)}
                                   </span>
                                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">
                                     {formatPaymentMethod(order.payment_method)}

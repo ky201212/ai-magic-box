@@ -38,6 +38,9 @@ export type BillingPayload = {
     order_type: "coin_purchase" | "subscription";
     amount: number;
     status: "pending" | "paid" | "cancelled" | "refunded";
+    fulfillment_status: "pending" | "fulfilled" | "failed";
+    fulfilled_at: string | null;
+    fulfillment_error: string | null;
     payment_method: string;
     detail: Record<string, unknown>;
     paid_at: string | null;
@@ -93,24 +96,32 @@ function formatPaymentMethod(method: string) {
   return "Mock 支付";
 }
 
-function formatOrderStatus(status: string) {
-  if (status === "pending") {
+function formatOrderStatus(order: BillingPayload["orders"][number]) {
+  if (order.status === "pending") {
     return "待支付";
   }
 
-  if (status === "paid") {
-    return "已支付";
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
+    return "已到账";
   }
 
-  if (status === "cancelled") {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "到账失败，请联系客服";
+  }
+
+  if (order.status === "paid") {
+    return "已支付，到账处理中";
+  }
+
+  if (order.status === "cancelled") {
     return "支付失败";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "已退款";
   }
 
-  return status;
+  return order.status;
 }
 
 function toDateOnly(date: Date) {
@@ -350,37 +361,30 @@ export function BillingClient({
           throw new Error(payload.error ?? "读取订单状态失败。");
         }
 
-        if (payload.order?.status === "pending") {
-          const cancelResponse = await fetch(
-            `/api/billing/orders/${pending.orderId}`,
-            {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                action: "cancel",
-              }),
-            },
-          );
-          const cancelPayload = (await cancelResponse.json()) as {
-            error?: string;
-          };
+        if (payload.order?.status === "pending" && !isStopped) {
+          setMessage("支付结果同步中，请稍后刷新或在订单记录查看。");
+        }
 
-          if (!cancelResponse.ok) {
-            throw new Error(cancelPayload.error ?? "订单取消失败。");
-          }
+        if (
+          payload.order?.status === "paid" &&
+          payload.order.fulfillment_status === "fulfilled" &&
+          !isStopped
+        ) {
+          setMessage("支付成功，订单已经到账。");
+          forgetPendingCheckoutOrder(pending.orderId);
+        }
 
-          if (!isStopped) {
-            setMessage("本次支付未完成，订单已自动记为失败。");
-          }
+        if (
+          payload.order?.status === "paid" &&
+          payload.order.fulfillment_status === "failed" &&
+          !isStopped
+        ) {
+          setMessage("支付已完成，但权益到账失败，请联系客服处理。");
         }
 
         if (!isStopped) {
           await refreshData();
         }
-
-        forgetPendingCheckoutOrder(pending.orderId);
       } catch (requestError) {
         if (!isStopped) {
           setMessage(
@@ -441,7 +445,10 @@ export function BillingClient({
             throw new Error(payload.error ?? "读取订单状态失败。");
           }
 
-          if (payload.order?.status === "paid") {
+          if (
+            payload.order?.status === "paid" &&
+            payload.order.fulfillment_status === "fulfilled"
+          ) {
             setSubscriptionOrderState("success");
             setCoinOrderState("success");
             setMessage("支付成功，订单已经到账。");
@@ -456,8 +463,26 @@ export function BillingClient({
             return;
           }
 
+          if (
+            payload.order?.status === "paid" &&
+            payload.order.fulfillment_status === "failed"
+          ) {
+            setCoinOrderState("error");
+            setSubscriptionOrderState("error");
+            setMessage("支付已完成，但权益到账失败，请联系客服处理。");
+            forgetPendingCheckoutOrder(orderId);
+            await refreshData();
+            return;
+          }
+
           if (attempts >= 6 && payload.order?.status === "pending") {
             setMessage("支付结果正在同步，请稍后刷新或在后台查单确认。");
+            await refreshData();
+            return;
+          }
+
+          if (attempts >= 6 && payload.order?.status === "paid") {
+            setMessage("支付已确认，权益到账处理中，请稍后刷新查看。");
             await refreshData();
             return;
           }
@@ -908,7 +933,7 @@ export function BillingClient({
                             {formatMoney(order.amount)}
                           </p>
                           <p className="mt-1 text-sm text-[#687394]">
-                            {formatOrderStatus(order.status)}
+                            {formatOrderStatus(order)}
                           </p>
                         </div>
                       </div>

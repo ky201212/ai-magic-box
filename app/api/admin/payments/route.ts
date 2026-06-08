@@ -9,6 +9,7 @@ import {
   createActivationCodeBatch,
   deleteCoinRechargePackage,
   deleteSubscriptionPlan,
+  fulfillPaymentOrder,
   getMagicCoinRate,
   listActivationCodeBatches,
   listActivationCodesByBatch,
@@ -129,6 +130,10 @@ export async function POST(request: Request) {
         }
       | {
           action: "sync_order";
+          orderId: string;
+        }
+      | {
+          action: "fulfill_order";
           orderId: string;
         }
       | {
@@ -325,6 +330,29 @@ export async function POST(request: Request) {
           status: order.status,
           tradeNo: order.trade_no,
           notifyStatus: order.notify_status,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        order,
+      });
+    }
+
+    if (body.action === "fulfill_order") {
+      const order = await fulfillPaymentOrder(body.orderId);
+
+      await appendAdminAuditLog({
+        actorUserId: adminContext.userId,
+        actorDisplayName: adminContext.displayName,
+        actorPhone: adminContext.phone,
+        action: "payment_order_fulfill",
+        targetType: "payment_order",
+        targetId: order.order_id,
+        detail: {
+          status: order.status,
+          fulfillmentStatus: order.fulfillment_status,
+          fulfilledAt: order.fulfilled_at,
         },
       });
 

@@ -205,6 +205,9 @@ export type AdminUserRecord = {
     order_type: "coin_purchase" | "subscription";
     amount: number;
     status: "pending" | "paid" | "cancelled" | "refunded";
+    fulfillment_status: "pending" | "fulfilled" | "failed";
+    fulfilled_at: string | null;
+    fulfillment_error: string | null;
     payment_method: "mock" | "wechat_pc" | "alipay_pc";
     trade_no: string | null;
     provider_name: string | null;

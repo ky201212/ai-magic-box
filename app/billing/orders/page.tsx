@@ -34,24 +34,35 @@ function formatPaymentMethod(method: string) {
   return "Mock 支付";
 }
 
-function formatOrderStatus(status: string) {
-  if (status === "pending") {
+function formatOrderStatus(order: {
+  status: string;
+  fulfillment_status?: "pending" | "fulfilled" | "failed";
+}) {
+  if (order.status === "pending") {
     return "待支付";
   }
 
-  if (status === "paid") {
-    return "已支付";
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
+    return "已到账";
   }
 
-  if (status === "cancelled") {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "到账失败，请联系客服";
+  }
+
+  if (order.status === "paid") {
+    return "已支付，到账处理中";
+  }
+
+  if (order.status === "cancelled") {
     return "已取消";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "已退款";
   }
 
-  return status;
+  return order.status;
 }
 
 function formatOrderSummary(order: {
@@ -111,7 +122,7 @@ export default async function BillingOrdersPage() {
                     全部充值与订阅订单
                   </h1>
                   <p className="mt-3 text-sm leading-7 text-[#687394]">
-                    这里会保留你的充值、订阅和支付状态记录，未完成支付的订单会自动记为失败。
+                    这里会保留你的充值、订阅、支付和到账状态记录。
                   </p>
                 </div>
                 <div className="rounded-[18px] border border-[#e4eaff] bg-white px-4 py-3 text-sm font-semibold text-[#5f6b8e]">
@@ -134,7 +145,7 @@ export default async function BillingOrdersPage() {
                             {order.order_type === "coin_purchase" ? "魔法币充值" : "订阅购买"}
                           </p>
                           <span className="rounded-full bg-[#f2f5ff] px-3 py-1 text-xs font-bold text-[#60709a]">
-                            {formatOrderStatus(order.status)}
+                            {formatOrderStatus(order)}
                           </span>
                         </div>
                         <p className="mt-2 text-sm text-[#687394]">

@@ -34,6 +34,22 @@ type AdjustCreditsResult = {
   credits: number;
 };
 
+export type CoinTransactionType =
+  | "recharge"
+  | "subscription_daily"
+  | "exchange_code"
+  | "consume"
+  | "admin_adjust"
+  | "refund"
+  | "signup_bonus";
+
+type AtomicAdjustCreditsResult = {
+  balance_after: number;
+  applied: boolean;
+  transaction_id: string | null;
+  change_amount: number;
+};
+
 type UserCreditInsertPayload = {
   user_id: string;
   credits: number;
@@ -275,6 +291,8 @@ export async function addCredits(
     reasonCode?: string;
     reasonLabel?: string;
     note?: string;
+    referenceId?: string;
+    transactionType?: CoinTransactionType;
   },
 ) {
   await ensureUserCredits(userId);
@@ -293,6 +311,29 @@ export async function addCredits(
     }
 
     return data.credits;
+  }
+
+  if (metadata?.referenceId && metadata.transactionType) {
+    const { data, error } = await supabaseAdmin
+      .rpc(
+        "adjust_user_credits" as never,
+        {
+          p_user_id: userId,
+          p_amount: normalizedAmount,
+          p_reason_code: metadata.reasonCode ?? "credit_adjust",
+          p_reason_label: metadata.reasonLabel ?? "魔法币调整",
+          p_note: metadata.note ?? null,
+          p_reference_id: metadata.referenceId,
+          p_transaction_type: metadata.transactionType,
+        } as never,
+      )
+      .single<AtomicAdjustCreditsResult>();
+
+    if (error) {
+      throw error;
+    }
+
+    return data.balance_after;
   }
 
   const { data: currentCredits, error: fetchError } = await supabaseAdmin
@@ -338,11 +379,36 @@ export async function deductCredits(
     reasonCode?: string;
     reasonLabel?: string;
     note?: string;
+    referenceId?: string;
+    transactionType?: CoinTransactionType;
   },
 ) {
   await ensureUserCredits(userId);
   const supabaseAdmin = getSupabaseAdmin();
   const normalizedAmount = Math.max(0, Math.floor(amount));
+
+  if (metadata?.referenceId && metadata.transactionType) {
+    const { data, error } = await supabaseAdmin
+      .rpc(
+        "adjust_user_credits" as never,
+        {
+          p_user_id: userId,
+          p_amount: -normalizedAmount,
+          p_reason_code: metadata.reasonCode ?? "credit_deduct",
+          p_reason_label: metadata.reasonLabel ?? "魔法币扣回",
+          p_note: metadata.note ?? null,
+          p_reference_id: metadata.referenceId,
+          p_transaction_type: metadata.transactionType,
+        } as never,
+      )
+      .single<AtomicAdjustCreditsResult>();
+
+    if (error) {
+      throw error;
+    }
+
+    return data.balance_after;
+  }
 
   const { data: currentCredits, error: fetchError } = await supabaseAdmin
     .from("user_credits")

@@ -29,6 +29,9 @@ type PaymentsConsoleProps = {
     order_type: "coin_purchase" | "subscription";
     amount: number;
     status: string;
+    fulfillment_status: "pending" | "fulfilled" | "failed";
+    fulfilled_at: string | null;
+    fulfillment_error: string | null;
     payment_method: string;
     trade_no: string | null;
     provider_name: string | null;
@@ -182,36 +185,48 @@ function formatPaymentMethod(method: string) {
   return "Mock 支付";
 }
 
-function formatOrderStatus(status: string) {
-  if (status === "pending") {
+function formatOrderStatus(order: PaymentsConsoleProps["initialOrders"][number]) {
+  if (order.status === "pending") {
     return "待支付";
   }
 
-  if (status === "paid") {
-    return "已支付";
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
+    return "已到账";
   }
 
-  if (status === "cancelled") {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "到账失败";
+  }
+
+  if (order.status === "paid") {
+    return "已支付待到账";
+  }
+
+  if (order.status === "cancelled") {
     return "已关闭";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "已退款";
   }
 
-  return status;
+  return order.status;
 }
 
-function getOrderStatusTone(status: string) {
-  if (status === "paid") {
+function getOrderStatusTone(order: PaymentsConsoleProps["initialOrders"][number]) {
+  if (order.status === "paid" && order.fulfillment_status === "failed") {
+    return "bg-rose-50 text-rose-700";
+  }
+
+  if (order.status === "paid" && order.fulfillment_status === "fulfilled") {
     return "bg-emerald-50 text-emerald-700";
   }
 
-  if (status === "pending") {
+  if (order.status === "paid" || order.status === "pending") {
     return "bg-amber-50 text-amber-700";
   }
 
-  if (status === "refunded") {
+  if (order.status === "refunded") {
     return "bg-sky-50 text-sky-700";
   }
 
@@ -290,7 +305,7 @@ export function PaymentsConsole({
   const [batchState, setBatchState] = useState<SaveState>("idle");
   const [coinPackageState, setCoinPackageState] = useState<SaveState>("idle");
   const [orderActionState, setOrderActionState] = useState<
-    Record<string, "syncing" | "refunding" | undefined>
+    Record<string, "syncing" | "fulfilling" | "refunding" | undefined>
   >({});
   const [orderMessage, setOrderMessage] = useState("");
   const [plainCodes, setPlainCodes] = useState<string[]>([]);
@@ -787,6 +802,47 @@ export function PaymentsConsole({
       setOrderMessage("订单状态已从支付宝同步。");
     } catch (error) {
       setOrderMessage(error instanceof Error ? error.message : "订单查单失败。");
+    } finally {
+      setOrderActionState((current) => ({
+        ...current,
+        [order.order_id]: undefined,
+      }));
+    }
+  };
+
+  const handleFulfillOrder = async (
+    order: PaymentsConsoleProps["initialOrders"][number],
+  ) => {
+    setOrderActionState((current) => ({
+      ...current,
+      [order.order_id]: "fulfilling",
+    }));
+    setOrderMessage("");
+
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "fulfill_order",
+          orderId: order.order_id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        order?: PaymentsConsoleProps["initialOrders"][number];
+        error?: string;
+      };
+
+      if (!response.ok || !payload.order) {
+        throw new Error(payload.error ?? "权益补发失败");
+      }
+
+      replaceOrder(payload.order);
+      setOrderMessage("订单权益已重新履约。");
+    } catch (error) {
+      setOrderMessage(error instanceof Error ? error.message : "权益补发失败。");
     } finally {
       setOrderActionState((current) => ({
         ...current,
@@ -1488,10 +1544,10 @@ export function PaymentsConsole({
                         </p>
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-bold ${getOrderStatusTone(
-                            order.status,
+                            order,
                           )}`}
                         >
-                          {formatOrderStatus(order.status)}
+                          {formatOrderStatus(order)}
                         </span>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">
@@ -1553,6 +1609,12 @@ export function PaymentsConsole({
                         <p className="mt-1 text-xs text-slate-500">
                           金额：{formatPrice(order.amount)}
                         </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          到账状态：{formatOrderStatus(order)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          到账时间：{formatDateTime(order.fulfilled_at)}
+                        </p>
                       </div>
 
                       <div className="rounded-[16px] bg-slate-50 px-4 py-3">
@@ -1586,6 +1648,9 @@ export function PaymentsConsole({
                           失败原因：{order.failure_reason ?? "暂无"}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
+                          到账错误：{order.fulfillment_error ?? "暂无"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
                           关闭时间：{formatDateTime(order.closed_at)}
                         </p>
                       </div>
@@ -1601,6 +1666,20 @@ export function PaymentsConsole({
                         {orderActionState[order.order_id] === "syncing"
                           ? "查单中"
                           : "向支付宝查单"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleFulfillOrder(order)}
+                        disabled={
+                          order.status !== "paid" ||
+                          order.fulfillment_status === "fulfilled" ||
+                          Boolean(orderActionState[order.order_id])
+                        }
+                        className="rounded-full border border-emerald-200 bg-white px-4 py-2 text-xs font-black text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {orderActionState[order.order_id] === "fulfilling"
+                          ? "补发中"
+                          : "补发权益"}
                       </button>
                       <button
                         type="button"

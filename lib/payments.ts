@@ -1,6 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
-import { addCredits, deductCredits, ensureUserCredits } from "@/lib/credits";
+import { addCredits, deductCredits } from "@/lib/credits";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   getPaymentGateway,
@@ -49,6 +49,9 @@ export type PaymentOrder = {
   order_type: OrderType;
   amount: number;
   status: "pending" | "paid" | "cancelled" | "refunded";
+  fulfillment_status: "pending" | "fulfilled" | "failed";
+  fulfilled_at: string | null;
+  fulfillment_error: string | null;
   payment_method: PaymentMethod;
   trade_no: string | null;
   provider_name: string | null;
@@ -82,6 +85,9 @@ export type PublicPaymentOrder = Pick<
   | "order_type"
   | "amount"
   | "status"
+  | "fulfillment_status"
+  | "fulfilled_at"
+  | "fulfillment_error"
   | "payment_method"
   | "detail"
   | "paid_at"
@@ -133,22 +139,6 @@ export type UserSubscription = {
     SubscriptionPlan,
     "name" | "daily_coins" | "duration_days" | "price"
   > | null;
-};
-
-type InsertCoinTransactionPayload = {
-  user_id: string;
-  amount: number;
-  type:
-    | "recharge"
-    | "subscription_daily"
-    | "exchange_code"
-    | "consume"
-    | "admin_adjust"
-    | "refund"
-    | "signup_bonus";
-  reference_id: string;
-  balance_after: number;
-  signature: string;
 };
 
 function isMissingPaymentInfrastructure(error: unknown) {
@@ -234,18 +224,6 @@ function signActivationCode(input: {
   );
 }
 
-function signCoinTransaction(input: Omit<InsertCoinTransactionPayload, "signature">) {
-  return hmac(
-    [
-      input.user_id,
-      input.amount,
-      input.type,
-      input.reference_id,
-      input.balance_after,
-    ].join("|"),
-  );
-}
-
 function createReadableActivationCode() {
   const raw = crypto.randomBytes(9).toString("base64url").toUpperCase();
   const compact = raw.replace(/[^A-Z0-9]/g, "").padEnd(12, "X").slice(0, 12);
@@ -289,10 +267,7 @@ function createRefundRequestId(orderId: string) {
 }
 
 export function isMockPaymentEnabled() {
-  return (
-    process.env.ENABLE_MOCK_PAYMENTS === "true" ||
-    process.env.NODE_ENV !== "production"
-  );
+  return process.env.NODE_ENV !== "production" && process.env.ENABLE_MOCK_PAYMENTS !== "false";
 }
 
 function resolveRequestedPaymentMethod(method?: PaymentMethod) {
@@ -315,6 +290,9 @@ export function toPublicPaymentOrder(order: PaymentOrder): PublicPaymentOrder {
     order_type: order.order_type,
     amount: order.amount,
     status: order.status,
+    fulfillment_status: order.fulfillment_status,
+    fulfilled_at: order.fulfilled_at,
+    fulfillment_error: order.fulfillment_error,
     payment_method: order.payment_method,
     detail: order.detail,
     paid_at: order.paid_at,
@@ -328,6 +306,9 @@ const PAYMENT_ORDER_SELECT = `
   order_type,
   amount,
   status,
+  fulfillment_status,
+  fulfilled_at,
+  fulfillment_error,
   payment_method,
   trade_no,
   provider_name,
@@ -964,6 +945,8 @@ async function markOrderPaid(orderId: string, userId: string, payload: PaymentNo
       notify_status: payload.status ?? "TRADE_SUCCESS",
       notify_payload: payload.raw,
       failure_reason: null,
+      fulfillment_status: "pending",
+      fulfillment_error: null,
       paid_at: payload.paidAt,
       closed_at: null,
     } as never)
@@ -992,8 +975,57 @@ async function markOrderPaidFromQuery(order: PaymentOrder, result: PaymentQueryR
     status: result.status,
   });
 
-  await fulfillPaidOrder(paidOrder);
-  return paidOrder;
+  return attemptFulfillPaidOrder(paidOrder);
+}
+
+async function attemptFulfillPaidOrder(order: PaymentOrder) {
+  if (order.status !== "paid") {
+    return order;
+  }
+
+  if (order.fulfillment_status === "fulfilled") {
+    return order;
+  }
+
+  await updateOrderPaymentLifecycle(order.order_id, {
+    fulfillmentStatus: "pending",
+    fulfillmentError: null,
+  });
+
+  try {
+    await fulfillPaidOrder(order);
+    return updateOrderPaymentLifecycle(order.order_id, {
+      fulfillmentStatus: "fulfilled",
+      fulfilledAt: new Date().toISOString(),
+      fulfillmentError: null,
+      failureReason: null,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "订单权益发放失败，请人工补发。";
+
+    await updateOrderPaymentLifecycle(order.order_id, {
+      fulfillmentStatus: "failed",
+      fulfillmentError: message,
+      failureReason: message,
+    });
+
+    throw error;
+  }
+}
+
+export async function fulfillPaymentOrder(orderId: string) {
+  const order = await getPaymentOrderById(orderId);
+
+  if (!order) {
+    throw new Error("没有找到这个订单。");
+  }
+
+  if (order.status !== "paid") {
+    throw new Error("只有已支付订单可以补发权益。");
+  }
+
+  return attemptFulfillPaidOrder(order);
 }
 
 export async function completeMockPayment(orderId: string, userId: string) {
@@ -1010,7 +1042,7 @@ export async function completeMockPayment(orderId: string, userId: string) {
   }
 
   if (order.status === "paid") {
-    return order;
+    return attemptFulfillPaidOrder(order);
   }
 
   if (order.status !== "pending") {
@@ -1025,8 +1057,7 @@ export async function completeMockPayment(orderId: string, userId: string) {
   };
 
   const paidOrder = await markOrderPaid(order.order_id, userId, payload);
-  await fulfillPaidOrder(paidOrder);
-  return paidOrder;
+  return attemptFulfillPaidOrder(paidOrder);
 }
 
 export async function cancelPaymentOrder(orderId: string, userId: string) {
@@ -1111,13 +1142,16 @@ export async function handlePaymentNotification(method: PaymentMethod, request: 
     }
   }
 
-  if (order.status === "paid" || order.status === "refunded") {
+  if (order.status === "paid") {
+    return attemptFulfillPaidOrder(order);
+  }
+
+  if (order.status === "refunded") {
     return order;
   }
 
   const paidOrder = await markOrderPaid(order.order_id, order.user_id, payload);
-  await fulfillPaidOrder(paidOrder);
-  return paidOrder;
+  return attemptFulfillPaidOrder(paidOrder);
 }
 
 export async function syncPaymentOrderFromGateway(orderId: string) {
@@ -1145,7 +1179,7 @@ export async function syncPaymentOrderFromGateway(orderId: string) {
   }
 
   if (order.status === "paid" || order.status === "refunded") {
-    return updateOrderPaymentLifecycle(order.order_id, {
+    const updatedOrder = await updateOrderPaymentLifecycle(order.order_id, {
       providerName: result.provider ?? order.provider_name,
       notifyStatus: result.status,
       notifyPayload: result.raw,
@@ -1153,6 +1187,12 @@ export async function syncPaymentOrderFromGateway(orderId: string) {
       buyerId: result.buyerId ?? order.buyer_id,
       tradeNo: result.tradeNo ?? order.trade_no,
     });
+
+    if (updatedOrder.status === "paid") {
+      return attemptFulfillPaidOrder(updatedOrder);
+    }
+
+    return updatedOrder;
   }
 
   if (
@@ -1190,15 +1230,10 @@ async function fulfillPaidOrder(order: PaymentOrder) {
       reasonCode: "recharge",
       reasonLabel: "充值魔法币",
       note: `订单 ${order.order_id} 支付成功，到账 ${coins} 个魔法币。`,
+      referenceId: order.order_id,
+      transactionType: "recharge",
     });
-
-    await createSignedCoinTransaction({
-      user_id: order.user_id,
-      amount: coins,
-      type: "recharge",
-      reference_id: order.order_id,
-      balance_after: balanceAfter,
-    });
+    void balanceAfter;
     return;
   }
 
@@ -1218,15 +1253,10 @@ async function revokePaidOrderBenefit(order: PaymentOrder, reason: string) {
       reasonCode: "payment_refund_deduct",
       reasonLabel: "支付退款扣回",
       note: `订单 ${order.order_id} 已退款，扣回 ${coins} 个魔法币。${reason}`,
+      referenceId: order.order_id,
+      transactionType: "refund",
     });
-
-    await createSignedCoinTransaction({
-      user_id: order.user_id,
-      amount: -Math.max(0, coins),
-      type: "refund",
-      reference_id: order.order_id,
-      balance_after: balanceAfter,
-    });
+    void balanceAfter;
     return;
   }
 
@@ -1275,27 +1305,6 @@ async function closePaymentOrder(
   return data;
 }
 
-async function createSignedCoinTransaction(
-  input: Omit<InsertCoinTransactionPayload, "signature">,
-) {
-  const supabase = getSupabaseAdmin();
-  const payload: InsertCoinTransactionPayload = {
-    ...input,
-    signature: signCoinTransaction(input),
-  };
-  const { data, error } = await supabase
-    .from("coin_transactions")
-    .insert(payload as never)
-    .select("id")
-    .single<{ id: string }>();
-
-  if (error) {
-    throw asPaymentInfrastructureError(error);
-  }
-
-  return data.id;
-}
-
 async function grantSubscriptionCoins(input: {
   subscriptionId: string;
   userId: string;
@@ -1306,15 +1315,39 @@ async function grantSubscriptionCoins(input: {
   note: string;
 }) {
   const supabase = getSupabaseAdmin();
+  const referenceId = `subscription:${input.subscriptionId}:${input.grantDate}`;
+
+  await addCredits(input.userId, input.amount, {
+    reasonCode: "subscription_daily",
+    reasonLabel: input.reasonLabel,
+    note: input.note,
+    referenceId,
+    transactionType: "subscription_daily",
+  });
+
+  const { data: transaction, error: transactionError } = await supabase
+    .from("coin_transactions")
+    .select("id")
+    .eq("type", "subscription_daily")
+    .eq("reference_id", referenceId)
+    .maybeSingle<{ id: string }>();
+
+  if (transactionError) {
+    throw asPaymentInfrastructureError(transactionError);
+  }
 
   const { data: grantRow, error: grantError } = await supabase
     .from("subscription_grants")
-    .insert({
-      subscription_id: input.subscriptionId,
-      user_id: input.userId,
-      grant_date: input.grantDate,
-      amount: input.amount,
-    } as never)
+    .upsert(
+      {
+        subscription_id: input.subscriptionId,
+        user_id: input.userId,
+        grant_date: input.grantDate,
+        amount: input.amount,
+        transaction_id: transaction?.id ?? null,
+      } as never,
+      { onConflict: "subscription_id,grant_date" },
+    )
     .select("id")
     .single<{ id: string }>();
 
@@ -1322,30 +1355,15 @@ async function grantSubscriptionCoins(input: {
     throw asPaymentInfrastructureError(grantError);
   }
 
-  await ensureUserCredits(input.userId);
-  const balanceAfter = await addCredits(input.userId, input.amount, {
-    reasonCode: "subscription_daily",
-    reasonLabel: input.reasonLabel,
-    note: input.note,
-  });
-
-  const transactionId = await createSignedCoinTransaction({
-    user_id: input.userId,
-    amount: input.amount,
-    type: "subscription_daily",
-    reference_id: grantRow.id,
-    balance_after: balanceAfter,
-  });
-
-  const { error: updateGrantError } = await supabase
-    .from("subscription_grants")
+  const { error: updateSubscriptionError } = await supabase
+    .from("user_subscriptions")
     .update({
-      transaction_id: transactionId,
+      last_grant_date: input.grantDate,
     } as never)
-    .eq("id", grantRow.id);
+    .eq("id", input.subscriptionId);
 
-  if (updateGrantError) {
-    throw asPaymentInfrastructureError(updateGrantError);
+  if (updateSubscriptionError) {
+    throw asPaymentInfrastructureError(updateSubscriptionError);
   }
 
   return grantRow.id;
@@ -1369,6 +1387,43 @@ export async function createUserSubscription(input: {
 
   if (planError) {
     throw asPaymentInfrastructureError(planError);
+  }
+
+  if (input.referenceId) {
+    const referenceId = input.referenceId;
+
+    const { data: existingSubscription, error: existingSubscriptionError } = await supabase
+      .from("user_subscriptions")
+      .select(
+        "id, user_id, plan_id, status, start_date, end_date, last_grant_date, source, reference_id, created_at",
+      )
+      .eq("source", input.source)
+      .eq("reference_id", referenceId)
+      .maybeSingle<UserSubscription>();
+
+    if (existingSubscriptionError) {
+      throw asPaymentInfrastructureError(existingSubscriptionError);
+    }
+
+    if (existingSubscription) {
+      await grantSubscriptionCoins({
+        subscriptionId: existingSubscription.id,
+        userId: input.userId,
+        planName: plan.name,
+        amount: plan.daily_coins,
+        grantDate: existingSubscription.start_date,
+        reasonLabel: "订阅开通首日到账",
+        note:
+          input.source === "activation_code"
+            ? `${plan.name} 已激活，首日魔法币立即到账。`
+            : `${plan.name} 已开通，首日魔法币立即到账。`,
+      });
+
+      return {
+        ...existingSubscription,
+        last_grant_date: existingSubscription.start_date,
+      };
+    }
   }
 
   const { error: expireExistingError } = await supabase
@@ -1407,7 +1462,7 @@ export async function createUserSubscription(input: {
       start_date: startDate,
       end_date: endDate,
       source: input.source,
-      last_grant_date: startDate,
+      last_grant_date: null,
       reference_id: input.referenceId ?? null,
     } as never)
     .select(
@@ -1415,12 +1470,64 @@ export async function createUserSubscription(input: {
     )
     .single<UserSubscription>();
 
+  const subscription = data;
+
   if (error) {
-    throw asPaymentInfrastructureError(error);
+    const isReferenceConflict =
+      Boolean(input.referenceId) && "code" in error && error.code === "23505";
+
+    if (!isReferenceConflict) {
+      throw asPaymentInfrastructureError(error);
+    }
+
+    const referenceId = input.referenceId;
+
+    if (!referenceId) {
+      throw asPaymentInfrastructureError(error);
+    }
+
+    const { data: existingSubscription, error: existingSubscriptionError } = await supabase
+      .from("user_subscriptions")
+      .select(
+        "id, user_id, plan_id, status, start_date, end_date, last_grant_date, source, reference_id, created_at",
+      )
+      .eq("source", input.source)
+      .eq("reference_id", referenceId)
+      .maybeSingle<UserSubscription>();
+
+    if (existingSubscriptionError) {
+      throw asPaymentInfrastructureError(existingSubscriptionError);
+    }
+
+    if (!existingSubscription) {
+      throw asPaymentInfrastructureError(error);
+    }
+
+    await grantSubscriptionCoins({
+      subscriptionId: existingSubscription.id,
+      userId: input.userId,
+      planName: plan.name,
+      amount: plan.daily_coins,
+      grantDate: existingSubscription.start_date,
+      reasonLabel: "订阅开通首日到账",
+      note:
+        input.source === "activation_code"
+          ? `${plan.name} 已激活，首日魔法币立即到账。`
+          : `${plan.name} 已开通，首日魔法币立即到账。`,
+    });
+
+    return {
+      ...existingSubscription,
+      last_grant_date: existingSubscription.start_date,
+    };
+  }
+
+  if (!subscription) {
+    throw new Error("订阅创建失败，请稍后再试。");
   }
 
   await grantSubscriptionCoins({
-    subscriptionId: data.id,
+    subscriptionId: subscription.id,
     userId: input.userId,
     planName: plan.name,
     amount: plan.daily_coins,
@@ -1432,7 +1539,10 @@ export async function createUserSubscription(input: {
         : `${plan.name} 已开通，首日魔法币立即到账。`,
   });
 
-  return data;
+  return {
+    ...subscription,
+    last_grant_date: startDate,
+  };
 }
 
 export async function listUserSubscriptions(userId: string) {
@@ -1518,6 +1628,9 @@ async function updateOrderPaymentLifecycle(
     notifyStatus?: string | null;
     failureReason?: string | null;
     status?: PaymentOrder["status"];
+    fulfillmentStatus?: PaymentOrder["fulfillment_status"];
+    fulfilledAt?: string | null;
+    fulfillmentError?: string | null;
     paidAt?: string | null;
     refundedAt?: string | null;
     closedAt?: string | null;
@@ -1558,6 +1671,15 @@ async function updateOrderPaymentLifecycle(
   }
   if (input.status !== undefined) {
     updatePayload.status = input.status;
+  }
+  if (input.fulfillmentStatus !== undefined) {
+    updatePayload.fulfillment_status = input.fulfillmentStatus;
+  }
+  if (input.fulfilledAt !== undefined) {
+    updatePayload.fulfilled_at = input.fulfilledAt;
+  }
+  if (input.fulfillmentError !== undefined) {
+    updatePayload.fulfillment_error = input.fulfillmentError;
   }
   if (input.paidAt !== undefined) {
     updatePayload.paid_at = input.paidAt;
@@ -1945,39 +2067,47 @@ export async function redeemActivationCode(userId: string, code: string) {
     throw new Error("这个激活码已经被使用，请刷新后再试。");
   }
 
-  if (activationCode.type === "coin") {
-    const coins = Math.max(1, Math.floor(Number(activationCode.value)));
-    const balanceAfter = await addCredits(userId, coins, {
-      reasonCode: "exchange_code",
-      reasonLabel: "激活码兑换",
-      note: `成功兑换激活码 ${activationCode.id}。`,
-    });
+  try {
+    if (activationCode.type === "coin") {
+      const coins = Math.max(1, Math.floor(Number(activationCode.value)));
+      await addCredits(userId, coins, {
+        reasonCode: "exchange_code",
+        reasonLabel: "激活码兑换",
+        note: `成功兑换激活码 ${activationCode.id}。`,
+        referenceId: activationCode.id,
+        transactionType: "exchange_code",
+      });
 
-    await createSignedCoinTransaction({
-      user_id: userId,
-      amount: coins,
-      type: "exchange_code",
-      reference_id: activationCode.id,
-      balance_after: balanceAfter,
+      return {
+        type: "coin" as const,
+        coins,
+      };
+    }
+
+    const subscription = await createUserSubscription({
+      userId,
+      planId: activationCode.value,
+      source: "activation_code",
+      referenceId: activationCode.id,
     });
 
     return {
-      type: "coin" as const,
-      coins,
+      type: "subscription" as const,
+      subscription,
     };
+  } catch (benefitError) {
+    await supabase
+      .from("activation_codes")
+      .update({
+        status: "unused",
+        used_by_user_id: null,
+        used_at: null,
+      } as never)
+      .eq("id", activationCode.id)
+      .eq("used_by_user_id", userId);
+
+    throw benefitError;
   }
-
-  const subscription = await createUserSubscription({
-    userId,
-    planId: activationCode.value,
-    source: "activation_code",
-    referenceId: activationCode.id,
-  });
-
-  return {
-    type: "subscription" as const,
-    subscription,
-  };
 }
 
 export async function grantDailySubscriptionCoins(targetDate = new Date()) {
@@ -2008,40 +2138,20 @@ export async function grantDailySubscriptionCoins(targetDate = new Date()) {
       continue;
     }
 
-    const { data: grantRow, error: grantError } = await supabase
-      .from("subscription_grants")
-      .insert({
-        subscription_id: subscription.id,
-        user_id: subscription.user_id,
-        grant_date: today,
+    try {
+      await grantSubscriptionCoins({
+        subscriptionId: subscription.id,
+        userId: subscription.user_id,
+        planName: subscription.subscription_plans?.name ?? "订阅套餐",
         amount,
-      } as never)
-      .select("id")
-      .single<{ id: string }>();
-
-    if (grantError) {
+        grantDate: today,
+        reasonLabel: "订阅每日发放",
+        note: `${subscription.subscription_plans?.name ?? "订阅套餐"} ${today} 每日魔法币到账。`,
+      });
+    } catch (grantError) {
+      console.error("【订阅每日魔法币发放失败】:", grantError);
       continue;
     }
-
-    await ensureUserCredits(subscription.user_id);
-    const balanceAfter = await addCredits(subscription.user_id, amount, {
-      reasonCode: "subscription_daily",
-      reasonLabel: "订阅每日发放",
-      note: `${subscription.subscription_plans?.name ?? "订阅套餐"} ${today} 每日魔法币到账。`,
-    });
-
-    await createSignedCoinTransaction({
-      user_id: subscription.user_id,
-      amount,
-      type: "subscription_daily",
-      reference_id: grantRow.id,
-      balance_after: balanceAfter,
-    });
-
-    await supabase
-      .from("user_subscriptions")
-      .update({ last_grant_date: today } as never)
-      .eq("id", subscription.id);
 
     granted.push({
       subscriptionId: subscription.id,
