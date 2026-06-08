@@ -415,6 +415,8 @@ export function CommunityDetailClient({
           />
         ) : (
           <div className="overflow-hidden rounded-[34px] border border-white/80 bg-white/82 shadow-[0_22px_70px_rgba(99,113,181,0.14)] backdrop-blur-2xl">
+            {/* Post previews can be generated/user-uploaded URLs outside next/image config. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={post.preview_image_url}
               alt={post.title}

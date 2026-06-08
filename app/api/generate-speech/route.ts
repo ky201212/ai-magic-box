@@ -97,7 +97,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "ai-generate-speech",
       limit: 10,

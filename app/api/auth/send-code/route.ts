@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   try {
     const ip = getRequestIp(request);
     const settings = await getSmsAuthRiskControlSetting();
-    const ipRateLimit = consumeRateLimit({
+    const ipRateLimit = await consumeRateLimit({
       key: `auth:send-code:${ip}`,
       limit: settings.sendPerIpLimit,
       windowMs: settings.sendPerIpWindowSeconds * 1000,
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const dailyPhoneRateLimit = consumeRateLimit({
+    const dailyPhoneRateLimit = await consumeRateLimit({
       key: `auth:send-code:phone-day:${normalizedPhone}`,
       limit: settings.maxSendsPerPhonePerDay,
       windowMs: 24 * 60 * 60 * 1000,

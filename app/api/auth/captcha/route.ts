@@ -27,11 +27,12 @@ export async function GET(request: Request) {
     console.error("【图形验证码生成失败】:", error);
     const message =
       error instanceof Error ? error.message : "图形验证码加载失败，请稍后再试。";
+    const status = message.includes("图形验证码刷新太频繁") ? 429 : 500;
 
     return NextResponse.json(
       { error: message },
       {
-        status: 500,
+        status,
         headers: {
           "Cache-Control": "no-store",
         },

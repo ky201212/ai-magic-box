@@ -690,8 +690,7 @@ export function AiConfigForm({
   );
   const [secretStatuses, setSecretStatuses] =
     useState<AiSecretStatusRecord[]>(initialSecretStatuses);
-  const [secretSecurity, setSecretSecurity] =
-    useState<AiSecretSecuritySummary>(initialSecretSecurity);
+  const [secretSecurity] = useState<AiSecretSecuritySummary>(initialSecretSecurity);
   const [secretAuditLogs, setSecretAuditLogs] =
     useState<AiSecretAuditRecord[]>(initialSecretAuditLogs);
   const [modelChainStats, setModelChainStats] = useState<

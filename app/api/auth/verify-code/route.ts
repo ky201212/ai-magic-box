@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const ip = getRequestIp(request);
     const settings = await getSmsAuthRiskControlSetting();
-    const ipRateLimit = consumeRateLimit({
+    const ipRateLimit = await consumeRateLimit({
       key: `auth:verify-code:${ip}`,
       limit: settings.verifyPerIpLimit,
       windowMs: settings.verifyPerIpWindowSeconds * 1000,

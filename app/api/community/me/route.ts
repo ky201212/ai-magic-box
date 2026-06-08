@@ -45,7 +45,7 @@ async function verifyPhoneChangeCode(input: {
 }) {
   const ip = getRequestIp(input.request);
   const settings = await getSmsAuthRiskControlSetting();
-  const ipRateLimit = consumeRateLimit({
+  const ipRateLimit = await consumeRateLimit({
     key: `profile:phone-code:verify:${ip}`,
     limit: settings.verifyPerIpLimit,
     windowMs: settings.verifyPerIpWindowSeconds * 1000,

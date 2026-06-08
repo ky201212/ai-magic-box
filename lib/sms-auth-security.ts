@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { getSiteSettingValue } from "@/lib/admin-data";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { hashOtpCode } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export type HumanVerificationProvider = "builtin" | "turnstile" | "disabled";
 export type TurnstileWidgetMode = "managed" | "non-interactive" | "invisible";
@@ -165,6 +166,170 @@ function cleanupCaptchaStore() {
   }
 
   return store;
+}
+
+function shouldUsePersistentCaptchaStore() {
+  return Boolean(
+    process.env.SUPABASE_URL?.trim() &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() &&
+      process.env.DISABLE_PERSISTENT_CAPTCHA !== "true",
+  );
+}
+
+function isMissingPersistentCaptchaStore(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
+  const message =
+    "message" in error && typeof error.message === "string" ? error.message : "";
+
+  return (
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("sms_captcha_challenges")
+  );
+}
+
+async function cleanupPersistentCaptchaStore() {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("sms_captcha_challenges")
+    .delete()
+    .lte("expires_at", new Date().toISOString());
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function saveCaptchaChallenge(challenge: CaptchaChallengeRecord) {
+  if (!shouldUsePersistentCaptchaStore()) {
+    cleanupCaptchaStore().set(challenge.id, challenge);
+    return;
+  }
+
+  try {
+    await cleanupPersistentCaptchaStore();
+    const supabase = getSupabaseAdmin();
+    const { error } = await supabase.from("sms_captcha_challenges").insert({
+      id: challenge.id,
+      source_ip: challenge.ip,
+      answer_hash: challenge.answerHash,
+      expires_at: new Date(challenge.expiresAt).toISOString(),
+      failed_attempts: challenge.failedAttempts,
+    } as never);
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isMissingPersistentCaptchaStore(error)) {
+      console.warn("持久化图形验证码暂不可用，已回退到本机内存存储。", error);
+    }
+
+    cleanupCaptchaStore().set(challenge.id, challenge);
+  }
+}
+
+async function loadCaptchaChallenge(challengeId: string) {
+  if (!shouldUsePersistentCaptchaStore()) {
+    return cleanupCaptchaStore().get(challengeId) ?? null;
+  }
+
+  try {
+    await cleanupPersistentCaptchaStore();
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("sms_captcha_challenges")
+      .select("id, source_ip, answer_hash, expires_at, failed_attempts")
+      .eq("id", challengeId)
+      .maybeSingle<{
+        id: string;
+        source_ip: string;
+        answer_hash: string;
+        expires_at: string;
+        failed_attempts: number;
+      }>();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return {
+      id: data.id,
+      ip: data.source_ip,
+      answerHash: data.answer_hash,
+      expiresAt: new Date(data.expires_at).getTime(),
+      failedAttempts: data.failed_attempts,
+    };
+  } catch (error) {
+    if (!isMissingPersistentCaptchaStore(error)) {
+      console.warn("持久化图形验证码读取失败，已回退到本机内存存储。", error);
+    }
+
+    return cleanupCaptchaStore().get(challengeId) ?? null;
+  }
+}
+
+async function deleteCaptchaChallenge(challengeId: string) {
+  cleanupCaptchaStore().delete(challengeId);
+
+  if (!shouldUsePersistentCaptchaStore()) {
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { error } = await supabase
+      .from("sms_captcha_challenges")
+      .delete()
+      .eq("id", challengeId);
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isMissingPersistentCaptchaStore(error)) {
+      console.warn("持久化图形验证码删除失败。", error);
+    }
+  }
+}
+
+async function updateCaptchaFailedAttempts(
+  challenge: CaptchaChallengeRecord,
+  failedAttempts: number,
+) {
+  challenge.failedAttempts = failedAttempts;
+  cleanupCaptchaStore().set(challenge.id, challenge);
+
+  if (!shouldUsePersistentCaptchaStore()) {
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { error } = await supabase
+      .from("sms_captcha_challenges")
+      .update({ failed_attempts: failedAttempts } as never)
+      .eq("id", challenge.id);
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isMissingPersistentCaptchaStore(error)) {
+      console.warn("持久化图形验证码失败次数更新失败。", error);
+    }
+  }
 }
 
 function randomCaptchaText(length: number) {
@@ -366,7 +531,7 @@ export async function issueSmsCaptchaChallenge(
   ip: string,
   settings: SmsAuthRiskControlSetting,
 ): Promise<CaptchaIssueResult> {
-  const rateLimitResult = consumeRateLimit({
+  const rateLimitResult = await consumeRateLimit({
     key: `auth:captcha:issue:${ip}`,
     limit: settings.captchaIssuePerIpLimit,
     windowMs: settings.captchaIssuePerIpWindowSeconds * 1000,
@@ -382,9 +547,7 @@ export async function issueSmsCaptchaChallenge(
   const code = randomCaptchaText(settings.captchaLength);
   const challengeId = crypto.randomUUID();
   const answerHash = await hashOtpCode(normalizeCaptchaAnswer(code));
-  const store = cleanupCaptchaStore();
-
-  store.set(challengeId, {
+  await saveCaptchaChallenge({
     id: challengeId,
     ip,
     answerHash,
@@ -415,8 +578,7 @@ async function verifyBuiltinCaptchaChallenge(input: {
     };
   }
 
-  const store = cleanupCaptchaStore();
-  const challenge = store.get(input.challengeId);
+  const challenge = await loadCaptchaChallenge(input.challengeId);
 
   if (!challenge) {
     return {
@@ -426,7 +588,7 @@ async function verifyBuiltinCaptchaChallenge(input: {
   }
 
   if (challenge.expiresAt <= Date.now()) {
-    store.delete(input.challengeId);
+    await deleteCaptchaChallenge(input.challengeId);
     return {
       ok: false,
       error: "图形验证码已过期，请重新获取。",
@@ -434,7 +596,7 @@ async function verifyBuiltinCaptchaChallenge(input: {
   }
 
   if (challenge.ip !== input.ip) {
-    store.delete(input.challengeId);
+    await deleteCaptchaChallenge(input.challengeId);
     return {
       ok: false,
       error: "图形验证码校验环境已变化，请重新获取。",
@@ -442,7 +604,7 @@ async function verifyBuiltinCaptchaChallenge(input: {
   }
 
   if (challenge.failedAttempts >= input.settings.captchaMaxAttempts) {
-    store.delete(input.challengeId);
+    await deleteCaptchaChallenge(input.challengeId);
     return {
       ok: false,
       error: "图形验证码尝试次数过多，请刷新后再试。",
@@ -452,17 +614,17 @@ async function verifyBuiltinCaptchaChallenge(input: {
   const answerHash = await hashOtpCode(answer);
 
   if (answerHash !== challenge.answerHash) {
-    challenge.failedAttempts += 1;
+    const failedAttempts = challenge.failedAttempts + 1;
 
-    if (challenge.failedAttempts >= input.settings.captchaMaxAttempts) {
-      store.delete(input.challengeId);
+    if (failedAttempts >= input.settings.captchaMaxAttempts) {
+      await deleteCaptchaChallenge(input.challengeId);
       return {
         ok: false,
         error: "图形验证码尝试次数过多，请刷新后再试。",
       };
     }
 
-    store.set(input.challengeId, challenge);
+    await updateCaptchaFailedAttempts(challenge, failedAttempts);
 
     return {
       ok: false,
@@ -470,7 +632,7 @@ async function verifyBuiltinCaptchaChallenge(input: {
     };
   }
 
-  store.delete(input.challengeId);
+  await deleteCaptchaChallenge(input.challengeId);
   return { ok: true };
 }
 

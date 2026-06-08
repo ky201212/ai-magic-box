@@ -2840,7 +2840,7 @@ export async function POST(request: Request) {
       return response;
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "ai-generate",
       limit: 6,

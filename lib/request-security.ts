@@ -68,7 +68,7 @@ export function rejectUnsafeWriteOrigin(
   return NextResponse.json({ error: errorMessage }, { status: 403 });
 }
 
-export function rejectWhenRateLimited(input: {
+export async function rejectWhenRateLimited(input: {
   request: Request;
   scope: string;
   limit: number;
@@ -93,7 +93,7 @@ export function rejectWhenRateLimited(input: {
   }
 
   for (const key of keys) {
-    const result = consumeRateLimit({
+    const result = await consumeRateLimit({
       key,
       limit,
       windowMs,

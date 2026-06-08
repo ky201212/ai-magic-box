@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "ai-transcribe",
       limit: 8,

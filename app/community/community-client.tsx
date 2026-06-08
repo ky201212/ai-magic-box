@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
@@ -315,9 +316,12 @@ export function CommunityClient({
             <div className="pointer-events-none absolute left-[18%] top-[18%] h-4 w-4 rounded-full bg-[#a77dff]/40 blur-[2px]" />
             <div className="pointer-events-none absolute left-[56%] top-[50%] h-3.5 w-3.5 rounded-full bg-[#a77dff]/55 blur-[1px]" />
 
-            <img
+            <Image
               src="/community-assets/hero-kid-robot-clean.png"
               alt="社区主视觉"
+              width={620}
+              height={720}
+              priority
               className="pointer-events-none absolute bottom-0 right-[-4%] z-10 hidden h-[90%] max-w-none object-contain drop-shadow-[0_42px_52px_rgba(89,84,188,0.22)] sm:block sm:right-[-2%] xl:h-[94%]"
             />
 
@@ -339,13 +343,15 @@ export function CommunityClient({
                     >
                       <div className="flex items-center gap-2.5">
                         <span className="grid h-9 w-9 place-items-center rounded-full bg-[#f5f2ff] shadow-[inset_0_0_0_1px_rgba(141,121,255,0.14)]">
-                          <img
+                          <Image
                             src={
                               index === 0
                                 ? "/community-assets/stat-work-icon.png"
                                 : "/community-assets/stat-creator-icon.png"
                             }
                             alt=""
+                            width={20}
+                            height={20}
                             className="h-5 w-5 object-contain"
                           />
                         </span>
@@ -456,6 +462,8 @@ export function CommunityClient({
                           </div>
                         ) : (
                           <>
+                            {/* Community previews can be generated/user-uploaded URLs outside next/image config. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={post.preview_image_url}
                               alt={post.title}

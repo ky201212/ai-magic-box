@@ -242,7 +242,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "ai-optimize-prompt",
       limit: 10,

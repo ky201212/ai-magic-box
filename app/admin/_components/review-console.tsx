@@ -807,6 +807,8 @@ export function ReviewConsole({
             >
               <div className="grid gap-4 lg:grid-cols-[112px_minmax(0,1fr)]">
                 <div className="h-32 overflow-hidden rounded-[22px] bg-slate-50 lg:h-36">
+                  {/* Admin review thumbnails may point to user-uploaded or generated URLs. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={post.preview_image_url}
                     alt={post.title}

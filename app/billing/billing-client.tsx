@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -215,15 +216,19 @@ function PaymentMethodSelector({
                 <span className="size-1.5 rounded-full bg-white" />
               ) : null}
             </span>
-            <img
+            <Image
               src={ALIPAY_LOGO_SRC}
               alt="支付宝"
+              width={24}
+              height={24}
               className="size-6 shrink-0 rounded-[4px]"
             />
             <span className="text-sm font-black text-[#17213f]">支付宝</span>
-            <img
+            <Image
               src={ALIPAY_RECOMMENDED_SRC}
               alt="推荐"
+              width={48}
+              height={18}
               className="h-[18px] w-auto shrink-0"
             />
           </span>

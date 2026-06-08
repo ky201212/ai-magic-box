@@ -363,7 +363,7 @@ export async function POST(request: Request) {
       model?: string;
     };
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: existingRequestId?.trim() ? "ai-generate-video-poll" : "ai-generate-video",
       limit: existingRequestId?.trim() ? 20 : 4,

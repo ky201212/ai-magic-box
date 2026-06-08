@@ -178,6 +178,8 @@ export default async function AdminDashboardPage() {
               pendingPosts.map((post) => (
                 <div key={post.id} className="rounded-[24px] bg-slate-50 p-4">
                   <div className="flex items-start gap-4">
+                    {/* Admin moderation previews may be dynamic upload/provider URLs. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={post.preview_image_url}
                       alt={post.title}

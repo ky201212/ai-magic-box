@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "请先登录后再支付。" }, { status: 401 });
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "billing-mock-pay",
       userId: currentUser.user_id,

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -2046,7 +2047,7 @@ function WorkshopContent() {
     return codeGuideRows[0]?.markerId ?? null;
   }, [activeCodeGuideMarkerId, codeGuideRows, isCodeGuideOpen]);
 
-  const persistWorkshopDraft = () => {
+  const persistWorkshopDraft = useCallback(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -2068,12 +2069,23 @@ function WorkshopContent() {
       WORKSHOP_DRAFT_STORAGE_KEY,
       JSON.stringify(payload),
     );
-  };
+  }, [
+    drawingPrompt,
+    generatedCode,
+    generatedImageUrl,
+    generatedSpeechUrl,
+    generatedVideoUrl,
+    promptText,
+    speechText,
+    videoPrompt,
+    writingPrompt,
+    writingResult,
+  ]);
 
-  const showLoginPrompt = (message: string) => {
+  const showLoginPrompt = useCallback((message: string) => {
     persistWorkshopDraft();
     setLoginPromptMessage(message);
-  };
+  }, [persistWorkshopDraft, setLoginPromptMessage]);
 
   const getPromptValueByTarget = (target: PromptTarget) => {
     if (target === "coding") {
@@ -2667,7 +2679,7 @@ function WorkshopContent() {
       window.clearInterval(creditIntervalId);
       window.clearInterval(notificationIntervalId);
     };
-  }, [isCodingCompiling, isLoading]);
+  }, [isCodingCompiling, isLoading, showLoginPrompt]);
 
   const handleCodingPresetClick = (scene: string) => {
     setPromptText(codingPresetPrompts[scene]);
@@ -4760,6 +4772,8 @@ function WorkshopContent() {
                                   key={`${image.slice(0, 24)}-${index}`}
                                   className="overflow-hidden rounded-[18px] border border-[#f8d9e8] bg-[#fff9fc]"
                                 >
+                                  {/* Dynamic user-supplied data/blob URLs need native image loading. */}
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={image}
                                     alt={`参考图 ${index + 1}`}
@@ -5621,6 +5635,8 @@ function WorkshopContent() {
                                 ref={paintingPreviewRef}
                                 className="flex h-full min-h-0 w-full items-center justify-center overflow-y-auto"
                               >
+                                {/* Generated images can be data/blob/provider URLs, so keep native loading. */}
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                   src={generatedImageUrl}
                                   alt="智能生成的绘画作品"
@@ -5941,6 +5957,8 @@ function WorkshopContent() {
                         ref={shareCropFrameRef}
                         className="relative overflow-hidden rounded-[20px] bg-white shadow-[inset_0_0_0_1px_rgba(219,234,254,0.9)]"
                       >
+                        {/* Crop measurement depends on natural image dimensions from a native img element. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={shareSourceImageUrl}
                           alt="可裁剪的作品封面"
@@ -5979,6 +5997,8 @@ function WorkshopContent() {
                     </div>
                   ) : (
                     <div className="mt-4 flex max-h-[54vh] justify-center overflow-hidden rounded-[24px] bg-[#f7fbff] p-3">
+                      {/* Share previews may be data/blob URLs from user-generated content. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={shareSourceImageUrl}
                         alt="作品分享预览"

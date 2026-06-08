@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "请先登录后再兑换激活码。" }, { status: 401 });
     }
 
-    const rateLimitError = rejectWhenRateLimited({
+    const rateLimitError = await rejectWhenRateLimited({
       request,
       scope: "billing-redeem",
       userId: currentUser.user_id,
