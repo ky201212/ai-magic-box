@@ -20,18 +20,14 @@ function buildContentSecurityPolicy(input: {
     ? `script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://challenges.cloudflare.com${
         isDevelopment ? " 'unsafe-eval'" : ""
       }`
-    : `script-src 'self' 'nonce-${input.nonce}' https://challenges.cloudflare.com${
+    : `script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com${
         isDevelopment ? " 'unsafe-eval'" : ""
       }`;
   const scriptSrcElem = isWorkshopPreviewRoute
     ? "script-src-elem 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://challenges.cloudflare.com"
-    : `script-src-elem 'self' 'nonce-${input.nonce}' https://challenges.cloudflare.com`;
-  const styleSrc = isWorkshopPreviewRoute
-    ? "style-src 'self' 'unsafe-inline' https:"
-    : `style-src 'self' ${isDevelopment ? "'unsafe-inline'" : `'nonce-${input.nonce}'`} https:`;
-  const styleSrcElem = isWorkshopPreviewRoute
-    ? "style-src-elem 'self' 'unsafe-inline' https:"
-    : `style-src-elem 'self' ${isDevelopment ? "'unsafe-inline'" : `'nonce-${input.nonce}'`} https:`;
+    : "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com";
+  const styleSrc = "style-src 'self' 'unsafe-inline' https:";
+  const styleSrcElem = "style-src-elem 'self' 'unsafe-inline' https:";
 
   return [
     "default-src 'self'",
